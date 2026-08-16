@@ -27,6 +27,11 @@ class Settings(BaseSettings):
 
     WS_TICKET_TTL_SECONDS: int = 30
 
+    # Closed by default: with registration off, a publicly reachable backend only
+    # exposes login + the secret-gated TradingView webhook. First user is created
+    # via scripts/create_user.py.
+    ALLOW_REGISTRATION: bool = False
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
