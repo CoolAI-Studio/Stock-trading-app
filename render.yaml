@@ -1,0 +1,33 @@
+databases: []
+
+services:
+  - type: web
+    name: trading-app-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false # paste your Neon connection string after creating the DB
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SECRET_ENCRYPTION_KEY
+        sync: false # must be a real Fernet key -- see backend/.env.example for how to generate one
+      - key: TV_WEBHOOK_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false # your Vercel frontend URL, set after the frontend is deployed
+      - key: ALLOW_REGISTRATION
+        value: "false"
+      - key: WORKER_ENABLED
+        value: "true"
+      - key: NOTIFICATIONS_ENABLED
+        value: "true"
+      - key: MARKET_DATA_POLL_INTERVAL_SEC
+        value: "5"
+      - key: PENDING_ORDER_EXPIRY_MINUTES
+        value: "180"
+      - key: WS_TICKET_TTL_SECONDS
+        value: "30"
