@@ -44,9 +44,12 @@ def _run_strategy(db: Session, strategy: Strategy, quote: Quote, events: list[Ev
         strategy.last_run_at = utcnow()
         if strategy.consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
             strategy.is_active = False
-            events.append(
-                Event(type="strategy.error", data={"strategy_id": strategy.id, "error": str(exc)})
-            )
+            error_data = {
+                "strategy_id": strategy.id,
+                "error": str(exc),
+                "user_id": strategy.user_id,
+            }
+            events.append(Event(type="strategy.error", data=error_data))
         db.commit()
         return
 
@@ -71,7 +74,8 @@ def _run_strategy(db: Session, strategy: Strategy, quote: Quote, events: list[Ev
         if result.created:
             strategy.last_signal = signal_str
             strategy.last_signal_at = utcnow()
-            events.append(Event(type="order.created", data={"order_id": result.order.id}))
+            order_data = {"order_id": result.order.id, "user_id": strategy.user_id}
+            events.append(Event(type="order.created", data=order_data))
 
     db.commit()
 
@@ -109,7 +113,8 @@ def _check_position_exit(
         ),
     )
     if result.created:
-        events.append(Event(type="order.created", data={"order_id": result.order.id}))
+        order_data = {"order_id": result.order.id, "user_id": position.user_id}
+        events.append(Event(type="order.created", data=order_data))
 
 
 def _expire_stale_orders(db: Session, events: list[Event]) -> None:
@@ -120,7 +125,8 @@ def _expire_stale_orders(db: Session, events: list[Event]) -> None:
     for order in stale_orders:
         order.status = OrderStatus.EXPIRED
         order.decided_at = utcnow()
-        events.append(Event(type="order.updated", data={"order_id": order.id, "status": "expired"}))
+        data = {"order_id": order.id, "status": "expired", "user_id": order.user_id}
+        events.append(Event(type="order.updated", data=data))
     if stale_orders:
         db.commit()
 

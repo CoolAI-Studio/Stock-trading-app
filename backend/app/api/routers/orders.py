@@ -21,7 +21,7 @@ _broker = ManualConfirmBroker()
 
 
 def _publish_order_updated(order: Order) -> None:
-    data = {"order_id": order.id, "status": order.status.value}
+    data = {"order_id": order.id, "status": order.status.value, "user_id": order.user_id}
     bus.publish(Event(type="order.updated", data=data))
 
 
