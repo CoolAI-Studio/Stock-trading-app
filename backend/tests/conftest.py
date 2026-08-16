@@ -1,4 +1,5 @@
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +8,14 @@ import app.models
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _secret_encryption_key(monkeypatch):
+    # NotificationChannel.config_encrypted (app/db/types.py::EncryptedJSON)
+    # needs a real Fernet key to encrypt/decrypt at all -- every test gets
+    # one so this isn't something each test file has to remember.
+    monkeypatch.setattr("app.config.settings.SECRET_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 
 @pytest.fixture
@@ -34,6 +43,10 @@ def client(db_session, monkeypatch):
     # scratch DB. Phase 3+ tests exercise the worker's logic directly via
     # market_loop.tick_once(), not through the app's lifespan.
     monkeypatch.setattr("app.config.settings.WORKER_ENABLED", False)
+    # Same reasoning: the dispatcher opens its own SessionLocal() outside
+    # request scope, so it would silently hit the real (non-test) DB if a
+    # test's order/webhook flow triggered it.
+    monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", False)
 
     def _get_db_override():
         yield db_session

@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # auto-expired by the worker loop rather than sitting there forever.
     PENDING_ORDER_EXPIRY_MINUTES: int = 180
 
+    # Whether order.created/order.updated/strategy.error events trigger real
+    # LINE/Telegram/Email sends. Forced off in tests (see tests/conftest.py)
+    # since the dispatcher opens its own DB session outside request scope,
+    # bypassing the test DB override -- and to never hit real endpoints
+    # during a test run regardless.
+    NOTIFICATIONS_ENABLED: bool = True
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
