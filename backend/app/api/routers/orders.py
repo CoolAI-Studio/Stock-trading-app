@@ -1,0 +1,143 @@
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_active_user
+from app.db.session import get_db
+from app.models.enums import OrderSource, OrderStatus
+from app.models.mixins import utcnow
+from app.models.order import Order
+from app.models.user import User
+from app.schemas.order import ManualOrderCreate, OrderConfirmRequest, OrderRead, OrderRejectRequest
+from app.services import portfolio
+from app.services.broker.manual import ManualConfirmBroker
+from app.services.events import Event, bus
+from app.services.signals import SignalIn, create_pending_order
+
+router = APIRouter(prefix="/orders", tags=["orders"])
+
+# v1's only broker adapter -- see app/services/broker/base.py for the
+# interface a real broker integration would implement later.
+_broker = ManualConfirmBroker()
+
+
+def _publish_order_updated(order: Order) -> None:
+    data = {"order_id": order.id, "status": order.status.value}
+    bus.publish(Event(type="order.updated", data=data))
+
+
+def _get_owned_order(db: Session, user: User, order_id: int) -> Order:
+    order = db.query(Order).filter(Order.id == order_id, Order.user_id == user.id).first()
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    return order
+
+
+@router.get("", response_model=list[OrderRead])
+def list_orders(
+    status_filter: OrderStatus | None = Query(default=None, alias="status"),
+    symbol: str | None = None,
+    source: OrderSource | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> list[Order]:
+    query = db.query(Order).filter(Order.user_id == user.id)
+    if status_filter is not None:
+        query = query.filter(Order.status == status_filter)
+    if symbol:
+        query = query.filter(Order.symbol == symbol.upper())
+    if source is not None:
+        query = query.filter(Order.source == source)
+    return query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+
+
+@router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
+def create_manual_order(
+    payload: ManualOrderCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Order:
+    result = create_pending_order(
+        db,
+        user,
+        SignalIn(
+            symbol=payload.symbol.upper(),
+            side=payload.side,
+            source=OrderSource.MANUAL,
+            quantity=payload.quantity,
+            signal_price=payload.signal_price,
+        ),
+    )
+    if result.order is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=result.reason)
+    return result.order
+
+
+@router.get("/{order_id}", response_model=OrderRead)
+def get_order(
+    order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> Order:
+    return _get_owned_order(db, user, order_id)
+
+
+@router.post("/{order_id}/confirm", response_model=OrderRead)
+def confirm_order(
+    order_id: int,
+    payload: OrderConfirmRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Order:
+    order = _get_owned_order(db, user, order_id)
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"Order is already {order.status.value}"
+        )
+
+    fill_quantity = payload.quantity or order.quantity
+    result = _broker.submit(order, payload.fill_price, fill_quantity)
+    if not result.ok:
+        order.status = OrderStatus.FAILED
+        order.reject_reason = result.error
+        order.decided_at = utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=result.error or "Broker rejected the order",
+        )
+
+    order.status = OrderStatus.CONFIRMED
+    order.fill_price = result.fill_price
+    order.broker_ref = result.ref
+    order.filled_at = utcnow()
+    order.decided_at = utcnow()
+    db.commit()
+
+    portfolio.apply_fill(db, order, result.fill_price, fill_quantity)
+    db.refresh(order)
+
+    _publish_order_updated(order)
+    return order
+
+
+@router.post("/{order_id}/reject", response_model=OrderRead)
+def reject_order(
+    order_id: int,
+    payload: OrderRejectRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Order:
+    order = _get_owned_order(db, user, order_id)
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"Order is already {order.status.value}"
+        )
+
+    order.status = OrderStatus.REJECTED
+    order.reject_reason = payload.reason
+    order.decided_at = utcnow()
+    db.commit()
+    db.refresh(order)
+
+    _publish_order_updated(order)
+    return order

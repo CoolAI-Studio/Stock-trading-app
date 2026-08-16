@@ -28,13 +28,20 @@ def db_session(tmp_path):
 
 
 @pytest.fixture
-def client(db_session):
+def client(db_session, monkeypatch):
+    # Never start the real background poller in tests -- it would hit the
+    # network, run on an unrelated schedule, and race with each test's own
+    # scratch DB. Phase 3+ tests exercise the worker's logic directly via
+    # market_loop.tick_once(), not through the app's lifespan.
+    monkeypatch.setattr("app.config.settings.WORKER_ENABLED", False)
+
     def _get_db_override():
         yield db_session
 
     app.dependency_overrides[get_db] = _get_db_override
     try:
-        yield TestClient(app)
+        with TestClient(app) as test_client:
+            yield test_client
     finally:
         app.dependency_overrides.pop(get_db, None)
 

@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     # via scripts/create_user.py.
     ALLOW_REGISTRATION: bool = False
 
+    # Must run with --workers 1 when true: two worker processes would each run
+    # their own polling loop and duplicate signals for the same tick. Tests
+    # force this off (see tests/conftest.py) so the suite never spins up a
+    # real polling loop or touches the network.
+    WORKER_ENABLED: bool = True
+
+    # A manual-confirm pending order older than this is stale and gets
+    # auto-expired by the worker loop rather than sitting there forever.
+    PENDING_ORDER_EXPIRY_MINUTES: int = 180
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
