@@ -19,7 +19,7 @@ export function LoginPage() {
       await login(email, password)
       navigate('/', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Login failed')
+      setError(err instanceof ApiError ? err.message : '登入失敗')
     } finally {
       setSubmitting(false)
     }
@@ -31,11 +31,11 @@ export function LoginPage() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm space-y-4 rounded-lg border border-slate-800 bg-slate-900 p-8"
       >
-        <h1 className="text-xl font-semibold text-slate-100">Trading Dashboard</h1>
+        <h1 className="text-xl font-semibold text-slate-100">交易儀表板</h1>
 
         <div className="space-y-1">
           <label htmlFor="email" className="text-sm text-slate-400">
-            Email
+            電子信箱
           </label>
           <input
             id="email"
@@ -50,7 +50,7 @@ export function LoginPage() {
 
         <div className="space-y-1">
           <label htmlFor="password" className="text-sm text-slate-400">
-            Password
+            密碼
           </label>
           <input
             id="password"
@@ -70,7 +70,7 @@ export function LoginPage() {
           disabled={submitting}
           className="w-full rounded bg-emerald-600 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >
-          {submitting ? 'Signing in…' : 'Sign in'}
+          {submitting ? '登入中…' : '登入'}
         </button>
       </form>
     </div>

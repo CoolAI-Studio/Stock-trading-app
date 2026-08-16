@@ -34,7 +34,7 @@ describe('RiskSettingsPage', () => {
 
   it('loads and displays current settings', async () => {
     renderPage()
-    expect(await screen.findByLabelText(/max position/i)).toHaveValue('0')
+    expect(await screen.findByLabelText('最大持倉數量')).toHaveValue('0')
   })
 
   it('saves updated settings', async () => {
@@ -42,10 +42,10 @@ describe('RiskSettingsPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    const input = await screen.findByLabelText(/max position/i)
+    const input = await screen.findByLabelText('最大持倉數量')
     await user.clear(input)
     await user.type(input, '500')
-    await user.click(screen.getByRole('button', { name: /save/i }))
+    await user.click(screen.getByRole('button', { name: '儲存' }))
 
     await waitFor(() =>
       expect(api.put).toHaveBeenCalledWith(

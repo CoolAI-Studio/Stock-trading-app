@@ -17,7 +17,7 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
       <td className="py-2 pr-4">{strategy.symbol}</td>
       <td className="py-2 pr-4">
         <span className={strategy.is_active ? 'text-emerald-400' : 'text-slate-500'}>
-          {strategy.is_active ? 'active' : 'inactive'}
+          {strategy.is_active ? '啟用中' : '已停用'}
         </span>
       </td>
       <td className="py-2 pr-4 text-slate-400">{strategy.last_signal ?? '—'}</td>
@@ -30,7 +30,7 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
           onClick={() => toggleMutation.mutate()}
           className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
         >
-          {strategy.is_active ? 'Deactivate' : 'Activate'}
+          {strategy.is_active ? '停用' : '啟用'}
         </button>
       </td>
     </tr>
@@ -57,14 +57,14 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['strategies'] })
       onDone()
     },
-    onError: (err) => setCreateError(err instanceof ApiError ? err.message : 'Failed to create'),
+    onError: (err) => setCreateError(err instanceof ApiError ? err.message : '建立失敗'),
   })
 
   return (
     <div className="space-y-3 rounded border border-slate-800 p-4">
       <div>
         <label htmlFor="strategy-name" className="text-sm text-slate-400">
-          Name
+          名稱
         </label>
         <input
           id="strategy-name"
@@ -75,7 +75,7 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
       </div>
       <div>
         <label htmlFor="strategy-symbol" className="text-sm text-slate-400">
-          Symbol
+          股票代號
         </label>
         <input
           id="strategy-symbol"
@@ -86,7 +86,7 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
       </div>
       <div>
         <label htmlFor="strategy-code" className="text-sm text-slate-400">
-          Source code
+          原始碼
         </label>
         <textarea
           id="strategy-code"
@@ -100,7 +100,7 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
       {validation && (
         <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
           {validation.ok
-            ? `Detected: ${validation.detected_name} (${validation.detected_symbol})`
+            ? `偵測到：${validation.detected_name}（${validation.detected_symbol}）`
             : validation.error}
         </p>
       )}
@@ -112,14 +112,14 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
           onClick={() => validateMutation.mutate()}
           className="rounded bg-slate-700 px-3 py-1 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
         >
-          Validate
+          驗證
         </button>
         <button
           disabled={createMutation.isPending || !name || !symbol || !sourceCode}
           onClick={() => createMutation.mutate()}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >
-          Create
+          建立
         </button>
       </div>
     </div>
@@ -140,12 +140,12 @@ export function StrategiesPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Strategies</h1>
+        <h1 className="text-lg font-semibold">策略</h1>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500"
         >
-          New strategy
+          新增策略
         </button>
       </div>
 
@@ -154,12 +154,12 @@ export function StrategiesPage() {
       <table className="w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
-            <th className="pb-2 font-normal">Name</th>
-            <th className="pb-2 font-normal">Symbol</th>
-            <th className="pb-2 font-normal">Status</th>
-            <th className="pb-2 font-normal">Last signal</th>
-            <th className="pb-2 font-normal">Error</th>
-            <th className="pb-2 font-normal">Actions</th>
+            <th className="pb-2 font-normal">名稱</th>
+            <th className="pb-2 font-normal">股票代號</th>
+            <th className="pb-2 font-normal">狀態</th>
+            <th className="pb-2 font-normal">最新訊號</th>
+            <th className="pb-2 font-normal">錯誤</th>
+            <th className="pb-2 font-normal">操作</th>
           </tr>
         </thead>
         <tbody>

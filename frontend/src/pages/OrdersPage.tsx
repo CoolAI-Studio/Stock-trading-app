@@ -1,7 +1,21 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { Order } from '../lib/types'
+import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
+
+const SIDE_LABEL: Record<OrderSide, string> = { buy: '買進', sell: '賣出' }
+const SOURCE_LABEL: Record<OrderSource, string> = {
+  strategy: '策略訊號',
+  tradingview: 'TradingView',
+  manual: '手動',
+}
+const STATUS_LABEL: Record<OrderStatus, string> = {
+  pending: '待確認',
+  confirmed: '已確認',
+  rejected: '已拒絕',
+  expired: '已過期',
+  failed: '失敗',
+}
 
 function useOrdersQuery(status?: string) {
   return useQuery({
@@ -32,18 +46,18 @@ function PendingOrderRow({ order }: { order: Order }) {
   return (
     <tr className="border-b border-slate-800">
       <td className="py-2 pr-4 font-medium">{order.symbol}</td>
-      <td className={`py-2 pr-4 uppercase ${order.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
-        {order.side}
+      <td className={`py-2 pr-4 ${order.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
+        {SIDE_LABEL[order.side]}
       </td>
       <td className="py-2 pr-4">{order.quantity}</td>
-      <td className="py-2 pr-4 text-slate-400">{order.source}</td>
+      <td className="py-2 pr-4 text-slate-400">{SOURCE_LABEL[order.source]}</td>
       <td className="py-2 pr-4">
         <label htmlFor={`fill-price-${order.id}`} className="sr-only">
-          Fill price
+          成交價
         </label>
         <input
           id={`fill-price-${order.id}`}
-          aria-label="Fill price"
+          aria-label="成交價"
           value={fillPrice}
           onChange={(event) => setFillPrice(event.target.value)}
           className="w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
@@ -55,14 +69,14 @@ function PendingOrderRow({ order }: { order: Order }) {
           onClick={() => confirmMutation.mutate()}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >
-          Confirm
+          確認
         </button>
         <button
           disabled={busy}
           onClick={() => rejectMutation.mutate()}
           className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
         >
-          Reject
+          拒絕
         </button>
       </td>
     </tr>
@@ -73,10 +87,10 @@ function HistoryRow({ order }: { order: Order }) {
   return (
     <tr className="border-b border-slate-800 text-slate-300">
       <td className="py-2 pr-4 font-medium">{order.symbol}</td>
-      <td className="py-2 pr-4 uppercase">{order.side}</td>
+      <td className="py-2 pr-4">{SIDE_LABEL[order.side]}</td>
       <td className="py-2 pr-4">{order.quantity}</td>
       <td className="py-2 pr-4">{order.fill_price ?? '—'}</td>
-      <td className="py-2 pr-4 capitalize">{order.status}</td>
+      <td className="py-2 pr-4">{STATUS_LABEL[order.status]}</td>
       <td className="py-2 text-slate-500">{new Date(order.created_at).toLocaleString()}</td>
     </tr>
   )
@@ -96,13 +110,13 @@ export function OrdersPage() {
           onClick={() => setTab('pending')}
           className={`pb-2 text-sm font-medium ${tab === 'pending' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-slate-400'}`}
         >
-          Pending
+          待確認
         </button>
         <button
           onClick={() => setTab('history')}
           className={`pb-2 text-sm font-medium ${tab === 'history' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-slate-400'}`}
         >
-          History
+          歷史紀錄
         </button>
       </div>
 
@@ -110,12 +124,12 @@ export function OrdersPage() {
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
-              <th className="pb-2 font-normal">Symbol</th>
-              <th className="pb-2 font-normal">Side</th>
-              <th className="pb-2 font-normal">Qty</th>
-              <th className="pb-2 font-normal">Source</th>
-              <th className="pb-2 font-normal">Fill price</th>
-              <th className="pb-2 font-normal">Actions</th>
+              <th className="pb-2 font-normal">代號</th>
+              <th className="pb-2 font-normal">方向</th>
+              <th className="pb-2 font-normal">數量</th>
+              <th className="pb-2 font-normal">來源</th>
+              <th className="pb-2 font-normal">成交價</th>
+              <th className="pb-2 font-normal">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -126,19 +140,19 @@ export function OrdersPage() {
         </table>
       )}
       {tab === 'pending' && pendingQuery.data?.length === 0 && (
-        <p className="text-slate-500">No pending orders.</p>
+        <p className="text-slate-500">目前沒有待確認訂單。</p>
       )}
 
       {tab === 'history' && (
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
-              <th className="pb-2 font-normal">Symbol</th>
-              <th className="pb-2 font-normal">Side</th>
-              <th className="pb-2 font-normal">Qty</th>
-              <th className="pb-2 font-normal">Fill price</th>
-              <th className="pb-2 font-normal">Status</th>
-              <th className="pb-2 font-normal">Created</th>
+              <th className="pb-2 font-normal">代號</th>
+              <th className="pb-2 font-normal">方向</th>
+              <th className="pb-2 font-normal">數量</th>
+              <th className="pb-2 font-normal">成交價</th>
+              <th className="pb-2 font-normal">狀態</th>
+              <th className="pb-2 font-normal">建立時間</th>
             </tr>
           </thead>
           <tbody>

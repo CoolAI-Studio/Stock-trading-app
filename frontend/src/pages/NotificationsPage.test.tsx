@@ -47,10 +47,10 @@ describe('NotificationsPage', () => {
     renderPage()
 
     await screen.findByText('phone')
-    await user.click(screen.getByRole('button', { name: /test/i }))
+    await user.click(screen.getByRole('button', { name: '測試' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/notifications/channels/1/test'))
-    expect(await screen.findByText(/sent/i)).toBeInTheDocument()
+    expect(await screen.findByText('已送出。')).toBeInTheDocument()
   })
 
   it('creates a new telegram channel', async () => {
@@ -58,11 +58,11 @@ describe('NotificationsPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: /add channel/i }))
-    await user.type(screen.getByLabelText(/label/i), 'my-phone')
-    await user.type(screen.getByLabelText(/bot token/i), 't123')
-    await user.type(screen.getByLabelText(/chat id/i), '555')
-    await user.click(screen.getByRole('button', { name: /^create$/i }))
+    await user.click(screen.getByRole('button', { name: '新增管道' }))
+    await user.type(screen.getByLabelText('名稱'), 'my-phone')
+    await user.type(screen.getByLabelText(/機器人權杖/), 't123')
+    await user.type(screen.getByLabelText(/聊天室代號/), '555')
+    await user.click(screen.getByRole('button', { name: '建立' }))
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith('/api/notifications/channels', {

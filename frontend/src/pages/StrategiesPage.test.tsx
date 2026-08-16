@@ -55,7 +55,7 @@ describe('StrategiesPage', () => {
     renderPage()
 
     await screen.findByText('ma5-cross')
-    await user.click(screen.getByRole('button', { name: /activate/i }))
+    await user.click(screen.getByRole('button', { name: '啟用' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/strategies/1/activate'))
   })
@@ -70,12 +70,12 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: /new strategy/i }))
-    await user.type(screen.getByLabelText(/name/i), 'my-strategy')
-    await user.type(screen.getByLabelText(/^symbol/i), 'TSLA')
-    await user.type(screen.getByLabelText(/source code/i), 'class Strategy: pass')
-    await user.click(screen.getByRole('button', { name: /validate/i }))
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'my-strategy')
+    await user.type(screen.getByLabelText('股票代號'), 'TSLA')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByRole('button', { name: '驗證' }))
 
-    expect(await screen.findByText(/detected: n \(tsla\)/i)).toBeInTheDocument()
+    expect(await screen.findByText('偵測到：n（TSLA）')).toBeInTheDocument()
   })
 })

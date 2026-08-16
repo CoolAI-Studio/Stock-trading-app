@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react'
 
+// Tall enough that the price pane isn't squeezed to a sliver -- the widget's
+// own toolbar and symbol-info row already take a fixed ~65px off the top.
+const CHART_HEIGHT_PX = 650
+
 /** Embeds TradingView's free "Advanced Chart" widget for display only --
  * price data used for strategy math comes from the backend's own
  * yfinance/Binance providers, never from this widget. */
@@ -20,19 +24,26 @@ export function TradingViewWidget({ symbol }: { symbol: string }) {
     if (container.dataset.tvSymbol === symbol) return
     container.dataset.tvSymbol = symbol
 
-    container.innerHTML = '<div class="tradingview-widget-container__widget h-full"></div>'
+    container.innerHTML = ''
 
     const script = document.createElement('script')
     script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js'
     script.async = true
+    // Explicit pixel width/height, not autosize: autosize relies on the
+    // embedded iframe reading its parent's percentage height, which
+    // silently resolved to a ~150px default in this script-injected setup
+    // (verified live -- the container was genuinely 600px tall but the
+    // iframe inside it only rendered 150px). Fixed dimensions sidestep
+    // that entirely.
     script.innerHTML = JSON.stringify({
-      autosize: true,
+      width: '100%',
+      height: CHART_HEIGHT_PX,
       symbol,
       interval: 'D',
       timezone: 'Etc/UTC',
       theme: 'dark',
       style: '1',
-      locale: 'en',
+      locale: 'zh_TW',
       allow_symbol_change: true,
     })
     container.appendChild(script)
@@ -44,5 +55,11 @@ export function TradingViewWidget({ symbol }: { symbol: string }) {
     // whole subtree via React regardless.
   }, [symbol])
 
-  return <div ref={containerRef} className="tradingview-widget-container h-[480px]" />
+  return (
+    <div
+      ref={containerRef}
+      className="tradingview-widget-container"
+      style={{ height: CHART_HEIGHT_PX }}
+    />
+  )
 }

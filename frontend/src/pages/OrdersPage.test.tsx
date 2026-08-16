@@ -49,7 +49,7 @@ describe('OrdersPage', () => {
   it('renders a pending order', async () => {
     renderPage()
     expect(await screen.findByText('AAPL')).toBeInTheDocument()
-    expect(screen.getByText(/buy/i)).toBeInTheDocument()
+    expect(screen.getByText('買進')).toBeInTheDocument()
   })
 
   it('confirms an order with the entered fill price', async () => {
@@ -57,10 +57,10 @@ describe('OrdersPage', () => {
     renderPage()
 
     await screen.findByText('AAPL')
-    const fillPriceInput = screen.getByLabelText(/fill price/i)
+    const fillPriceInput = screen.getByLabelText('成交價')
     await user.clear(fillPriceInput)
     await user.type(fillPriceInput, '151.25')
-    await user.click(screen.getByRole('button', { name: /confirm/i }))
+    await user.click(screen.getByRole('button', { name: '確認' }))
 
     await waitFor(() =>
       expect(api.post).toHaveBeenCalledWith('/api/orders/1/confirm', { fill_price: '151.25' }),
@@ -72,7 +72,7 @@ describe('OrdersPage', () => {
     renderPage()
 
     await screen.findByText('AAPL')
-    await user.click(screen.getByRole('button', { name: /reject/i }))
+    await user.click(screen.getByRole('button', { name: '拒絕' }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/orders/1/reject', {}))
   })
@@ -81,6 +81,6 @@ describe('OrdersPage', () => {
     vi.mocked(api.get).mockResolvedValue([] as never)
     renderPage()
 
-    expect(await screen.findByText(/no pending orders/i)).toBeInTheDocument()
+    expect(await screen.findByText('目前沒有待確認訂單。')).toBeInTheDocument()
   })
 })

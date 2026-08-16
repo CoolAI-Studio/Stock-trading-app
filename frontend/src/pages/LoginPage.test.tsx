@@ -40,9 +40,9 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     renderLoginPage()
 
-    await user.type(screen.getByLabelText('Email'), 'me@example.com')
-    await user.type(screen.getByLabelText('Password'), 'hunter2')
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
+    await user.type(screen.getByLabelText('電子信箱'), 'me@example.com')
+    await user.type(screen.getByLabelText('密碼'), 'hunter2')
+    await user.click(screen.getByRole('button', { name: '登入' }))
 
     await waitFor(() => expect(screen.getByText('home page')).toBeInTheDocument())
   })
@@ -52,9 +52,9 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     renderLoginPage()
 
-    await user.type(screen.getByLabelText('Email'), 'me@example.com')
-    await user.type(screen.getByLabelText('Password'), 'wrong')
-    await user.click(screen.getByRole('button', { name: /sign in/i }))
+    await user.type(screen.getByLabelText('電子信箱'), 'me@example.com')
+    await user.type(screen.getByLabelText('密碼'), 'wrong')
+    await user.click(screen.getByRole('button', { name: '登入' }))
 
     expect(await screen.findByText('Incorrect email or password')).toBeInTheDocument()
   })

@@ -38,6 +38,6 @@ describe('PositionsPage', () => {
     vi.mocked(api.get).mockResolvedValue([] as never)
     renderPage()
 
-    expect(await screen.findByText(/no open positions/i)).toBeInTheDocument()
+    expect(await screen.findByText('目前沒有持有部位。')).toBeInTheDocument()
   })
 })

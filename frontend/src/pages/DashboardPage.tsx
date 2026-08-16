@@ -48,10 +48,10 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Pending orders" value={pendingQuery.data?.length ?? 0} />
-        <StatCard label="Open positions" value={positionsQuery.data?.length ?? 0} />
+        <StatCard label="待確認訂單" value={pendingQuery.data?.length ?? 0} />
+        <StatCard label="持有部位" value={positionsQuery.data?.length ?? 0} />
         <StatCard
-          label="Active strategies"
+          label="啟用中策略"
           value={(strategiesQuery.data ?? []).filter((s) => s.is_active).length}
         />
       </div>
@@ -61,9 +61,9 @@ export function DashboardPage() {
       <table className="w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
-            <th className="pb-2 font-normal">Symbol</th>
-            <th className="pb-2 font-normal">Price</th>
-            <th className="pb-2 font-normal">Change %</th>
+            <th className="pb-2 font-normal">代號</th>
+            <th className="pb-2 font-normal">價格</th>
+            <th className="pb-2 font-normal">漲跌幅 %</th>
           </tr>
         </thead>
         <tbody>

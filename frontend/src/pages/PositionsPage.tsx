@@ -12,21 +12,21 @@ export function PositionsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold">Positions</h1>
+      <h1 className="text-lg font-semibold">部位</h1>
 
       {positions.length === 0 && positionsQuery.isSuccess && (
-        <p className="text-slate-500">No open positions.</p>
+        <p className="text-slate-500">目前沒有持有部位。</p>
       )}
 
       {positions.length > 0 && (
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
-              <th className="pb-2 font-normal">Symbol</th>
-              <th className="pb-2 font-normal">Quantity</th>
-              <th className="pb-2 font-normal">Avg entry</th>
-              <th className="pb-2 font-normal">Realized P&amp;L</th>
-              <th className="pb-2 font-normal">Opened</th>
+              <th className="pb-2 font-normal">代號</th>
+              <th className="pb-2 font-normal">數量</th>
+              <th className="pb-2 font-normal">平均成本</th>
+              <th className="pb-2 font-normal">已實現損益</th>
+              <th className="pb-2 font-normal">建倉時間</th>
             </tr>
           </thead>
           <tbody>

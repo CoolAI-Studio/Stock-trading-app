@@ -81,10 +81,10 @@ describe('DashboardPage', () => {
 
   it('shows summary stat counts', async () => {
     renderPage()
-    const pendingCard = (await screen.findByText('Pending orders')).closest('div')!
+    const pendingCard = (await screen.findByText('待確認訂單')).closest('div')!
     expect(await within(pendingCard).findByText('1')).toBeInTheDocument()
 
-    const positionsCard = screen.getByText('Open positions').closest('div')!
+    const positionsCard = screen.getByText('持有部位').closest('div')!
     expect(await within(positionsCard).findByText('1')).toBeInTheDocument()
   })
 

@@ -9,7 +9,7 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
 
   const testMutation = useMutation({
     mutationFn: () => api.post<{ ok: boolean; error: string | null }>(`/api/notifications/channels/${channel.id}/test`),
-    onSuccess: (result) => setTestResult(result.ok ? 'Sent.' : `Failed: ${result.error}`),
+    onSuccess: (result) => setTestResult(result.ok ? '已送出。' : `失敗：${result.error}`),
   })
 
   const deleteMutation = useMutation({
@@ -29,14 +29,14 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
             onClick={() => testMutation.mutate()}
             className="rounded bg-slate-700 px-3 py-1 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
           >
-            Test
+            測試
           </button>
           <button
             disabled={deleteMutation.isPending}
             onClick={() => deleteMutation.mutate()}
             className="rounded bg-red-900 px-3 py-1 text-sm font-medium text-red-200 hover:bg-red-800 disabled:opacity-50"
           >
-            Delete
+            刪除
           </button>
           {testResult && <span className="text-sm text-slate-400">{testResult}</span>}
         </div>
@@ -72,7 +72,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['notification-channels'] })
       onDone()
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Failed to create'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : '建立失敗'),
   })
 
   return (
@@ -93,7 +93,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
 
       <div>
         <label htmlFor="channel-label" className="text-sm text-slate-400">
-          Label
+          名稱
         </label>
         <input
           id="channel-label"
@@ -107,7 +107,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         <>
           <div>
             <label htmlFor="bot-token" className="text-sm text-slate-400">
-              Bot token
+              機器人權杖（Bot Token）
             </label>
             <input
               id="bot-token"
@@ -118,7 +118,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           </div>
           <div>
             <label htmlFor="chat-id" className="text-sm text-slate-400">
-              Chat id
+              聊天室代號（Chat ID）
             </label>
             <input
               id="chat-id"
@@ -134,7 +134,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         <>
           <div>
             <label htmlFor="access-token" className="text-sm text-slate-400">
-              Access token
+              存取權杖（Access Token）
             </label>
             <input
               id="access-token"
@@ -145,7 +145,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           </div>
           <div>
             <label htmlFor="line-to" className="text-sm text-slate-400">
-              To (user id)
+              接收者使用者 ID
             </label>
             <input
               id="line-to"
@@ -161,7 +161,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         <>
           <div>
             <label htmlFor="smtp-host" className="text-sm text-slate-400">
-              SMTP host
+              SMTP 主機
             </label>
             <input
               id="smtp-host"
@@ -172,7 +172,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           </div>
           <div>
             <label htmlFor="from-addr" className="text-sm text-slate-400">
-              From address
+              寄件人信箱
             </label>
             <input
               id="from-addr"
@@ -183,7 +183,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           </div>
           <div>
             <label htmlFor="to-addr" className="text-sm text-slate-400">
-              To address
+              收件人信箱
             </label>
             <input
               id="to-addr"
@@ -202,7 +202,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         onClick={() => createMutation.mutate()}
         className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
       >
-        Create
+        建立
       </button>
     </div>
   )
@@ -218,12 +218,12 @@ export function NotificationsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Notification Channels</h1>
+        <h1 className="text-lg font-semibold">通知管道</h1>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500"
         >
-          Add channel
+          新增管道
         </button>
       </div>
 
@@ -232,10 +232,10 @@ export function NotificationsPage() {
       <table className="w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
-            <th className="pb-2 font-normal">Label</th>
-            <th className="pb-2 font-normal">Type</th>
-            <th className="pb-2 font-normal">Config</th>
-            <th className="pb-2 font-normal">Actions</th>
+            <th className="pb-2 font-normal">名稱</th>
+            <th className="pb-2 font-normal">類型</th>
+            <th className="pb-2 font-normal">設定</th>
+            <th className="pb-2 font-normal">操作</th>
           </tr>
         </thead>
         <tbody>

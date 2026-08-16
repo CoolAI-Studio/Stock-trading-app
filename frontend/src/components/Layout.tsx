@@ -2,12 +2,12 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/strategies', label: 'Strategies' },
-  { to: '/orders', label: 'Orders' },
-  { to: '/positions', label: 'Positions' },
-  { to: '/notifications', label: 'Notifications' },
-  { to: '/risk-settings', label: 'Risk Settings' },
+  { to: '/', label: '儀表板', end: true },
+  { to: '/strategies', label: '策略' },
+  { to: '/orders', label: '訂單' },
+  { to: '/positions', label: '部位' },
+  { to: '/notifications', label: '通知' },
+  { to: '/risk-settings', label: '風險設定' },
 ]
 
 export function Layout() {
@@ -31,7 +31,7 @@ export function Layout() {
           ))}
         </nav>
         <button onClick={logout} className="text-sm text-slate-400 hover:text-slate-200">
-          Log out
+          登出
         </button>
       </header>
       <main className="p-6">
