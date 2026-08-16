@@ -78,4 +78,37 @@ describe('StrategiesPage', () => {
 
     expect(await screen.findByText('偵測到：n（TSLA）')).toBeInTheDocument()
   })
+
+  it('loads a sample strategy into the form and auto-fills detected name/symbol', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/strategies/samples') {
+        return [{ filename: 'ma5_cross.py', source_code: 'class Strategy:\n    pass\n' }] as never
+      }
+      return [] as never
+    })
+    vi.mocked(api.post).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies/validate') {
+        return {
+          ok: true,
+          detected_name: 'AAPL_MA5_Trend',
+          detected_symbol: 'AAPL',
+          sample_signals: ['HOLD'],
+        } as never
+      }
+      return STRATEGY as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(await screen.findByRole('button', { name: '5 日均線交叉' }))
+
+    expect(screen.getByLabelText('原始碼')).toHaveValue('class Strategy:\n    pass\n')
+
+    await user.click(screen.getByRole('button', { name: '驗證' }))
+
+    expect(await screen.findByLabelText('名稱')).toHaveValue('AAPL_MA5_Trend')
+    expect(screen.getByLabelText('股票代號')).toHaveValue('AAPL')
+  })
 })

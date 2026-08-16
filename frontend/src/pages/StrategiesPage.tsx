@@ -3,6 +3,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import type { SampleStrategy, Strategy, StrategyValidateResult } from '../lib/types'
 
+const SAMPLE_LABELS: Record<string, string> = {
+  ma5_cross: '5 日均線交叉',
+  rsi_threshold: 'RSI 超買超賣',
+}
+
+function sampleLabel(sample: SampleStrategy): string {
+  const key = sample.filename.replace(/\.py$/, '')
+  return SAMPLE_LABELS[key] ?? key
+}
+
 function StrategyRow({ strategy }: { strategy: Strategy }) {
   const queryClient = useQueryClient()
   const toggleMutation = useMutation({
@@ -37,7 +47,7 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
   )
 }
 
-function NewStrategyForm({ onDone }: { onDone: () => void }) {
+function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: SampleStrategy[] }) {
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [sourceCode, setSourceCode] = useState('')
@@ -48,8 +58,23 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
   const validateMutation = useMutation({
     mutationFn: () =>
       api.post<StrategyValidateResult>('/api/strategies/validate', { source_code: sourceCode }),
-    onSuccess: (result) => setValidation(result),
+    onSuccess: (result) => {
+      setValidation(result)
+      // Auto-fill from the code's own self.name/self.symbol so loading a
+      // sample (or pasting existing code) doesn't require retyping them --
+      // but never overwrite something the user already typed themselves.
+      if (result.ok) {
+        if (!name && result.detected_name) setName(result.detected_name)
+        if (!symbol && result.detected_symbol) setSymbol(result.detected_symbol)
+      }
+    },
   })
+
+  function applySample(sample: SampleStrategy) {
+    setSourceCode(sample.source_code)
+    setValidation(null)
+    setCreateError(null)
+  }
 
   const createMutation = useMutation({
     mutationFn: () => api.post<Strategy>('/api/strategies', { name, symbol, source_code: sourceCode }),
@@ -62,6 +87,23 @@ function NewStrategyForm({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="space-y-3 rounded border border-slate-800 p-4">
+      {samples.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-sm text-slate-400">不知道怎麼寫策略？從範例載入：</p>
+          <div className="flex flex-wrap gap-2">
+            {samples.map((sample) => (
+              <button
+                key={sample.filename}
+                type="button"
+                onClick={() => applySample(sample)}
+                className="rounded border border-slate-700 px-3 py-1 text-sm hover:bg-slate-800"
+              >
+                {sampleLabel(sample)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <label htmlFor="strategy-name" className="text-sm text-slate-400">
           名稱
@@ -132,7 +174,7 @@ export function StrategiesPage() {
     queryKey: ['strategies'],
     queryFn: () => api.get<Strategy[]>('/api/strategies'),
   })
-  useQuery({
+  const samplesQuery = useQuery({
     queryKey: ['strategy-samples'],
     queryFn: () => api.get<SampleStrategy[]>('/api/strategies/samples'),
   })
@@ -149,7 +191,9 @@ export function StrategiesPage() {
         </button>
       </div>
 
-      {showForm && <NewStrategyForm onDone={() => setShowForm(false)} />}
+      {showForm && (
+        <NewStrategyForm onDone={() => setShowForm(false)} samples={samplesQuery.data ?? []} />
+      )}
 
       <table className="w-full text-left text-sm">
         <thead className="text-slate-500">
