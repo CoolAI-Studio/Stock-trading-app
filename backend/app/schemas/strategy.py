@@ -4,6 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import DataSource
+from app.schemas.common import MoneyStr
 
 
 class StrategyCreate(BaseModel):
@@ -32,7 +33,7 @@ class StrategyRead(BaseModel):
     symbol: str
     data_source: DataSource
     is_active: bool
-    default_quantity: Decimal
+    default_quantity: MoneyStr
     warmup_bars: int
     last_signal: str | None
     last_signal_at: datetime | None

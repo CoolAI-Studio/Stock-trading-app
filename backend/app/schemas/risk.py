@@ -2,15 +2,17 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.common import MoneyStr
+
 
 class RiskSettingsRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    capital: Decimal
-    stop_loss_pct: Decimal
-    take_profit_pct: Decimal
-    max_position_qty: Decimal
-    max_order_notional: Decimal
+    capital: MoneyStr
+    stop_loss_pct: MoneyStr
+    take_profit_pct: MoneyStr
+    max_position_qty: MoneyStr
+    max_order_notional: MoneyStr
     max_pending_orders_per_symbol: int
     signal_cooldown_sec: int
 

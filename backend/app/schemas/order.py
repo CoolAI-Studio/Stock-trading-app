@@ -4,6 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import OrderSide, OrderSource, OrderStatus
+from app.schemas.common import MoneyStr
 
 
 class OrderRead(BaseModel):
@@ -14,12 +15,12 @@ class OrderRead(BaseModel):
     source: OrderSource
     symbol: str
     side: OrderSide
-    quantity: Decimal
-    signal_price: Decimal | None
+    quantity: MoneyStr
+    signal_price: MoneyStr | None
     status: OrderStatus
     risk_notes: dict | None
     reject_reason: str | None
-    fill_price: Decimal | None
+    fill_price: MoneyStr | None
     filled_at: datetime | None
     decided_at: datetime | None
     broker_ref: str | None
