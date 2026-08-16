@@ -1,0 +1,10 @@
+﻿pytest
+numpy
+matplotlib
+pandas
+plotly
+sqlalchemy
+scipy
+jupyter
+dash
+yfinance

@@ -1,0 +1,24 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+sqlalchemy>=2.0
+alembic>=1.13
+pydantic>=2.9
+pydantic-settings>=2.6
+passlib[bcrypt]>=1.7
+python-jose[cryptography]>=3.3
+pyotp>=2.9
+python-multipart>=0.0.12
+httpx>=0.27
+cryptography>=43.0
+yfinance>=0.2.43
+numpy>=1.26
+pandas>=2.2
+pytest>=8.3
+pytest-asyncio>=0.24
+
+# Optional cloud Postgres driver (needed once DATABASE_URL points at Neon/Supabase/etc.)
+psycopg2-binary>=2.9
+
+# Optional: only needed if AI_PROVIDER=anthropic is selected (default provider is
+# the plain-httpx OpenAI-compatible client, which needs no extra SDK)
+# anthropic>=0.39
