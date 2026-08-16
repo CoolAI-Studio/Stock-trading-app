@@ -1,5 +1,3 @@
-databases: []
-
 services:
   - type: web
     name: trading-app-backend
