@@ -12,7 +12,7 @@ engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True, connect_args=_
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """FastAPI dependency: one Session per request, closed afterwards."""
     db = SessionLocal()
     try:

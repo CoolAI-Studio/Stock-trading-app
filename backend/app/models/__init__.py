@@ -1,0 +1,13 @@
+"""Import every model module so Base.metadata is fully populated before
+Alembic autogenerate (or Base.metadata.create_all in tests) runs. This file
+being complete is load-bearing -- a missing import here means a table is
+silently absent from migrations."""
+
+from app.models.market import MarketQuote  # noqa: F401
+from app.models.notification import NotificationChannel, NotificationLog  # noqa: F401
+from app.models.order import Order  # noqa: F401
+from app.models.position import Position  # noqa: F401
+from app.models.risk import RiskSettings  # noqa: F401
+from app.models.strategy import Strategy  # noqa: F401
+from app.models.user import User  # noqa: F401
+from app.models.webhook import TradingViewWebhookLog  # noqa: F401
