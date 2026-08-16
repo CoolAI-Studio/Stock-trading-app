@@ -37,3 +37,20 @@ def client(db_session):
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def auth_client(client, monkeypatch):
+    """A TestClient with a real registered user and a bearer token pre-attached."""
+    monkeypatch.setattr("app.config.settings.ALLOW_REGISTRATION", True)
+    client.post(
+        "/api/auth/register",
+        json={"email": "fixture-user@example.com", "password": "correct-horse-battery"},
+    )
+    login_resp = client.post(
+        "/api/auth/login",
+        data={"username": "fixture-user@example.com", "password": "correct-horse-battery"},
+    )
+    token = login_resp.json()["access_token"]
+    client.headers.update({"Authorization": f"Bearer {token}"})
+    return client
