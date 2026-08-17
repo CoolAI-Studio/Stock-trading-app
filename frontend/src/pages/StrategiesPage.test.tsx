@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import type { Strategy } from '../lib/types'
 
 vi.mock('../lib/api', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }))
 
 const STRATEGY: Strategy = {
@@ -36,6 +36,7 @@ function renderPage() {
 
 describe('StrategiesPage', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/strategies/samples') return [] as never
@@ -110,5 +111,47 @@ describe('StrategiesPage', () => {
 
     expect(await screen.findByLabelText('名稱')).toHaveValue('AAPL_MA5_Trend')
     expect(screen.getByLabelText('股票代號')).toHaveValue('AAPL')
+  })
+
+  it('edits a strategy without touching its source code', async () => {
+    vi.mocked(api.patch).mockResolvedValue({ ...STRATEGY, name: 'renamed' } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+
+    const nameInput = screen.getByLabelText('名稱')
+    await user.clear(nameInput)
+    await user.type(nameInput, 'renamed')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith('/api/strategies/1', { name: 'renamed', symbol: 'AAPL' }),
+    )
+  })
+
+  it('deletes a strategy after confirming', async () => {
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '刪除' }))
+
+    expect(window.confirm).toHaveBeenCalled()
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/strategies/1'))
+  })
+
+  it('does not delete a strategy when the confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '刪除' }))
+
+    expect(api.delete).not.toHaveBeenCalled()
   })
 })

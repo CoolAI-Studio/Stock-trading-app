@@ -13,7 +13,108 @@ function sampleLabel(sample: SampleStrategy): string {
   return SAMPLE_LABELS[key] ?? key
 }
 
+function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: () => void }) {
+  const [name, setName] = useState(strategy.name)
+  const [symbol, setSymbol] = useState(strategy.symbol)
+  const [sourceCode, setSourceCode] = useState('')
+  const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+
+  const validateMutation = useMutation({
+    mutationFn: () =>
+      api.post<StrategyValidateResult>('/api/strategies/validate', { source_code: sourceCode }),
+    onSuccess: (result) => setValidation(result),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const payload: Record<string, unknown> = { name, symbol }
+      if (sourceCode.trim()) payload.source_code = sourceCode
+      return api.patch<Strategy>(`/api/strategies/${strategy.id}`, payload)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['strategies'] })
+      onDone()
+    },
+    onError: (err) => setSaveError(err instanceof ApiError ? err.message : '儲存失敗'),
+  })
+
+  return (
+    <div className="space-y-3 rounded border border-slate-800 p-4">
+      <div>
+        <label htmlFor={`edit-strategy-name-${strategy.id}`} className="text-sm text-slate-400">
+          名稱
+        </label>
+        <input
+          id={`edit-strategy-name-${strategy.id}`}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+      </div>
+      <div>
+        <label htmlFor={`edit-strategy-symbol-${strategy.id}`} className="text-sm text-slate-400">
+          股票代號
+        </label>
+        <input
+          id={`edit-strategy-symbol-${strategy.id}`}
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value)}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+      </div>
+      <div>
+        <label htmlFor={`edit-strategy-code-${strategy.id}`} className="text-sm text-slate-400">
+          原始碼（留空表示不變更）
+        </label>
+        <textarea
+          id={`edit-strategy-code-${strategy.id}`}
+          value={sourceCode}
+          onChange={(e) => setSourceCode(e.target.value)}
+          rows={10}
+          placeholder="貼上新的原始碼以取代現有策略程式碼；留空則保留原本的程式碼"
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm"
+        />
+      </div>
+
+      {validation && (
+        <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
+          {validation.ok
+            ? `偵測到：${validation.detected_name}（${validation.detected_symbol}）`
+            : validation.error}
+        </p>
+      )}
+      {saveError && <p className="text-red-400">{saveError}</p>}
+
+      <div className="flex gap-2">
+        <button
+          disabled={validateMutation.isPending || !sourceCode}
+          onClick={() => validateMutation.mutate()}
+          className="rounded bg-slate-700 px-3 py-1 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
+        >
+          驗證
+        </button>
+        <button
+          disabled={saveMutation.isPending || !name || !symbol}
+          onClick={() => saveMutation.mutate()}
+          className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+        >
+          儲存
+        </button>
+        <button
+          onClick={onDone}
+          className="rounded bg-slate-800 px-3 py-1 text-sm font-medium text-slate-300 hover:bg-slate-700"
+        >
+          取消
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function StrategyRow({ strategy }: { strategy: Strategy }) {
+  const [editing, setEditing] = useState(false)
   const queryClient = useQueryClient()
   const toggleMutation = useMutation({
     mutationFn: () =>
@@ -21,29 +122,62 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['strategies'] }),
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete(`/api/strategies/${strategy.id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['strategies'] }),
+  })
+
+  function handleDelete() {
+    if (window.confirm(`確定要刪除策略「${strategy.name}」嗎？此操作無法復原。`)) {
+      deleteMutation.mutate()
+    }
+  }
+
   return (
-    <tr className="border-b border-slate-800">
-      <td className="py-2 pr-4 font-medium">{strategy.name}</td>
-      <td className="py-2 pr-4">{strategy.symbol}</td>
-      <td className="py-2 pr-4">
-        <span className={strategy.is_active ? 'text-emerald-400' : 'text-slate-500'}>
-          {strategy.is_active ? '啟用中' : '已停用'}
-        </span>
-      </td>
-      <td className="py-2 pr-4 text-slate-400">{strategy.last_signal ?? '—'}</td>
-      <td className="py-2 pr-4 text-red-400">
-        {strategy.consecutive_errors > 0 ? strategy.last_error : ''}
-      </td>
-      <td className="py-2">
-        <button
-          disabled={toggleMutation.isPending}
-          onClick={() => toggleMutation.mutate()}
-          className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
-        >
-          {strategy.is_active ? '停用' : '啟用'}
-        </button>
-      </td>
-    </tr>
+    <>
+      <tr className="border-b border-slate-800">
+        <td className="py-2 pr-4 font-medium">{strategy.name}</td>
+        <td className="py-2 pr-4">{strategy.symbol}</td>
+        <td className="py-2 pr-4">
+          <span className={strategy.is_active ? 'text-emerald-400' : 'text-slate-500'}>
+            {strategy.is_active ? '啟用中' : '已停用'}
+          </span>
+        </td>
+        <td className="py-2 pr-4 text-slate-400">{strategy.last_signal ?? '—'}</td>
+        <td className="py-2 pr-4 text-red-400">
+          {strategy.consecutive_errors > 0 ? strategy.last_error : ''}
+        </td>
+        <td className="flex gap-2 py-2">
+          <button
+            disabled={toggleMutation.isPending}
+            onClick={() => toggleMutation.mutate()}
+            className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+          >
+            {strategy.is_active ? '停用' : '啟用'}
+          </button>
+          <button
+            onClick={() => setEditing((v) => !v)}
+            className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600"
+          >
+            編輯
+          </button>
+          <button
+            disabled={deleteMutation.isPending}
+            onClick={handleDelete}
+            className="rounded bg-red-900 px-3 py-1 text-sm font-medium text-red-200 hover:bg-red-800 disabled:opacity-50"
+          >
+            刪除
+          </button>
+        </td>
+      </tr>
+      {editing && (
+        <tr>
+          <td colSpan={6} className="pb-4">
+            <EditStrategyForm strategy={strategy} onDone={() => setEditing(false)} />
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
