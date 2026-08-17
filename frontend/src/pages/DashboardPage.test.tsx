@@ -117,4 +117,15 @@ describe('DashboardPage', () => {
 
     expect(JSON.parse(localStorage.getItem('trading_app_watchlist')!)).toEqual([])
   })
+
+
+  it('surfaces a backend failure instead of rendering it as an empty account', async () => {
+    // Regression: with every query failing, the page used to fall back to
+    // `?? 0` / `?? []` and render "0 待確認訂單" -- indistinguishable from a
+    // quiet account, so a pending order could sit unnoticed until it expired.
+    vi.mocked(api.get).mockRejectedValue(new Error('Service Unavailable'))
+    renderPage()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('無法讀取資料')
+  })
 })

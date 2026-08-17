@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { QueryError } from '../components/QueryError'
 import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
 
 const SIDE_LABEL: Record<OrderSide, string> = { buy: '買進', sell: '賣出' }
@@ -189,8 +190,14 @@ export function OrdersPage() {
 
   const history = (historyQuery.data ?? []).filter((o) => o.status !== 'pending')
 
+  const activeQuery = tab === 'pending' ? pendingQuery : historyQuery
+
   return (
     <div className="space-y-4">
+      {activeQuery.isError && (
+        <QueryError error={activeQuery.error} onRetry={() => activeQuery.refetch()} />
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex gap-4 border-b border-slate-800">
           <button

@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
+import { useWebSocket } from '../lib/useWebSocket'
 
 const NAV_ITEMS = [
   { to: '/', label: '儀表板', end: true },
@@ -13,6 +14,12 @@ const NAV_ITEMS = [
 
 export function Layout() {
   const { logout } = useAuth()
+  // Mounted here rather than on the dashboard so one connection covers every
+  // signed-in page. It used to live on the dashboard alone, which meant the
+  // Orders page -- the screen you actually sit on waiting to confirm an order
+  // -- received no live updates at all, and window-focus refetching is
+  // globally disabled, so nothing else filled the gap either.
+  useWebSocket(true)
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">

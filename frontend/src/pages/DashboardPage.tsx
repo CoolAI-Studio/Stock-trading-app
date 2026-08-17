@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useWebSocket } from '../lib/useWebSocket'
 import { TradingViewWidget } from '../components/TradingViewWidget'
+import { QueryError } from '../components/QueryError'
 import type { Order, Position, Quote, Strategy } from '../lib/types'
 
 const WATCHLIST_KEY = 'trading_app_watchlist'
@@ -26,8 +26,6 @@ function StatCard({ label, value }: { label: string; value: number }) {
 }
 
 export function DashboardPage() {
-  useWebSocket(true)
-
   const strategiesQuery = useQuery({
     queryKey: ['strategies'],
     queryFn: () => api.get<Strategy[]>('/api/strategies'),
@@ -76,8 +74,21 @@ export function DashboardPage() {
     setWatchlist((prev) => prev.filter((s) => s !== symbol))
   }
 
+  const failed = [strategiesQuery, positionsQuery, pendingQuery].find((q) => q.isError)
+
   return (
     <div className="space-y-6">
+      {failed && (
+        <QueryError
+          error={failed.error}
+          onRetry={() => {
+            strategiesQuery.refetch()
+            positionsQuery.refetch()
+            pendingQuery.refetch()
+          }}
+        />
+      )}
+
       <div className="grid grid-cols-3 gap-4">
         <StatCard label="待確認訂單" value={pendingQuery.data?.length ?? 0} />
         <StatCard label="持有部位" value={positionsQuery.data?.length ?? 0} />
