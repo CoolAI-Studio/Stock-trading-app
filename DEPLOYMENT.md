@@ -51,7 +51,7 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
      把印出來的字串貼進去
    - `CORS_ORIGINS`：先隨便填 `http://localhost:5173`，等第 3 步 Vercel 部署完拿到正式網址後回來改
 5. 部署完成後，Render 會給你一個網址，例如 `https://trading-app-backend-xxxx.onrender.com`。記下來，第 3 步會用到。
-6. 打開 `https://<你的網址>/healthz`，看到 `{"status":"ok"}` 就代表後端上線成功。
+6. 打開 `https://<你的網址>/healthz`，最外層看到 `"status": "ok"`（HTTP 200）就代表後端上線成功。剛部署完、背景 worker 還沒跑完第一輪時，`worker` 和 `market_data` 會顯示 `starting`，這是正常的。
 
 ---
 
@@ -81,6 +81,21 @@ Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控
    - URL：`https://<你的 Render 後端網址>/healthz`
    - Monitoring Interval：5 分鐘
 3. 存檔後就會開始每 5 分鐘自動 ping 一次，讓服務保持清醒。
+4. **記得在 monitor 的 Alert Contacts 加上你的 Email**，否則就算後端壞掉也不會通知你。
+
+### `/healthz` 到底檢查什麼
+
+這個網址同時是「保持喚醒」和「唯一的線上監控」。它會實際去測三件事，任何一項失敗就回 **HTTP 503**，UptimeRobot 收到 503 才會寄信給你：
+
+| 檢查項目 | 失敗代表 |
+| --- | --- |
+| `database` | 資料庫連不上（Neon 掛掉、連線字串失效） |
+| `worker` | 背景 worker 沒在跑迴圈了（卡死，或根本沒起來） |
+| `market_data` | 迴圈還在轉，但已經很久沒有一輪報價成功跑完 |
+
+回應只有檢查項目名稱和秒數，不會帶出連線字串、金鑰或持股標的，所以公開被 ping 是安全的。
+
+另外注意：`render.yaml` 的 `healthCheckPath` 也指向 `/healthz`，所以持續 503 時 Render 也會判定服務不健康。worker 卡死的情況下重啟本來就是正確處置，但如果之後不想要這個連動，把 `healthCheckPath` 改成別的路徑即可。
 
 ---
 

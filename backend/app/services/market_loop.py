@@ -13,7 +13,7 @@ from app.models.position import Position
 from app.models.risk import RiskSettings
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.services import risk
+from app.services import risk, worker_health
 from app.services.events import Event, bus
 from app.services.market_data.base import Quote
 from app.services.market_data.service import MarketDataService, get_market_data_service
@@ -192,10 +192,16 @@ async def run_forever(stop_event: asyncio.Event) -> None:
         "loop and duplicate signals for the same tick."
     )
     while not stop_event.is_set():
+        # Marked before the tick, so a tick that hangs (and therefore never
+        # returns to mark anything) shows up in /healthz as a stalled loop
+        # rather than as a loop that is merely between polls.
+        worker_health.heartbeat.mark_loop()
         try:
             await asyncio.to_thread(tick_once)
         except Exception:
             logger.exception("market loop tick failed")
+        else:
+            worker_health.heartbeat.mark_poll_success()
         try:
             await asyncio.wait_for(
                 stop_event.wait(), timeout=settings.MARKET_DATA_POLL_INTERVAL_SEC

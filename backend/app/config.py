@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     # real polling loop or touches the network.
     WORKER_ENABLED: bool = True
 
+    # /healthz fails (503) when the worker's last loop iteration, or its last
+    # poll cycle that completed, is older than this. Deliberately far above
+    # MARKET_DATA_POLL_INTERVAL_SEC: one slow yfinance response must never page
+    # anyone, only a worker that is genuinely wedged or dead.
+    HEALTH_MAX_AGE_SEC: float = 300.0
+
+    # Render's free tier spins the whole process down when idle, so the first
+    # probe after a cold start meets a worker that truthfully has never polled.
+    # Inside this window that reports as "starting" instead of failing.
+    HEALTH_STARTUP_GRACE_SEC: float = 120.0
+
     # A manual-confirm pending order older than this is stale and gets
     # auto-expired by the worker loop rather than sitting there forever.
     PENDING_ORDER_EXPIRY_MINUTES: int = 180
