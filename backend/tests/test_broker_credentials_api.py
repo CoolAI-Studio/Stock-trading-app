@@ -69,6 +69,7 @@ def test_broker_credentials_require_auth(client):
 
 def test_ai_assist_success(auth_client, monkeypatch):
     monkeypatch.setattr("app.config.settings.AI_API_KEY", "test-key")
+    monkeypatch.setattr("app.config.settings.AI_MODEL", "test-model")
     monkeypatch.setattr("app.config.settings.AI_PROVIDER", "openai_compatible")
 
     fake_response = MagicMock(status_code=200)
