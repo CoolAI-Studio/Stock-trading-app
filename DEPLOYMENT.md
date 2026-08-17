@@ -102,6 +102,22 @@ Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控
 
 ---
 
+## 6. 啟用瀏覽器推播通知（選用）
+
+想在「通知」頁用「瀏覽器推播」這個管道，需要先在 Render 後端設定一組 VAPID 金鑰：
+
+1. 在本機執行：
+   ```
+   python backend/scripts/generate_vapid_keys.py
+   ```
+   會印出 `VAPID_PUBLIC_KEY` 跟 `VAPID_PRIVATE_KEY` 兩個值。
+2. 到 Render 後端服務的環境變數，新增這兩個欄位並貼上對應的值，`VAPID_SUBJECT` 保持預設值即可（或改成你自己的 `mailto:` 信箱）。
+3. 存檔後 Render 會自動重新部署一次；之後就能在「通知」頁選「瀏覽器推播」建立管道了。
+
+不設定也沒關係——LINE/Telegram/Email 三種管道完全不受影響，只是瀏覽器推播那個選項在測試時會顯示「VAPID_PRIVATE_KEY is not configured」。
+
+---
+
 ## 檢查清單
 
 - [ ] Neon 資料庫建立完成，拿到連線字串
@@ -111,3 +127,4 @@ Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控
 - [ ] 後端 `CORS_ORIGINS` 已更新成 Vercel 網址
 - [ ] UptimeRobot 監控已設定
 - [ ] 已建立自己的登入帳號，且 `ALLOW_REGISTRATION` 已改回 `false`
+- [ ] （選用）已設定 `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`，瀏覽器推播通知可以用

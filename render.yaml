@@ -13,6 +13,12 @@ services:
         generateValue: true
       - key: SECRET_ENCRYPTION_KEY
         sync: false # must be a real Fernet key -- see backend/.env.example for how to generate one
+      - key: VAPID_PUBLIC_KEY
+        sync: false # run `python backend/scripts/generate_vapid_keys.py`, paste both values in
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: "mailto:you@example.com"
       - key: TV_WEBHOOK_SECRET
         generateValue: true
       - key: CORS_ORIGINS
