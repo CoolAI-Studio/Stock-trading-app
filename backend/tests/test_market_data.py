@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from app.models.enums import DataSource
+from app.services.market_data.base import Quote
 from app.services.market_data.providers.mock_provider import MockProvider
 from app.services.market_data.service import MarketDataService
 
@@ -76,3 +79,87 @@ def test_upsert_quotes_persists_to_db(db_session):
     row = db_session.get(MarketQuote, "AAPL")
     assert row is not None
     assert row.price == quotes["AAPL"].price
+
+
+class _OmitsUnknownProvider:
+    """Returns quotes only for symbols it recognises, silently dropping the
+    rest -- which is exactly what yfinance does for a delisted ticker, a typo,
+    or a Taiwan symbol missing its `.TW` suffix. MockProvider can't stand in
+    here because it invents a price for every symbol it's asked about.
+    """
+
+    data_source = DataSource.YFINANCE
+
+    def __init__(self, known: str, start_price: float = 100.0) -> None:
+        self._known = known
+        self._price = start_price
+        self.calls: list[list[str]] = []
+
+    def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
+        self.calls.append(list(symbols))
+        self._price += 1.0
+        return {
+            s: Quote(symbol=s, data_source=self.data_source, price=Decimal(str(self._price)))
+            for s in symbols
+            if s == self._known
+        }
+
+
+def test_an_unresolvable_symbol_does_not_freeze_every_other_price():
+    """Regression, and the most expensive bug this suite guards: backfilling a
+    symbol the provider never returns used to rewrite the cache timestamp on
+    every single poll. `stale` therefore never came true again, so every OTHER
+    symbol's price froze at whatever it was on the first tick -- silently, with
+    a fresh-looking timestamp -- and stop-loss/take-profit stopped firing for
+    the entire portfolio because the price they compare against never moved.
+    """
+    provider = _OmitsUnknownProvider(known="AAPL", start_price=100.0)
+    fake_time = {"t": 1000.0}
+    service = MarketDataService(
+        providers={DataSource.YFINANCE: provider},
+        ttl_sec={DataSource.YFINANCE: 15.0},
+        clock=lambda: fake_time["t"],
+    )
+
+    watched = ["AAPL", "DELISTED.OLD"]
+    first = service.get_quotes(watched, DataSource.YFINANCE)
+    assert "AAPL" in first
+    assert "DELISTED.OLD" not in first
+    first_price = first["AAPL"].price
+
+    # Poll well past the TTL, the way the worker loop does every few seconds.
+    for _ in range(10):
+        fake_time["t"] += 5.0
+        latest = service.get_quotes(watched, DataSource.YFINANCE)
+
+    assert latest["AAPL"].price > first_price, (
+        "AAPL's price never moved: the unresolvable symbol kept re-arming the "
+        "cache TTL, so the full refresh never happened again"
+    )
+
+
+def test_backfilling_a_missing_symbol_does_not_extend_the_ttl():
+    """The mechanism behind the bug above, asserted directly: a partial fetch
+    for a newly-watched symbol must leave the existing TTL clock alone."""
+    provider = _OmitsUnknownProvider(known="AAPL")
+    fake_time = {"t": 1000.0}
+    service = MarketDataService(
+        providers={DataSource.YFINANCE: provider},
+        ttl_sec={DataSource.YFINANCE: 15.0},
+        clock=lambda: fake_time["t"],
+    )
+
+    service.get_quotes(["AAPL"], DataSource.YFINANCE)
+    assert provider.calls == [["AAPL"]]
+
+    # A backfill for an unknown symbol 10s in...
+    fake_time["t"] += 10.0
+    service.get_quotes(["AAPL", "DELISTED.OLD"], DataSource.YFINANCE)
+
+    # ...must not push the full-refresh deadline out past the original 15s.
+    fake_time["t"] += 6.0
+    service.get_quotes(["AAPL", "DELISTED.OLD"], DataSource.YFINANCE)
+
+    assert ["AAPL", "DELISTED.OLD"] in provider.calls, (
+        "no full refresh happened after the TTL elapsed"
+    )

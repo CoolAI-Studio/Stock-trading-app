@@ -48,7 +48,16 @@ class MarketDataService:
             fetch_list = symbols if stale else missing
             fresh = provider.get_quotes(fetch_list)
             cached_quotes = {**cached_quotes, **fresh}
-            self._cache[data_source] = (now, cached_quotes)
+            # Only a full refresh restarts the TTL clock. A backfill must not:
+            # providers silently omit symbols they can't resolve (a typo, a
+            # delisting, a Taiwan ticker missing its .TW suffix), so that
+            # symbol stays permanently "missing" and gets re-fetched every
+            # poll. Stamping `now` there re-armed the timer forever, `stale`
+            # never came true again, and every OTHER symbol's price froze at
+            # its first value -- silently, behind a fresh-looking timestamp,
+            # with stop-loss/take-profit comparing against a price that could
+            # no longer move.
+            self._cache[data_source] = (now if stale else cached_at, cached_quotes)
 
         return {s: cached_quotes[s] for s in symbols if s in cached_quotes}
 
