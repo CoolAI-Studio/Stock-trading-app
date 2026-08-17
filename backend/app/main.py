@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.api.routers.health import router as health_router
-from app.config import settings
+from app.config import enforce_required_secrets, settings
 from app.services.events import bus
 from app.services.market_loop import run_forever
 from app.services.notification.dispatcher import handle_event as dispatch_notification
@@ -33,6 +33,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     bus.unsubscribe(broadcaster.handle_event)
     bus.unsubscribe(dispatch_notification)
 
+
+# At import, not in lifespan: uvicorn then dies while loading the app, so a
+# misconfigured deploy never binds a port and never serves a single request.
+enforce_required_secrets(settings)
 
 app = FastAPI(title="Trading App API", lifespan=lifespan)
 
