@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { ApiError, api } from '../lib/api'
 import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
 
 const SIDE_LABEL: Record<OrderSide, string> = { buy: '買進', sell: '賣出' }
@@ -83,6 +83,91 @@ function PendingOrderRow({ order }: { order: Order }) {
   )
 }
 
+function NewOrderForm({ onDone }: { onDone: () => void }) {
+  const [symbol, setSymbol] = useState('')
+  const [side, setSide] = useState<OrderSide>('buy')
+  const [quantity, setQuantity] = useState('')
+  const [signalPrice, setSignalPrice] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      api.post<Order>('/api/orders', {
+        symbol,
+        side,
+        quantity,
+        signal_price: signalPrice || null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      onDone()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : '建立失敗'),
+  })
+
+  return (
+    <div className="space-y-3 rounded border border-slate-800 p-4">
+      <div>
+        <label htmlFor="new-order-symbol" className="text-sm text-slate-400">
+          代號
+        </label>
+        <input
+          id="new-order-symbol"
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value)}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+      </div>
+      <div className="flex gap-4">
+        {(['buy', 'sell'] as const).map((value) => (
+          <label key={value} className="flex items-center gap-1 text-sm">
+            <input
+              type="radio"
+              name="new-order-side"
+              checked={side === value}
+              onChange={() => setSide(value)}
+            />
+            {SIDE_LABEL[value]}
+          </label>
+        ))}
+      </div>
+      <div>
+        <label htmlFor="new-order-quantity" className="text-sm text-slate-400">
+          數量
+        </label>
+        <input
+          id="new-order-quantity"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+      </div>
+      <div>
+        <label htmlFor="new-order-price" className="text-sm text-slate-400">
+          預期價格（選填）
+        </label>
+        <input
+          id="new-order-price"
+          value={signalPrice}
+          onChange={(e) => setSignalPrice(e.target.value)}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+      </div>
+
+      {error && <p className="text-red-400">{error}</p>}
+
+      <button
+        disabled={createMutation.isPending || !symbol || !quantity}
+        onClick={() => createMutation.mutate()}
+        className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+      >
+        送出
+      </button>
+    </div>
+  )
+}
+
 function HistoryRow({ order }: { order: Order }) {
   return (
     <tr className="border-b border-slate-800 text-slate-300">
@@ -98,6 +183,7 @@ function HistoryRow({ order }: { order: Order }) {
 
 export function OrdersPage() {
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
+  const [showForm, setShowForm] = useState(false)
   const pendingQuery = useOrdersQuery('pending')
   const historyQuery = useOrdersQuery()
 
@@ -105,20 +191,30 @@ export function OrdersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-4 border-b border-slate-800">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-4 border-b border-slate-800">
+          <button
+            onClick={() => setTab('pending')}
+            className={`pb-2 text-sm font-medium ${tab === 'pending' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-slate-400'}`}
+          >
+            待確認
+          </button>
+          <button
+            onClick={() => setTab('history')}
+            className={`pb-2 text-sm font-medium ${tab === 'history' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-slate-400'}`}
+          >
+            歷史紀錄
+          </button>
+        </div>
         <button
-          onClick={() => setTab('pending')}
-          className={`pb-2 text-sm font-medium ${tab === 'pending' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-slate-400'}`}
+          onClick={() => setShowForm((v) => !v)}
+          className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500"
         >
-          待確認
-        </button>
-        <button
-          onClick={() => setTab('history')}
-          className={`pb-2 text-sm font-medium ${tab === 'history' ? 'border-b-2 border-emerald-400 text-emerald-400' : 'text-slate-400'}`}
-        >
-          歷史紀錄
+          新增訂單
         </button>
       </div>
+
+      {showForm && <NewOrderForm onDone={() => setShowForm(false)} />}
 
       {tab === 'pending' && (
         <table className="w-full text-left text-sm">

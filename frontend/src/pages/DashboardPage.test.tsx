@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DashboardPage } from './DashboardPage'
 import { api } from '../lib/api'
@@ -70,6 +71,7 @@ function renderPage() {
 
 describe('DashboardPage', () => {
   beforeEach(() => {
+    localStorage.clear()
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/positions') return [POSITION] as never
@@ -91,5 +93,28 @@ describe('DashboardPage', () => {
   it('lists live quotes for watched symbols', async () => {
     renderPage()
     expect(await screen.findByText('150.25')).toBeInTheDocument()
+  })
+
+  it('adds a searched symbol to the watchlist and queries its quote', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('150.25')
+    await user.type(screen.getByLabelText('查詢代號'), 'tsla')
+    await user.click(screen.getByRole('button', { name: '加入自選' }))
+
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining('TSLA'))
+    expect(JSON.parse(localStorage.getItem('trading_app_watchlist')!)).toEqual(['TSLA'])
+  })
+
+  it('removes a watchlist symbol', async () => {
+    localStorage.setItem('trading_app_watchlist', JSON.stringify(['AAPL']))
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('150.25')
+    await user.click(screen.getByRole('button', { name: '移除 AAPL' }))
+
+    expect(JSON.parse(localStorage.getItem('trading_app_watchlist')!)).toEqual([])
   })
 })

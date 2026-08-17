@@ -83,4 +83,26 @@ describe('OrdersPage', () => {
 
     expect(await screen.findByText('目前沒有待確認訂單。')).toBeInTheDocument()
   })
+
+  it('creates a manual order', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('AAPL')
+    await user.click(screen.getByRole('button', { name: '新增訂單' }))
+    await user.type(screen.getByLabelText('代號'), 'tsla')
+    await user.click(screen.getByRole('radio', { name: '賣出' }))
+    await user.type(screen.getByLabelText('數量'), '5')
+    await user.type(screen.getByLabelText('預期價格（選填）'), '200')
+    await user.click(screen.getByRole('button', { name: '送出' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/orders', {
+        symbol: 'tsla',
+        side: 'sell',
+        quantity: '5',
+        signal_price: '200',
+      }),
+    )
+  })
 })
