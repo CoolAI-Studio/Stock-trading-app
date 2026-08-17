@@ -14,6 +14,14 @@ class Settings(BaseSettings):
 
     SECRET_ENCRYPTION_KEY: str = ""
 
+    # Web Push (browser notifications). Generate with:
+    #   python -c "from py_vapid import Vapid02; v=Vapid02(); v.generate_keys(); ..."
+    # (see scripts/generate_vapid_keys.py). Public key is safe to expose to the
+    # frontend; private key must stay server-side only.
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY: str = ""
+    VAPID_SUBJECT: str = "mailto:admin@example.com"
+
     TV_WEBHOOK_SECRET: str = "change-me"
 
     CORS_ORIGINS: str = "http://localhost:5173"

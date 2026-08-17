@@ -8,6 +8,7 @@ from app.services.notification.dispatcher import handle_event
 from app.services.notification.email import EmailSender
 from app.services.notification.line import LineSender
 from app.services.notification.telegram import TelegramSender
+from app.services.notification.webpush import WebPushSender
 
 
 def _make_user(db_session, email="notify@example.com") -> User:
@@ -79,6 +80,52 @@ def test_email_sender_success():
 def test_email_sender_missing_config():
     result = EmailSender().send({}, "hello")
     assert result.ok is False
+
+
+def test_webpush_sender_success(monkeypatch):
+    monkeypatch.setattr("app.config.settings.VAPID_PRIVATE_KEY", "test-private-key")
+    with patch("app.services.notification.webpush.webpush", return_value=None) as mock_send:
+        result = WebPushSender().send(
+            {"endpoint": "https://push.example.com/x", "p256dh": "p", "auth": "a"}, "hello"
+        )
+
+    assert result.ok is True
+    mock_send.assert_called_once()
+    # Regression guard: pywebpush's own default (ttl=0) is rejected outright
+    # by Microsoft's WNS push service (verified live against a real Edge
+    # subscription -- 400 "Ttl value conflicts with X-WNS-Cache-Policy").
+    assert mock_send.call_args.kwargs["ttl"] > 0
+
+
+def test_webpush_sender_missing_config():
+    result = WebPushSender().send({}, "hello")
+    assert result.ok is False
+    assert "endpoint" in result.error
+
+
+def test_webpush_sender_missing_vapid_key(monkeypatch):
+    monkeypatch.setattr("app.config.settings.VAPID_PRIVATE_KEY", "")
+    result = WebPushSender().send(
+        {"endpoint": "https://push.example.com/x", "p256dh": "p", "auth": "a"}, "hello"
+    )
+    assert result.ok is False
+    assert "VAPID_PRIVATE_KEY" in result.error
+
+
+def test_webpush_sender_gone_subscription(monkeypatch):
+    from pywebpush import WebPushException
+
+    monkeypatch.setattr("app.config.settings.VAPID_PRIVATE_KEY", "test-private-key")
+    with patch(
+        "app.services.notification.webpush.webpush",
+        side_effect=WebPushException("Push failed: 410 Gone"),
+    ):
+        result = WebPushSender().send(
+            {"endpoint": "https://push.example.com/x", "p256dh": "p", "auth": "a"}, "hello"
+        )
+
+    assert result.ok is False
+    assert "410" in result.error
 
 
 # ---- dispatcher ----
@@ -180,6 +227,30 @@ def test_dispatcher_respects_subscribed_events_filter(db_session):
         )
 
     mock_post.assert_not_called()
+
+
+def test_dispatcher_sends_to_web_push_channel(db_session, monkeypatch):
+    monkeypatch.setattr("app.config.settings.VAPID_PRIVATE_KEY", "test-private-key")
+    user = _make_user(db_session)
+    channel = NotificationChannel(
+        user_id=user.id,
+        channel_type=ChannelType.WEB_PUSH,
+        label="my-laptop",
+        config_encrypted={"endpoint": "https://push.example.com/x", "p256dh": "p", "auth": "a"},
+        is_enabled=True,
+    )
+    db_session.add(channel)
+    db_session.commit()
+
+    with patch("app.services.notification.webpush.webpush", return_value=None):
+        handle_event(
+            Event(type="order.created", data={"order_id": 1, "user_id": user.id}), db=db_session
+        )
+
+    log = db_session.query(NotificationLog).first()
+    assert log is not None
+    assert log.status == NotificationStatus.SENT
+    assert log.channel_id == channel.id
 
 
 def test_dispatcher_ignores_events_without_user_id(db_session):

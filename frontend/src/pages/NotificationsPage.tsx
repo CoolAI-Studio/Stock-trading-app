@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { isPushSupported, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
 
 const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', failed: '失敗' }
@@ -183,7 +184,10 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/api/notifications/channels/${channel.id}`),
+    mutationFn: async () => {
+      if (channel.channel_type === 'web_push') await unsubscribeFromPush()
+      return api.delete(`/api/notifications/channels/${channel.id}`)
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notification-channels'] }),
   })
 
@@ -244,7 +248,14 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient()
 
   const createMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (channelType === 'web_push') {
+        const { public_key } = await api.get<{ public_key: string }>(
+          '/api/notifications/push/vapid-public-key',
+        )
+        const config = await subscribeToPush(public_key)
+        return api.post('/api/notifications/channels', { channel_type: channelType, label, config })
+      }
       const config =
         channelType === 'telegram'
           ? { bot_token: botToken, chat_id: chatId }
@@ -257,13 +268,13 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['notification-channels'] })
       onDone()
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : '建立失敗'),
+    onError: (err) => setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : '建立失敗'),
   })
 
   return (
     <div className="space-y-3 rounded border border-slate-800 p-4">
       <div className="flex gap-4">
-        {(['telegram', 'line', 'email'] as const).map((type) => (
+        {(['telegram', 'line', 'email', 'web_push'] as const).map((type) => (
           <label key={type} className="flex items-center gap-1 text-sm">
             <input
               type="radio"
@@ -271,7 +282,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
               checked={channelType === type}
               onChange={() => setChannelType(type)}
             />
-            {type}
+            {type === 'web_push' ? '瀏覽器推播' : type}
           </label>
         ))}
       </div>
@@ -380,10 +391,18 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         </>
       )}
 
+      {channelType === 'web_push' && (
+        <p className="text-sm text-slate-500">
+          {isPushSupported()
+            ? '按下方「建立」後，瀏覽器會詢問是否允許通知——請按允許。即使沒有開著這個網頁，只要瀏覽器（或手機）在背景執行，還是能收到通知。'
+            : '這個瀏覽器不支援推播通知（iOS 需先將本網站加入主畫面才能使用）。'}
+        </p>
+      )}
+
       {error && <p className="text-red-400">{error}</p>}
 
       <button
-        disabled={createMutation.isPending || !label}
+        disabled={createMutation.isPending || !label || (channelType === 'web_push' && !isPushSupported())}
         onClick={() => createMutation.mutate()}
         className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
       >

@@ -25,6 +25,16 @@ class EmailConfig(BaseModel):
     use_tls: bool = True
 
 
+class WebPushConfig(BaseModel):
+    """A browser's PushSubscription, as returned by
+    PushManager.subscribe() -- endpoint plus the two keys needed to encrypt
+    a push payload for that specific browser/device."""
+
+    endpoint: str = Field(min_length=1)
+    p256dh: str = Field(min_length=1)
+    auth: str = Field(min_length=1)
+
+
 class ChannelCreate(BaseModel):
     channel_type: ChannelType
     label: str = Field(min_length=1, max_length=120)

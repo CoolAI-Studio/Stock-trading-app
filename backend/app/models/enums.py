@@ -29,6 +29,7 @@ class ChannelType(StrEnum):
     LINE = "line"
     TELEGRAM = "telegram"
     EMAIL = "email"
+    WEB_PUSH = "web_push"
 
 
 class NotificationStatus(StrEnum):

@@ -4,10 +4,17 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationsPage } from './NotificationsPage'
 import { api } from '../lib/api'
+import * as push from '../lib/push'
 import type { NotificationChannel, NotificationLog } from '../lib/types'
 
 vi.mock('../lib/api', () => ({
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+}))
+
+vi.mock('../lib/push', () => ({
+  isPushSupported: vi.fn(() => true),
+  subscribeToPush: vi.fn(),
+  unsubscribeFromPush: vi.fn(),
 }))
 
 const CHANNEL: NotificationChannel = {
@@ -19,6 +26,17 @@ const CHANNEL: NotificationChannel = {
   last_sent_at: null,
   last_error: null,
   config_preview: 'telegram: bot_token=****abcd, chat_id=999',
+}
+
+const WEB_PUSH_CHANNEL: NotificationChannel = {
+  id: 2,
+  channel_type: 'web_push',
+  label: 'my-laptop',
+  is_enabled: true,
+  subscribed_events: null,
+  last_sent_at: null,
+  last_error: null,
+  config_preview: 'web_push: endpoint=https://push.example.com/x',
 }
 
 const LOG: NotificationLog = {
@@ -134,5 +152,53 @@ describe('NotificationsPage', () => {
 
     expect(await screen.findByText('已送出')).toBeInTheDocument()
     expect(screen.getByText('test')).toBeInTheDocument()
+  })
+
+  it('creates a web push channel via the browser subscribe flow', async () => {
+    vi.mocked(push.subscribeToPush).mockResolvedValue({
+      endpoint: 'https://push.example.com/x',
+      p256dh: 'p',
+      auth: 'a',
+    })
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [CHANNEL] as never
+      if (path === '/api/notifications/logs') return [LOG] as never
+      if (path === '/api/notifications/push/vapid-public-key') return { public_key: 'vapid-key' } as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue(WEB_PUSH_CHANNEL as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByRole('radio', { name: '瀏覽器推播' }))
+    await user.type(screen.getByLabelText('名稱'), 'my-laptop')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() => expect(push.subscribeToPush).toHaveBeenCalledWith('vapid-key'))
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/notifications/channels', {
+        channel_type: 'web_push',
+        label: 'my-laptop',
+        config: { endpoint: 'https://push.example.com/x', p256dh: 'p', auth: 'a' },
+      }),
+    )
+  })
+
+  it('unsubscribes the browser push subscription when deleting a web push channel', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [WEB_PUSH_CHANNEL] as never
+      if (path === '/api/notifications/logs') return [] as never
+      return [] as never
+    })
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('my-laptop')
+    await user.click(screen.getByRole('button', { name: '刪除' }))
+
+    await waitFor(() => expect(push.unsubscribeFromPush).toHaveBeenCalled())
+    expect(api.delete).toHaveBeenCalledWith('/api/notifications/channels/2')
   })
 })

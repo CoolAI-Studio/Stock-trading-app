@@ -112,3 +112,34 @@ def test_test_endpoint_sends_and_logs(auth_client):
 def test_notifications_require_auth(client):
     resp = client.get("/api/notifications/channels")
     assert resp.status_code == 401
+
+
+def test_create_web_push_channel(auth_client):
+    resp = auth_client.post(
+        "/api/notifications/channels",
+        json={
+            "channel_type": "web_push",
+            "label": "my-laptop",
+            "config": {
+                "endpoint": "https://push.example.com/subscription/xyz",
+                "p256dh": "some-p256dh-key",
+                "auth": "some-auth-secret",
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert "some-auth-secret" not in resp.text
+    assert body["config_preview"]
+
+
+def test_vapid_public_key_endpoint(auth_client, monkeypatch):
+    monkeypatch.setattr("app.config.settings.VAPID_PUBLIC_KEY", "test-public-key")
+    resp = auth_client.get("/api/notifications/push/vapid-public-key")
+    assert resp.status_code == 200
+    assert resp.json() == {"public_key": "test-public-key"}
+
+
+def test_vapid_public_key_requires_auth(client):
+    resp = client.get("/api/notifications/push/vapid-public-key")
+    assert resp.status_code == 401

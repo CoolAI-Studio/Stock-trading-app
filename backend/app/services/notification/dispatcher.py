@@ -10,6 +10,7 @@ from app.services.events import Event
 from app.services.notification.email import EmailSender
 from app.services.notification.line import LineSender
 from app.services.notification.telegram import TelegramSender
+from app.services.notification.webpush import WebPushSender
 
 logger = logging.getLogger("app.notifications")
 
@@ -17,6 +18,7 @@ SENDERS = {
     ChannelType.TELEGRAM: TelegramSender(),
     ChannelType.LINE: LineSender(),
     ChannelType.EMAIL: EmailSender(),
+    ChannelType.WEB_PUSH: WebPushSender(),
 }
 
 _DISPATCHED_EVENT_TYPES = {"order.created", "order.updated", "strategy.error"}

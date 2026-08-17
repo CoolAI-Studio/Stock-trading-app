@@ -3,6 +3,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
+from app.config import settings
 from app.db.session import get_db
 from app.models.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
@@ -17,6 +18,7 @@ from app.schemas.notification import (
     LineConfig,
     NotificationLogRead,
     TelegramConfig,
+    WebPushConfig,
 )
 from app.services.notification.dispatcher import SENDERS
 
@@ -26,10 +28,11 @@ _CONFIG_SCHEMAS = {
     ChannelType.TELEGRAM: TelegramConfig,
     ChannelType.LINE: LineConfig,
     ChannelType.EMAIL: EmailConfig,
+    ChannelType.WEB_PUSH: WebPushConfig,
 }
 
 # Keys whose value gets masked in the read-only preview shown to the client.
-_SECRET_KEYS = {"bot_token", "access_token", "password"}
+_SECRET_KEYS = {"bot_token", "access_token", "password", "auth", "p256dh"}
 
 
 def _mask(value: str) -> str:
@@ -174,3 +177,12 @@ def list_logs(
         .limit(limit)
         .all()
     )
+
+
+@router.get("/push/vapid-public-key")
+def get_vapid_public_key(user: User = Depends(get_current_active_user)) -> dict:
+    """The frontend passes this straight to PushManager.subscribe() as
+    applicationServerKey -- public by design, safe to hand to any logged-in
+    user (auth is only required here to avoid an unauthenticated GET, not
+    because the key itself is sensitive)."""
+    return {"public_key": settings.VAPID_PUBLIC_KEY}

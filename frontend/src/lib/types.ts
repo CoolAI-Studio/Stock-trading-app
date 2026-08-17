@@ -2,7 +2,7 @@ export type OrderStatus = 'pending' | 'confirmed' | 'rejected' | 'expired' | 'fa
 export type OrderSide = 'buy' | 'sell'
 export type OrderSource = 'strategy' | 'tradingview' | 'manual'
 export type DataSource = 'yfinance' | 'binance'
-export type ChannelType = 'line' | 'telegram' | 'email'
+export type ChannelType = 'line' | 'telegram' | 'email' | 'web_push'
 
 export interface Order {
   id: number
