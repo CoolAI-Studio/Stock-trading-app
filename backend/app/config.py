@@ -33,6 +33,13 @@ class Settings(BaseSettings):
 
     MARKET_DATA_POLL_INTERVAL_SEC: float = 5.0
 
+    # Wall-clock budget for one strategy on_tick() call. Kept well under
+    # MARKET_DATA_POLL_INTERVAL_SEC so that even several misbehaving strategies
+    # can't push a single poll cycle past its own interval. A real strategy is
+    # arithmetic over a price list -- microseconds -- so 2s only ever fires on
+    # an infinite loop or a hung network call.
+    STRATEGY_TICK_TIMEOUT_SEC: float = 2.0
+
     WS_TICKET_TTL_SECONDS: int = 30
 
     # Closed by default: with registration off, a publicly reachable backend only

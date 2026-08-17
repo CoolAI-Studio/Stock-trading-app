@@ -1,3 +1,4 @@
+import threading
 from datetime import timedelta
 from decimal import Decimal
 
@@ -11,6 +12,7 @@ from app.models.user import User
 from app.services import market_loop
 from app.services.market_data.providers.mock_provider import MockProvider
 from app.services.market_data.service import MarketDataService
+from app.services.strategy_runtime import LoadedStrategy
 
 ALWAYS_BUY_SOURCE = """
 class Strategy:
@@ -105,6 +107,37 @@ def test_loop_survives_a_raising_strategy(db_session):
     assert strategy.last_error
     assert db_session.query(Order).count() == 0
     assert isinstance(events, list)  # tick_once returned normally, did not raise
+
+
+def test_loop_survives_a_hanging_strategy(db_session, monkeypatch):
+    release = threading.Event()
+
+    class _Hanging:
+        name = "hang"
+        symbol = "AAPL"
+
+        def on_tick(self, current_price: float) -> str:
+            release.wait(30)
+            return "BUY"
+
+    user = _make_user(db_session)
+    strategy = _make_strategy(db_session, user, ALWAYS_BUY_SOURCE)
+    hanging = LoadedStrategy(
+        name="hang", symbol="AAPL", instance=_Hanging(), code_hash="x", timeout_sec=0.05
+    )
+    monkeypatch.setattr(market_loop._registry, "get_or_load", lambda *a, **kw: hanging)
+
+    try:
+        market_loop.tick_once(db=db_session, market_data_service=_mock_service())
+    finally:
+        release.set()
+
+    db_session.refresh(strategy)
+    # A hang has to look like any other strategy error, so the existing
+    # consecutive-error deactivation eventually retires it.
+    assert strategy.consecutive_errors == 1
+    assert "timed out" in strategy.last_error.lower()
+    assert db_session.query(Order).count() == 0
 
 
 def test_strategy_auto_deactivates_after_five_consecutive_errors(db_session):
