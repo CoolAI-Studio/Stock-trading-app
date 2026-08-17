@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/positions', label: '部位' },
   { to: '/notifications', label: '通知' },
   { to: '/risk-settings', label: '風險設定' },
+  { to: '/broker-settings', label: '券商設定' },
 ]
 
 export function Layout() {

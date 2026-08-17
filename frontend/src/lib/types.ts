@@ -99,6 +99,20 @@ export interface NotificationLog {
   created_at: string
 }
 
+export interface BrokerCredential {
+  id: number
+  label: string
+  broker_name: string
+  created_at: string
+  config_preview: string
+}
+
+export interface AiAssistResult {
+  ok: boolean
+  reply: string | null
+  error: string | null
+}
+
 export interface WsEvent {
   type: string
   ts: string

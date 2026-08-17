@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routers import (
     auth,
+    broker_credentials,
     market,
     notifications,
     orders,
@@ -22,6 +23,7 @@ api_router.include_router(risk.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(ws_ticket.router)
 api_router.include_router(notifications.router)
+api_router.include_router(broker_credentials.router)
 # app/main.py mounts this under the /api prefix. The health check and the
 # raw /ws WebSocket route are mounted separately at root (see app/main.py)
 # since neither is an /api resource.

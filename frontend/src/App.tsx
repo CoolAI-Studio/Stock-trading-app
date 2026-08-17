@@ -8,6 +8,7 @@ import { OrdersPage } from './pages/OrdersPage'
 import { PositionsPage } from './pages/PositionsPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { RiskSettingsPage } from './pages/RiskSettingsPage'
+import { BrokerSettingsPage } from './pages/BrokerSettingsPage'
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/risk-settings" element={<RiskSettingsPage />} />
+          <Route path="/broker-settings" element={<BrokerSettingsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
