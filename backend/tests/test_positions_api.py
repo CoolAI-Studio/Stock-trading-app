@@ -40,3 +40,27 @@ def test_flatten_position(auth_client):
 def test_positions_require_auth(client):
     resp = client.get("/api/positions")
     assert resp.status_code == 401
+
+
+def test_adjust_rejects_a_negative_quantity(auth_client):
+    """A negative quantity used to be accepted, and the next confirmed buy then
+    silently reset avg_entry_price to 0 -- corrupting the cost basis every
+    later P&L calculation and stop-loss comparison depends on."""
+    resp = auth_client.patch(
+        "/api/positions/AAPL", json={"quantity": "-5", "avg_entry_price": "100"}
+    )
+    assert resp.status_code == 422
+
+
+def test_adjust_rejects_a_negative_avg_entry_price(auth_client):
+    resp = auth_client.patch(
+        "/api/positions/AAPL", json={"quantity": "5", "avg_entry_price": "-100"}
+    )
+    assert resp.status_code == 422
+
+
+def test_adjust_still_accepts_zero_to_flatten(auth_client):
+    resp = auth_client.patch(
+        "/api/positions/AAPL", json={"quantity": "0", "avg_entry_price": "0"}
+    )
+    assert resp.status_code == 200

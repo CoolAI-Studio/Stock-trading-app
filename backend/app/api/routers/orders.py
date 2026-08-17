@@ -95,6 +95,18 @@ def confirm_order(
         )
 
     fill_quantity = payload.quantity or order.quantity
+
+    # Checked up-front, not after the fact: everything below this point mutates
+    # and commits the order, so discovering the position can't take the fill
+    # only once apply_fill runs would leave the order permanently marked
+    # confirmed against a position that never moved.
+    try:
+        portfolio.ensure_fill_applicable(db, order, fill_quantity)
+    except portfolio.InsufficientPositionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
     result = _broker.submit(order, payload.fill_price, fill_quantity)
     if not result.ok:
         order.status = OrderStatus.FAILED

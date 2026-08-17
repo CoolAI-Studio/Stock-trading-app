@@ -118,3 +118,26 @@ def test_cannot_confirm_another_users_order(auth_client, client, monkeypatch):
         headers={"Authorization": f"Bearer {other_token}"},
     )
     assert resp.status_code == 404
+
+
+def test_confirming_a_sell_larger_than_the_position_is_rejected(auth_client):
+    """The order must stay pending: it used to be committed as CONFIRMED first
+    and only then handed to apply_fill, which clamped the excess away -- so the
+    order said one quantity and the position another, permanently."""
+    auth_client.patch("/api/positions/AAPL", json={"quantity": "10", "avg_entry_price": "100"})
+
+    created = auth_client.post(
+        "/api/orders", json={"symbol": "AAPL", "side": "sell", "quantity": "25"}
+    )
+    order_id = created.json()["id"]
+
+    resp = auth_client.post(f"/api/orders/{order_id}/confirm", json={"fill_price": "150"})
+    assert resp.status_code == 422
+    assert "25" in resp.json()["detail"]
+
+    still_pending = auth_client.get(f"/api/orders/{order_id}")
+    assert still_pending.json()["status"] == "pending"
+
+    unchanged = auth_client.get("/api/positions/AAPL")
+    assert unchanged.json()["quantity"] == "10"
+    assert unchanged.json()["realized_pnl"] == "0"
