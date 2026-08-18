@@ -382,16 +382,25 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
       )}
       {createError && <p className="text-red-400">{createError}</p>}
 
+      {/* Both are locked while the AI writes: the answer is about to replace
+          the source box, and 建立 would close the form over the top of an
+          answer the daily quota has already been spent on. */}
       <div className="flex gap-2">
         <button
-          disabled={validateMutation.isPending || !sourceCode}
+          disabled={validateMutation.isPending || generateMutation.isPending || !sourceCode}
           onClick={() => validateMutation.mutate()}
           className="rounded bg-slate-700 px-3 py-1 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
         >
           驗證
         </button>
         <button
-          disabled={createMutation.isPending || !name || !symbol || !sourceCode}
+          disabled={
+            createMutation.isPending ||
+            generateMutation.isPending ||
+            !name ||
+            !symbol ||
+            !sourceCode
+          }
           onClick={() => createMutation.mutate()}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >

@@ -193,6 +193,132 @@ def test_requested_symbol_is_passed_to_the_model(auth_client):
     assert "2330.TW" in provider.calls[0]["message"]
 
 
+# A crossover strategy rather than the one-liner above: the end-to-end test
+# has to see BUY and SELL actually come out, not just "no exception".
+CROSSOVER_SOURCE = '''class Strategy:
+    def __init__(self):
+        self.name = "MA5_MA20_CROSS"
+        self.symbol = "2330.TW"
+        self.prices = []
+        self.holding = False
+
+    def on_tick(self, current_price: float) -> str:
+        # 累積價格，均線要自己算，沙箱裡沒有 pandas
+        self.prices.append(current_price)
+        if len(self.prices) < 20:
+            return "HOLD"
+        ma5 = sum(self.prices[-5:]) / 5
+        ma20 = sum(self.prices[-20:]) / 20
+        if ma5 > ma20 and not self.holding:
+            self.holding = True
+            return "BUY"
+        if ma5 < ma20 and self.holding:
+            self.holding = False
+            return "SELL"
+        return "HOLD"
+'''.strip()
+
+
+def test_an_apology_with_no_code_does_not_spend_the_repair_round(auth_client):
+    """A refusal is not something the repair round can fix, so spending a
+    round trip on it burns the daily allowance for nothing -- and handing the
+    apology to the validator answers the owner with a Python syntax error
+    about their own Chinese sentence."""
+    provider = FakeProvider(
+        AIResult(ok=True, reply="抱歉，我無法根據這個描述產生策略。可以再說得具體一點嗎？")
+    )
+
+    resp = _generate(auth_client, provider)
+
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["source_code"] is None
+    assert "沒有回傳任何程式碼" in body["error"]
+    assert len(provider.calls) == 1
+
+
+def test_the_strategy_is_picked_out_of_a_reply_with_several_fenced_blocks(auth_client):
+    """Models like to illustrate the rule in one block before writing the
+    strategy in the next. Taking the first block hands pseudo-code to the
+    validator and spends the repair round undoing the mistake."""
+    reply = (
+        "先說明判斷條件：\n\n```text\nMA5 > MA20 -> 買進\n```\n\n"
+        f"完整程式碼如下：\n\n```python\n{GENERATED_SOURCE}\n```\n\n有問題再問我。"
+    )
+    provider = FakeProvider(AIResult(ok=True, reply=reply))
+
+    resp = _generate(auth_client, provider)
+
+    body = resp.json()
+    assert body["ok"] is True, body
+    assert body["source_code"] == GENERATED_SOURCE
+    assert len(provider.calls) == 1
+
+
+def test_a_lead_in_sentence_before_unfenced_code_is_dropped(auth_client):
+    """The contract asks for bare source, and a model that obeys it still
+    tends to greet you first."""
+    provider = FakeProvider(AIResult(ok=True, reply=f"好的，這是你要的策略：\n{GENERATED_SOURCE}"))
+
+    resp = _generate(auth_client, provider)
+
+    body = resp.json()
+    assert body["ok"] is True, body
+    assert body["source_code"] == GENERATED_SOURCE
+    assert len(provider.calls) == 1
+
+
+def test_the_prompt_never_names_an_allowed_module_as_unavailable(auth_client, monkeypatch):
+    """The counter-examples earn their place -- they are what a model reaches
+    for -- but they are hand-written, so they get filtered against the live
+    allowlist. Otherwise allowing `time` leaves the prompt still forbidding it
+    and the model obeys the contradiction it was given last."""
+    monkeypatch.setattr(strategy_runtime, "_ALLOWED_MODULES", frozenset({"math", "time"}))
+    provider = FakeProvider(AIResult(ok=True, reply=GENERATED_SOURCE))
+
+    _generate(auth_client, provider)
+
+    system_prompt = provider.calls[0]["system"]
+    clause = system_prompt.partition("Importing anything else")[2].partition("makes the")[0]
+    assert "pandas" in clause
+    assert "time" not in clause
+
+
+def test_a_realistic_reply_yields_code_that_saves_and_ticks(auth_client):
+    """End to end on the shape a real model actually returns -- prose, a
+    throwaway block, the real block, more prose. What comes out has to clear
+    POST /strategies (the same validation, no shortcut) and answer
+    BUY/SELL/HOLD across a full price series, not merely compile."""
+    reply = (
+        "好的！我幫你寫了一個 5 日與 20 日均線的黃金交叉策略。\n\n"
+        "判斷條件：\n\n```text\nMA5 > MA20 且尚未持有 -> 買進\n```\n\n"
+        f"完整程式碼：\n\n```python\n{CROSSOVER_SOURCE}\n```\n\n記得先自己讀過再啟用！"
+    )
+    provider = FakeProvider(AIResult(ok=True, reply=reply))
+
+    resp = _generate(auth_client, provider)
+    body = resp.json()
+    assert body["ok"] is True, body
+    assert body["source_code"] == CROSSOVER_SOURCE
+    assert body["detected_name"] == "MA5_MA20_CROSS"
+    assert len(provider.calls) == 1
+
+    created = auth_client.post(
+        "/api/strategies",
+        json={"name": "ma-cross", "symbol": "2330.TW", "source_code": body["source_code"]},
+    )
+    assert created.status_code == 201, created.text
+
+    loaded = strategy_runtime.compile_strategy(body["source_code"])
+    rising = [100.0 + i for i in range(30)]
+    falling = [130.0 - 2 * i for i in range(30)]
+    signals = [loaded.on_tick(price) for price in rising + falling]
+
+    assert set(signals) <= {"BUY", "SELL", "HOLD"}
+    assert "BUY" in signals
+    assert "SELL" in signals
+
+
 def test_generate_requires_auth(client):
     resp = client.post("/api/strategies/generate", json={"description": "均線策略"})
     assert resp.status_code == 401

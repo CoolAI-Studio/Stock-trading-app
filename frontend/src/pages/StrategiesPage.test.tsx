@@ -245,6 +245,26 @@ describe('StrategiesPage', () => {
     expect(screen.queryByRole('button', { name: 'AI 產生策略' })).not.toBeInTheDocument()
   })
 
+  it('locks 驗證 and 建立 while the AI is still writing', async () => {
+    // 建立 closes the form on success, so firing it mid-generation throws
+    // away an answer the daily quota has already been spent on.
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(api.post).mockReturnValue(new Promise(() => {}) as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), '我的策略')
+    await user.type(screen.getByLabelText('股票代號'), '2330.TW')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    await screen.findByRole('button', { name: '產生中…' })
+    expect(screen.getByRole('button', { name: '建立' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '驗證' })).toBeDisabled()
+  })
+
   it('does not overwrite existing source code when the confirmation is cancelled', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     const user = userEvent.setup()

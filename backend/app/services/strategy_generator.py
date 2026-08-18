@@ -41,14 +41,21 @@ Hard rules:
   __init__; they are read back to label the strategy in the UI.
 - The code runs in a restricted sandbox: no network access, no filesystem
   access. Compute every indicator from the prices you accumulated yourself.
-- The ONLY importable modules are: {modules}. Importing anything else --
-  numpy, pandas, requests, httpx, yfinance, talib, os, sys, time -- makes the
-  strategy impossible to save.
+- The ONLY importable modules are: {modules}. Importing anything else -- for
+  example {unavailable} -- makes the strategy impossible to save.
 - These names are rejected outright and must not appear anywhere in the code:
   {forbidden}. Neither may attribute access to any dunder (__class__,
   __dict__, and so on).
 - The user reads Traditional Chinese, so write any comments in Traditional
   Chinese."""
+
+# Named rather than left to "anything else" because these are what a model
+# reaches for unprompted. Filtered against the live allowlist before it goes
+# into the prompt: widening the sandbox to include one of them later must not
+# leave the same prompt still forbidding it.
+_COMMON_TEMPTATIONS = (
+    "numpy", "pandas", "requests", "httpx", "yfinance", "talib", "os", "sys", "time",
+)  # fmt: skip
 
 # Closed fence first: `.*?` stops at the closing ```, whereas the open-fence
 # pattern below would swallow it and everything after. An unterminated fence
@@ -57,10 +64,16 @@ Hard rules:
 _CLOSED_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 _OPEN_FENCE_RE = re.compile(r"```[^\n]*\n(.*)", re.DOTALL)
 
+# A statement at column 0 -- where the contract's `class Strategy` has to
+# begin. This is what tells code apart from chat about code.
+_CODE_START_RE = re.compile(r"^(?:class|def|import|from)\b", re.MULTILINE)
+
 
 def build_system_prompt() -> str:
+    allowed = allowed_modules()
     return _CONTRACT.format(
-        modules=", ".join(allowed_modules()),
+        modules=", ".join(allowed),
+        unavailable=", ".join(m for m in _COMMON_TEMPTATIONS if m not in allowed),
         forbidden=", ".join(forbidden_names()),
     )
 
@@ -90,8 +103,26 @@ def build_repair_prompt(request_prompt: str, source_code: str, error: str) -> st
 
 def extract_code(reply: str | None) -> str:
     """Models are told to emit bare source and routinely emit a fenced block
-    with a sentence of chat on either side anyway."""
+    with a sentence of chat on either side anyway -- sometimes two blocks,
+    sometimes a greeting and no fence, sometimes an apology and no code.
+
+    Guessing wrong costs more than tidiness: prose handed to the validator
+    comes back as a syntax error, which spends the one repair round -- and its
+    slice of the daily allowance -- on an answer that never contained a
+    strategy, then shows the owner a Python error about a Chinese sentence.
+    """
     if not reply:
         return ""
-    match = _CLOSED_FENCE_RE.search(reply) or _OPEN_FENCE_RE.search(reply)
-    return (match.group(1) if match else reply).strip()
+
+    blocks = _CLOSED_FENCE_RE.findall(reply)
+    if blocks:
+        # Two blocks means the model illustrated the rule before writing the
+        # strategy, so the first block is the one to skip, not the one to take.
+        return next((b for b in blocks if _CODE_START_RE.search(b)), blocks[0]).strip()
+
+    open_fence = _OPEN_FENCE_RE.search(reply)
+    if open_fence:
+        return open_fence.group(1).strip()
+
+    start = _CODE_START_RE.search(reply)
+    return reply[start.start() :].strip() if start else ""
