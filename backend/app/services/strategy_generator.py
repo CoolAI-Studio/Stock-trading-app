@@ -8,6 +8,7 @@ digging the code back out of whatever the model wrapped it in.
 
 import re
 
+from app.services.indicators import INDICATOR_CATEGORIES, catalogue
 from app.services.strategy_runtime import allowed_modules, forbidden_names
 
 # The sandbox rules are interpolated, never spelled out: see
@@ -40,14 +41,33 @@ Hard rules:
 - self.name and self.symbol must be plain string literals assigned in
   __init__; they are read back to label the strategy in the UI.
 - The code runs in a restricted sandbox: no network access, no filesystem
-  access. Compute every indicator from the prices you accumulated yourself.
+  access.
+- A technical-indicator library is already there, as the global name
+  `indicators`. It needs no import and CANNOT be imported. USE IT, and DO NOT
+  RE-IMPLEMENT anything in the list below: a hand-written RSI, MACD or ATR is
+  very easily subtly wrong -- Wilder smoothing mistaken for a plain EMA, the
+  wrong seed value, a signal line off by one -- and wrong code that returns
+  plausible numbers is the worst outcome here, because it gets traded on.
+- Every indicator takes plain lists of floats that YOU accumulate on `self`,
+  oldest candle first, and returns a list of the SAME length with `None` in
+  every position that has not warmed up yet. So
+  `indicators.rsi(self.closes, 14)[-1]` is the RSI now and `[-2]` is the
+  previous one -- always check for `None` before comparing.
+- Trim those lists to the longest window the strategy actually needs (a few
+  times the largest period is plenty). Every indicator call is linear in the
+  list it is given, and the strategy is re-run over hundreds of candles when
+  it starts up, so an unbounded list makes start-up slower and slower for no
+  gain.
 - The ONLY importable modules are: {modules}. Importing anything else -- for
   example {unavailable} -- makes the strategy impossible to save.
 - These names are rejected outright and must not appear anywhere in the code:
   {forbidden}. Neither may attribute access to any dunder (__class__,
   __dict__, and so on).
 - The user reads Traditional Chinese, so write any comments in Traditional
-  Chinese."""
+  Chinese.
+
+Available indicators ({indicator_count}), called as `indicators.<name>(...)`:
+{indicator_reference}"""
 
 # Named rather than left to "anything else" because these are what a model
 # reaches for unprompted. Filtered against the live allowlist before it goes
@@ -69,12 +89,32 @@ _OPEN_FENCE_RE = re.compile(r"```[^\n]*\n(.*)", re.DOTALL)
 _CODE_START_RE = re.compile(r"^(?:class|def|import|from)\b", re.MULTILINE)
 
 
+def build_indicator_reference() -> str:
+    """The indicator catalogue, rendered for the system prompt.
+
+    Read from the registry for the same reason allowed_modules() is: a list
+    retyped into the prompt goes stale the moment an indicator is added, and
+    the model then writes code against one that is not there -- or, far worse,
+    quietly hand-rolls one that is.
+    """
+    lines: list[str] = []
+    current: str | None = None
+    for spec in catalogue():
+        if spec.category.value != current:
+            current = spec.category.value
+            lines.append(f"[{current}/{INDICATOR_CATEGORIES[spec.category]}]")
+        lines.append(f"  {spec.signature()} -> {spec.returns()}  # {spec.title}")
+    return "\n".join(lines)
+
+
 def build_system_prompt() -> str:
     allowed = allowed_modules()
     return _CONTRACT.format(
         modules=", ".join(allowed),
         unavailable=", ".join(m for m in _COMMON_TEMPTATIONS if m not in allowed),
         forbidden=", ".join(forbidden_names()),
+        indicator_count=len(catalogue()),
+        indicator_reference=build_indicator_reference(),
     )
 
 

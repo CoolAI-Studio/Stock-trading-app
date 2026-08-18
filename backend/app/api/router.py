@@ -4,6 +4,7 @@ from app.api.routers import (
     alerts,
     auth,
     broker_credentials,
+    indicators,
     market,
     notifications,
     orders,
@@ -18,6 +19,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(alerts.router)
 api_router.include_router(strategies.router)
+api_router.include_router(indicators.router)
 api_router.include_router(market.router)
 api_router.include_router(orders.router)
 api_router.include_router(positions.router)

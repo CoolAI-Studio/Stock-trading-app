@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.config import settings
+from app.services.indicators import indicator_namespace
 from app.services.market_data.base import DEFAULT_TIMEFRAME, Bar, Timeframe
 
 
@@ -141,7 +142,17 @@ def _build_sandbox_namespace() -> dict:
     # resolved to builtins.__name__, so both have to be supplied here.
     safe_builtins["__build_class__"] = builtins.__build_class__
     safe_builtins["__import__"] = _guarded_import
-    return {"__builtins__": safe_builtins, "__name__": "<strategy>"}
+    return {
+        "__builtins__": safe_builtins,
+        "__name__": "<strategy>",
+        # A plain global rather than an entry in _ALLOWED_MODULES: `indicators`
+        # is not a real importable module, so allowing the import would have
+        # meant teaching _guarded_import to resolve a name that does not exist
+        # on sys.path. Injecting it leaves the import allowlist exactly as
+        # narrow as it was. See app/services/indicators/__init__.py for what
+        # the object does and does not expose.
+        "indicators": indicator_namespace(),
+    }
 
 
 def _reject_unsafe_source(tree: ast.AST) -> None:
