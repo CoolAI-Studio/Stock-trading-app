@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import timedelta
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -15,10 +16,10 @@ from app.models.strategy import Strategy
 from app.models.user import User
 from app.services import alerts, risk, worker_health
 from app.services.events import Event, bus
-from app.services.market_data.base import Quote
+from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
 from app.services.signals import SignalIn, create_pending_order
-from app.services.strategy_runtime import StrategyRegistry
+from app.services.strategy_runtime import LoadedStrategy, StrategyRegistry
 
 logger = logging.getLogger("app.market_loop")
 
@@ -34,69 +35,150 @@ _MAX_CONSECUTIVE_ERRORS = 5
 # fast-follow, not required for the core signal pipeline this phase verifies.
 
 
-def _run_strategy(db: Session, strategy: Strategy, quote: Quote, events: list[Event]) -> None:
+def _record_strategy_error(
+    db: Session, strategy: Strategy, exc: Exception, events: list[Event]
+) -> None:
+    strategy.consecutive_errors += 1
+    strategy.last_error = str(exc)
+    strategy.last_run_at = utcnow()
+    if strategy.consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+        strategy.is_active = False
+        error_data = {
+            "strategy_id": strategy.id,
+            "error": str(exc),
+            "user_id": strategy.user_id,
+        }
+        events.append(Event(type="strategy.error", data=error_data))
+    db.commit()
+
+
+def _run_tick_strategy(
+    db: Session, strategy: Strategy, loaded: LoadedStrategy, quote: Quote, events: list[Event]
+) -> None:
     try:
-        loaded = _registry.get_or_load(strategy.id, strategy.source_code)
         signal_str = loaded.on_tick(float(quote.price))
     except Exception as exc:
-        strategy.consecutive_errors += 1
-        strategy.last_error = str(exc)
-        strategy.last_run_at = utcnow()
-        if strategy.consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
-            strategy.is_active = False
-            error_data = {
-                "strategy_id": strategy.id,
-                "error": str(exc),
-                "user_id": strategy.user_id,
-            }
-            events.append(Event(type="strategy.error", data=error_data))
-        db.commit()
+        _record_strategy_error(db, strategy, exc, events)
         return
 
     strategy.last_run_at = utcnow()
     strategy.consecutive_errors = 0
-
-    if signal_str in ("BUY", "SELL"):
-        side = OrderSide.BUY if signal_str == "BUY" else OrderSide.SELL
-        if strategy.alert_only:
-            _emit_alert_only_signal(db, strategy, side, quote, signal_str, events)
-            db.commit()
-            return
-
-        user = db.get(User, strategy.user_id)
-        result = create_pending_order(
-            db,
-            user,
-            SignalIn(
-                symbol=strategy.symbol,
-                side=side,
-                source=OrderSource.STRATEGY,
-                quantity=strategy.default_quantity,
-                signal_price=quote.price,
-                strategy_id=strategy.id,
-            ),
-        )
-        if result.created:
-            strategy.last_signal = signal_str
-            strategy.last_signal_at = utcnow()
-            order_data = {"order_id": result.order.id, "user_id": strategy.user_id}
-            events.append(Event(type="order.created", data=order_data))
-
+    _apply_signal(db, strategy, signal_str, quote.price, events)
     db.commit()
+
+
+def _effective_warmup(strategy: Strategy, loaded: LoadedStrategy) -> int:
+    """How many closed candles must exist before this strategy may signal.
+
+    The number is a property of the indicator, which lives in the source, so
+    a `self.warmup_bars` declaration wins outright; the stored
+    Strategy.warmup_bars column is the fallback for source that says nothing.
+    Deliberately not max() of the two: the stored default of 30 is a generic
+    number nobody chose, and holding a strategy that needs 5 weekly candles
+    back for 30 weeks because of it would be a bug wearing a safety jacket.
+    """
+    return loaded.warmup_bars if loaded.warmup_bars is not None else strategy.warmup_bars
+
+
+def _run_bar_strategy(
+    db: Session, strategy: Strategy, loaded: LoadedStrategy, bars: list[Bar], events: list[Event]
+) -> None:
+    """Feeds closed candles to on_bar: at most one call per candle, and never
+    for a candle the strategy has already been shown."""
+    strategy.last_run_at = utcnow()
+
+    warmup = _effective_warmup(strategy, loaded)
+    if len(bars) < warmup:
+        # An indicator handed 3 of the 35 candles it needs still returns a
+        # number, and that number is garbage. Say so where the owner can read
+        # it, and leave consecutive_errors alone: waiting for history is not
+        # a fault, and must never retire the strategy.
+        strategy.last_error = (
+            f"warming up: {len(bars)}/{warmup} closed {loaded.timeframe.value} candles "
+            "available so far -- no signals until then"
+        )
+        db.commit()
+        return
+
+    try:
+        if loaded.last_bar_ts is None:
+            # Every candle in hand closed before this instance existed, so
+            # replay fills its memory and its signals are thrown away: a BUY
+            # from three weeks ago is an observation, not an instruction.
+            loaded.warm_up(bars)
+            loaded.last_bar_ts = bars[-1].timestamp
+            signal_bar, signal_str = bars[-1], "HOLD"
+        else:
+            new_bars = [bar for bar in bars if bar.timestamp > loaded.last_bar_ts]
+            if not new_bars:
+                db.commit()  # mid-candle poll: nothing has closed since last time
+                return
+            # Catch-up after an outage: the older candles still have to reach
+            # the strategy so its state is right, but only the newest one can
+            # justify an order. Acting on the rest would place trades now for
+            # reasons that expired hours ago.
+            if len(new_bars) > 1:
+                loaded.warm_up(new_bars[:-1])
+            signal_bar = new_bars[-1]
+            signal_str = loaded.on_bar(signal_bar)
+            loaded.last_bar_ts = signal_bar.timestamp
+    except Exception as exc:
+        _record_strategy_error(db, strategy, exc, events)
+        return
+
+    strategy.consecutive_errors = 0
+    # The warm-up notice above is written here, so it is taken back here too.
+    strategy.last_error = None
+    # The candle's own close, not the live quote: the signal is a statement
+    # about that candle, and pricing it off a tick minutes later would record
+    # a reason and a price that never met.
+    _apply_signal(db, strategy, signal_str, Decimal(str(signal_bar.close)), events)
+    db.commit()
+
+
+def _apply_signal(
+    db: Session, strategy: Strategy, signal_str: str, price: Decimal, events: list[Event]
+) -> None:
+    if signal_str not in ("BUY", "SELL"):
+        return
+
+    side = OrderSide.BUY if signal_str == "BUY" else OrderSide.SELL
+    if strategy.alert_only:
+        _emit_alert_only_signal(db, strategy, side, price, signal_str, events)
+        return
+
+    user = db.get(User, strategy.user_id)
+    result = create_pending_order(
+        db,
+        user,
+        SignalIn(
+            symbol=strategy.symbol,
+            side=side,
+            source=OrderSource.STRATEGY,
+            quantity=strategy.default_quantity,
+            signal_price=price,
+            strategy_id=strategy.id,
+        ),
+    )
+    if result.created:
+        strategy.last_signal = signal_str
+        strategy.last_signal_at = utcnow()
+        order_data = {"order_id": result.order.id, "user_id": strategy.user_id}
+        events.append(Event(type="order.created", data=order_data))
 
 
 def _emit_alert_only_signal(
     db: Session,
     strategy: Strategy,
     side: OrderSide,
-    quote: Quote,
+    price: Decimal,
     signal_str: str,
     events: list[Event],
 ) -> None:
     """Watch-only path: no create_pending_order call at all, so none of the
     order-side gates (dedupe, cooldown, position/notional limits) apply --
     nothing here can move money."""
-    event = alerts.emit_alert(db, strategy, side, quote.price)
+    event = alerts.emit_alert(db, strategy, side, price)
     if event is None:
         return
     # Only stamped when the alert actually went out, matching the order path
@@ -174,8 +256,24 @@ def tick_once(
         strategies = session.query(Strategy).filter(Strategy.is_active.is_(True)).all()
         positions = session.query(Position).filter(Position.quantity > 0).all()
 
+        # Compiled up front rather than at call time, because the entry point
+        # a strategy turned out to use decides what data it needs fetched:
+        # a price tick, or a candle series at its own timeframe.
+        loaded_by_id: dict[int, LoadedStrategy] = {}
+        for strategy in strategies:
+            try:
+                loaded_by_id[strategy.id] = _registry.get_or_load(
+                    strategy.id, strategy.source_code
+                )
+            except Exception as exc:
+                _record_strategy_error(session, strategy, exc, events)
+
         symbols_by_source: dict[DataSource, set[str]] = {}
         for strat in strategies:
+            # Quotes are fetched for candle strategies too, even though they
+            # never read one: the dashboard's price panel is driven off
+            # MarketQuote rows, and a symbol would otherwise go blank the
+            # moment its strategy switched to on_bar.
             symbols_by_source.setdefault(strat.data_source, set()).add(strat.symbol)
         for pos in positions:
             # Positions don't record their own data_source; default to
@@ -191,10 +289,30 @@ def tick_once(
             if fetched:
                 events.append(Event(type="quote.update", data={"symbols": sorted(fetched)}))
 
+        # One fetch per distinct symbol+timeframe, shared by every strategy
+        # asking for it -- the history cache bounds this further still.
+        bars_by_key: dict[tuple[DataSource, str, Timeframe], list[Bar]] = {}
         for strategy in strategies:
+            loaded = loaded_by_id.get(strategy.id)
+            if loaded is None or loaded.entry_point != "on_bar":
+                continue
+            key = (strategy.data_source, strategy.symbol, loaded.timeframe)
+            if key not in bars_by_key:
+                bars_by_key[key] = service.get_bars(
+                    strategy.symbol, loaded.timeframe, strategy.data_source
+                )
+
+        for strategy in strategies:
+            loaded = loaded_by_id.get(strategy.id)
+            if loaded is None:
+                continue  # failed to compile; already recorded above
+            if loaded.entry_point == "on_bar":
+                key = (strategy.data_source, strategy.symbol, loaded.timeframe)
+                _run_bar_strategy(session, strategy, loaded, bars_by_key.get(key, []), events)
+                continue
             quote = quotes.get(strategy.symbol)
             if quote is not None:
-                _run_strategy(session, strategy, quote, events)
+                _run_tick_strategy(session, strategy, loaded, quote, events)
 
         for position in positions:
             quote = quotes.get(position.symbol)

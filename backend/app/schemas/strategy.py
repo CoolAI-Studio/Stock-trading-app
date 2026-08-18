@@ -66,6 +66,13 @@ class StrategyValidateResult(BaseModel):
     error: str | None = None
     detected_name: str | None = None
     detected_symbol: str | None = None
+    # Which entry point the source turned out to use, "on_tick" or "on_bar".
+    # Reported because the two read almost alike, and a strategy that quietly
+    # got the wrong one looks exactly like a strategy that works.
+    entry_point: str | None = None
+    # The candle size an on_bar strategy declared; None for on_tick, which
+    # has no candles to declare.
+    timeframe: str | None = None
     sample_signals: list[str] | None = None
 
 

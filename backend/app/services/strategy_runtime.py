@@ -2,9 +2,12 @@ import ast
 import builtins
 import hashlib
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.config import settings
+from app.services.market_data.base import DEFAULT_TIMEFRAME, Bar, Timeframe
 
 
 class StrategyValidationError(Exception):
@@ -185,12 +188,49 @@ class LoadedStrategy:
     # None means "resolve settings at call time", which also lets a test
     # monkeypatch the setting on an already-cached strategy.
     timeout_sec: float | None = None
+    # "on_tick" or "on_bar" -- which of the two shapes this source turned out
+    # to be. Every caller that has to treat them differently reads this
+    # rather than sniffing the instance again.
+    entry_point: str = "on_tick"
+    # Only meaningful for an on_bar strategy; kept a real Timeframe for a
+    # tick strategy too so nothing downstream has to handle None.
+    timeframe: Timeframe = DEFAULT_TIMEFRAME
+    # None means the source did not declare one, so the stored per-strategy
+    # setting decides. See _effective_warmup() in market_loop.
+    warmup_bars: int | None = None
+    # Newest candle this instance has already been shown. Lives here, beside
+    # the instance whose state it describes, so it is dropped the moment the
+    # source changes and the strategy has to warm up again from scratch.
+    last_bar_ts: datetime | None = field(default=None, compare=False)
     _stuck_thread: threading.Thread | None = field(default=None, repr=False, compare=False)
 
     def on_tick(self, price: float) -> str:
-        """Runs the user's on_tick under a wall-clock deadline.
+        return self._guarded(lambda: self.instance.on_tick(price), "on_tick")
 
-        HONEST TRADEOFF: Python cannot kill a thread, so an abandoned on_tick
+    def on_bar(self, bar: Bar) -> str:
+        return self._guarded(lambda: self.instance.on_bar(bar), "on_bar")
+
+    def warm_up(self, bars: list[Bar]) -> None:
+        """Replay closed candles to fill the strategy's own memory, throwing
+        every signal away.
+
+        Those candles closed before this instance existed, so a BUY they
+        produce is an observation about the past, not an instruction for now.
+        The whole replay runs inside ONE guarded call rather than one per
+        candle: three hundred separate threads would cost more than the
+        arithmetic they guard, and the deadline still catches a strategy that
+        never returns."""
+
+        def _replay() -> None:
+            for bar in bars:
+                self.instance.on_bar(bar)
+
+        self._guarded(_replay, "warm_up")
+
+    def _guarded(self, work: Callable[[], object], label: str) -> object:
+        """Runs user code under a wall-clock deadline.
+
+        HONEST TRADEOFF: Python cannot kill a thread, so an abandoned call
         keeps running (burning a core on `while True`, or blocked on a socket)
         until the process restarts. What this buys is that the *market loop*
         gets its worker thread back: quotes keep updating and stop-loss /
@@ -214,7 +254,7 @@ class LoadedStrategy:
 
         if self._stuck_thread is not None and self._stuck_thread.is_alive():
             raise StrategyTimeoutError(
-                f"Previous on_tick() call timed out after {timeout}s and is still running; "
+                f"Previous {label}() call timed out after {timeout}s and is still running; "
                 "skipping this tick."
             )
 
@@ -222,7 +262,7 @@ class LoadedStrategy:
 
         def _run() -> None:
             try:
-                outcome["value"] = self.instance.on_tick(price)
+                outcome["value"] = work()
             except Exception as exc:
                 outcome["error"] = exc
 
@@ -232,15 +272,15 @@ class LoadedStrategy:
 
         if worker.is_alive():
             self._stuck_thread = worker
-            raise StrategyTimeoutError(f"on_tick() timed out after {timeout}s.")
+            raise StrategyTimeoutError(f"{label}() timed out after {timeout}s.")
 
         self._stuck_thread = None
         if "error" in outcome:
             raise outcome["error"]
         if "value" not in outcome:
-            # Only reachable if on_tick raised a BaseException (SystemExit,
+            # Only reachable if the strategy raised a BaseException (SystemExit,
             # KeyboardInterrupt) -- the thread died without recording anything.
-            raise StrategyValidationError("on_tick() exited without returning a signal.")
+            raise StrategyValidationError(f"{label}() exited without completing.")
         return outcome["value"]
 
 
@@ -248,13 +288,65 @@ def code_hash(source_code: str) -> str:
     return hashlib.sha256(source_code.encode("utf-8")).hexdigest()
 
 
+def _detect_entry_point(instance: object) -> str:
+    """Which of the two shapes this strategy is written in.
+
+    Defining both is rejected rather than resolved by precedence: whichever
+    one the runtime picked, the other half of the code would look live and be
+    dead -- source that reads correct while doing nothing is the exact
+    failure this entry point was added to remove."""
+    has_tick = callable(getattr(instance, "on_tick", None))
+    has_bar = callable(getattr(instance, "on_bar", None))
+
+    if has_tick and has_bar:
+        raise StrategyValidationError(
+            "Strategy defines both on_tick and on_bar -- pick one. on_tick(self, "
+            "current_price) runs on every price update; on_bar(self, bar) runs once per "
+            "closed candle of self.timeframe."
+        )
+    if has_tick:
+        return "on_tick"
+    if has_bar:
+        return "on_bar"
+    raise StrategyValidationError(
+        "Strategy must define on_tick(self, current_price) -- called on every price "
+        "update -- or on_bar(self, bar), called once per closed candle."
+    )
+
+
+def _read_timeframe(instance: object) -> Timeframe:
+    declared = getattr(instance, "timeframe", None)
+    if declared is None:
+        return DEFAULT_TIMEFRAME
+    try:
+        return Timeframe(declared)
+    except ValueError as exc:
+        allowed = ", ".join(tf.value for tf in Timeframe)
+        raise StrategyValidationError(
+            f"self.timeframe = {declared!r} is not a candle size this runtime can fetch. "
+            f"Use one of: {allowed}."
+        ) from exc
+
+
+def _read_warmup_bars(instance: object) -> int | None:
+    declared = getattr(instance, "warmup_bars", None)
+    if declared is None:
+        return None
+    if not isinstance(declared, int) or isinstance(declared, bool) or declared < 0:
+        raise StrategyValidationError(
+            f"self.warmup_bars = {declared!r} must be a non-negative whole number of candles."
+        )
+    return declared
+
+
 def compile_strategy(source_code: str, timeout_sec: float | None = None) -> LoadedStrategy:
     """Compiles user-authored strategy source into a live `LoadedStrategy`.
 
-    Expects the legacy `class Strategy: def __init__(self): self.name=...;
-    self.symbol=...` / `def on_tick(self, current_price: float) -> str`
-    shape -- this is the interface the user already writes strategies in and
-    it's being preserved as-is."""
+    Expects `class Strategy: def __init__(self): self.name=...;
+    self.symbol=...` plus exactly one entry point: the legacy
+    `def on_tick(self, current_price: float) -> str`, unchanged and still the
+    default, or `def on_bar(self, bar) -> str` for a strategy that reasons in
+    candles of `self.timeframe`."""
     try:
         tree = ast.parse(source_code, "<strategy>", "exec")
     except SyntaxError as exc:
@@ -279,11 +371,9 @@ def compile_strategy(source_code: str, timeout_sec: float | None = None) -> Load
     except Exception as exc:
         raise StrategyValidationError(f"Strategy() failed to instantiate: {exc}") from exc
 
-    for attr in ("name", "symbol", "on_tick"):
+    for attr in ("name", "symbol"):
         if not hasattr(instance, attr):
             raise StrategyValidationError(f"Strategy instance is missing required '{attr}'.")
-    if not callable(instance.on_tick):
-        raise StrategyValidationError("Strategy.on_tick must be callable.")
 
     return LoadedStrategy(
         name=instance.name,
@@ -291,6 +381,9 @@ def compile_strategy(source_code: str, timeout_sec: float | None = None) -> Load
         instance=instance,
         code_hash=code_hash(source_code),
         timeout_sec=timeout_sec,
+        entry_point=_detect_entry_point(instance),
+        timeframe=_read_timeframe(instance),
+        warmup_bars=_read_warmup_bars(instance),
     )
 
 

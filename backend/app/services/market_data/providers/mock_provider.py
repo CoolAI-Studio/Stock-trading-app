@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.models.enums import DataSource
-from app.services.market_data.base import Quote
+from app.services.market_data.base import Bar, Quote, Timeframe, bars_from_closes
 
 
 class MockProvider:
@@ -33,3 +33,11 @@ class MockProvider:
                 quote_time=now,
             )
         return quotes
+
+    def get_bars(self, symbol: str, timeframe: Timeframe, limit: int) -> list[Bar]:
+        """Unlike the quote walk above this is deterministic: an indicator
+        replayed over it gives the same answer twice, which is what makes it
+        usable in a test."""
+        base = self._prices.setdefault(symbol, 100.0)
+        closes = [round(base + (i % 7) - 3, 4) for i in range(limit)]
+        return bars_from_closes(symbol, timeframe, closes)

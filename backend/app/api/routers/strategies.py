@@ -20,6 +20,7 @@ from app.schemas.strategy import (
     StrategyValidateResult,
 )
 from app.services.ai_provider import get_ai_provider
+from app.services.market_data.base import bars_from_closes
 from app.services.strategy_generator import (
     build_repair_prompt,
     build_request_prompt,
@@ -45,23 +46,32 @@ def _validate(source_code: str, sample_prices: list[float] | None = None) -> Str
     except StrategyValidationError as exc:
         return StrategyValidateResult(ok=False, error=str(exc))
 
-    prices = sample_prices or _DEFAULT_SAMPLE_PRICES
+    detected = {
+        "detected_name": loaded.name,
+        "detected_symbol": loaded.symbol,
+        "entry_point": loaded.entry_point,
+        # Left out for a tick strategy: it has no candles, and reporting the
+        # default would read as a choice the code never made.
+        "timeframe": loaded.timeframe.value if loaded.entry_point == "on_bar" else None,
+    }
+
+    prices = [float(p) for p in (sample_prices or _DEFAULT_SAMPLE_PRICES)]
     try:
-        signals = [loaded.on_tick(float(p)) for p in prices]
+        if loaded.entry_point == "on_bar":
+            # The same sample prices, turned into candles closing at them, so
+            # the dry run is comparable whichever entry point the code uses.
+            bars = bars_from_closes(loaded.symbol, loaded.timeframe, prices)
+            signals = [loaded.on_bar(bar) for bar in bars]
+        else:
+            signals = [loaded.on_tick(price) for price in prices]
     except Exception as exc:
         return StrategyValidateResult(
             ok=False,
-            error=f"Strategy compiled but on_tick() raised: {exc}",
-            detected_name=loaded.name,
-            detected_symbol=loaded.symbol,
+            error=f"Strategy compiled but {loaded.entry_point}() raised: {exc}",
+            **detected,
         )
 
-    return StrategyValidateResult(
-        ok=True,
-        detected_name=loaded.name,
-        detected_symbol=loaded.symbol,
-        sample_signals=signals,
-    )
+    return StrategyValidateResult(ok=True, sample_signals=signals, **detected)
 
 
 def _to_generate_result(

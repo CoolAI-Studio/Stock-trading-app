@@ -4,9 +4,23 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from app.models.enums import DataSource
-from app.services.market_data.base import Quote
+from app.services.market_data.base import Bar, Quote, Timeframe
 
 _TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
+_KLINES_URL = "https://api.binance.com/api/v3/klines"
+
+# Binance spells three of the intervals differently from Yahoo. Timeframe
+# uses Yahoo's spelling (see base.py), so the crypto side translates here
+# rather than making every strategy know which provider it is talking to.
+_BINANCE_INTERVAL: dict[Timeframe, str] = {
+    Timeframe.MINUTE_1: "1m",
+    Timeframe.MINUTE_5: "5m",
+    Timeframe.MINUTE_15: "15m",
+    Timeframe.HOUR_1: "1h",
+    Timeframe.DAY_1: "1d",
+    Timeframe.WEEK_1: "1w",
+    Timeframe.MONTH_1: "1M",
+}
 
 
 class BinanceProvider:
@@ -39,6 +53,44 @@ class BinanceProvider:
                     quote_time=now,
                 )
         return quotes
+
+    def get_bars(self, symbol: str, timeframe: Timeframe, limit: int) -> list[Bar]:
+        try:
+            with httpx.Client(timeout=10.0) as http_client:
+                response = http_client.get(
+                    _KLINES_URL,
+                    params={
+                        "symbol": symbol,
+                        "interval": _BINANCE_INTERVAL[timeframe],
+                        "limit": limit,
+                    },
+                )
+                response.raise_for_status()
+                rows = response.json()
+        except (httpx.HTTPError, ValueError):
+            # Absent, not an exception: one unresolvable pair must not take
+            # the whole poll down.
+            return []
+
+        bars: list[Bar] = []
+        for row in rows:
+            try:
+                # [openTime, open, high, low, close, volume, closeTime, ...]
+                bars.append(
+                    Bar(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        timestamp=datetime.fromtimestamp(row[0] / 1000, UTC),
+                        open=float(row[1]),
+                        high=float(row[2]),
+                        low=float(row[3]),
+                        close=float(row[4]),
+                        volume=float(row[5]),
+                    )
+                )
+            except (IndexError, TypeError, ValueError):
+                continue
+        return bars
 
     @staticmethod
     def _safe_decimal(value) -> Decimal | None:

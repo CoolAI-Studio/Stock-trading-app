@@ -13,6 +13,19 @@ class Strategy:
         return "BUY" if current_price > ma5 else "HOLD"
 """
 
+WEEKLY_BAR_SOURCE = """
+class Strategy:
+    def __init__(self):
+        self.name = "TSMC_weekly"
+        self.symbol = "2330.TW"
+        self.timeframe = "1wk"
+        self.closes = []
+
+    def on_bar(self, bar) -> str:
+        self.closes.append(bar.close)
+        return "BUY" if bar.close > bar.open else "HOLD"
+"""
+
 BROKEN_SOURCE = "def not_a_strategy(:\n    pass"
 
 
@@ -24,6 +37,33 @@ def test_validate_accepts_well_formed_strategy(auth_client):
     assert body["detected_name"] == "AAPL_MA5_Trend"
     assert body["detected_symbol"] == "AAPL"
     assert body["sample_signals"]
+    assert body["entry_point"] == "on_tick"
+
+
+def test_validate_says_when_a_strategy_runs_on_candles_instead(auth_client):
+    """Two entry points now exist and they read almost the same. The owner
+    has to be told which one their code actually got, or a strategy that
+    silently never runs looks identical to one that works."""
+    resp = auth_client.post("/api/strategies/validate", json={"source_code": WEEKLY_BAR_SOURCE})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["entry_point"] == "on_bar"
+    assert body["timeframe"] == "1wk"
+    assert body["sample_signals"]
+
+
+def test_a_candle_strategy_can_be_saved_and_activated(auth_client):
+    create_resp = auth_client.post(
+        "/api/strategies",
+        json={"name": "tsmc-weekly", "symbol": "2330.TW", "source_code": WEEKLY_BAR_SOURCE},
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    strategy_id = create_resp.json()["id"]
+
+    activate_resp = auth_client.post(f"/api/strategies/{strategy_id}/activate")
+    assert activate_resp.status_code == 200, activate_resp.text
+    assert activate_resp.json()["is_active"] is True
 
 
 def test_validate_reports_clean_error_for_broken_code(auth_client):

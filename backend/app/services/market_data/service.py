@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import DataSource
 from app.models.market import MarketQuote
 from app.models.mixins import utcnow
-from app.services.market_data.base import Quote, QuoteProvider
+from app.services.market_data.base import Bar, Quote, QuoteProvider, Timeframe, closed_bars
 from app.services.market_data.providers.binance_provider import BinanceProvider
 from app.services.market_data.providers.yfinance_provider import YFinanceProvider
 
@@ -18,12 +18,34 @@ _DEFAULT_TTL_SEC: dict[DataSource, float] = {
     DataSource.BINANCE: 5.0,
 }
 
+# Candle history is the far more expensive request -- years of rows per
+# symbol -- and a candle that has closed can never change again, so re-asking
+# for it on every poll is pure waste aimed straight at the rate limiter.
+# Each TTL is a fraction of its own candle, which is the honest bound: it is
+# short enough that a newly closed candle is picked up promptly, and long
+# enough that nothing is downloaded faster than it can possibly change.
+_DEFAULT_BAR_TTL_SEC: dict[Timeframe, float] = {
+    Timeframe.MINUTE_1: 30.0,
+    Timeframe.MINUTE_5: 60.0,
+    Timeframe.MINUTE_15: 120.0,
+    Timeframe.HOUR_1: 300.0,
+    Timeframe.DAY_1: 900.0,
+    Timeframe.WEEK_1: 3600.0,
+    Timeframe.MONTH_1: 3600.0,
+}
+
+# Enough history for a 200-period indicator to warm up, with room to spare,
+# and few enough rows that replaying them through a sandboxed strategy on
+# startup costs milliseconds.
+DEFAULT_BAR_LIMIT = 300
+
 
 class MarketDataService:
     def __init__(
         self,
         providers: dict[DataSource, QuoteProvider] | None = None,
         ttl_sec: dict[DataSource, float] | None = None,
+        bar_ttl_sec: dict[Timeframe, float] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._providers = providers or {
@@ -31,8 +53,13 @@ class MarketDataService:
             DataSource.BINANCE: BinanceProvider(),
         }
         self._ttl_sec = {**_DEFAULT_TTL_SEC, **(ttl_sec or {})}
+        self._bar_ttl_sec = {**_DEFAULT_BAR_TTL_SEC, **(bar_ttl_sec or {})}
         self._clock = clock
         self._cache: dict[DataSource, tuple[float, dict[str, Quote]]] = {}
+        # Keyed per symbol and per timeframe, unlike the quote cache's single
+        # per-source bucket. That is what keeps one symbol's fetch schedule
+        # entirely its own business -- see get_bars().
+        self._bar_cache: dict[tuple[DataSource, str, Timeframe], tuple[float, list[Bar]]] = {}
 
     def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
         if not symbols:
@@ -60,6 +87,38 @@ class MarketDataService:
             self._cache[data_source] = (now if stale else cached_at, cached_quotes)
 
         return {s: cached_quotes[s] for s in symbols if s in cached_quotes}
+
+    def get_bars(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        data_source: DataSource,
+        limit: int = DEFAULT_BAR_LIMIT,
+    ) -> list[Bar]:
+        """Closed candles for one symbol, newest last, served from cache
+        between refreshes.
+
+        The cache key includes the symbol, which is the lesson the quote
+        cache above paid for: with one shared bucket, a symbol the provider
+        could never resolve dragged every other symbol's refresh schedule
+        around with it. Here a dead symbol only ever wastes its own slot.
+        """
+        key = (data_source, symbol, timeframe)
+        now = self._clock()
+        cached_at, cached = self._bar_cache.get(key, (None, []))
+        if cached_at is not None and (now - cached_at) <= self._bar_ttl_sec[timeframe]:
+            return cached[-limit:]
+
+        fetched = closed_bars(self._providers[data_source].get_bars(symbol, timeframe, limit))
+        # An empty result is a fetch that happened, so it stamps the clock:
+        # otherwise a symbol the provider cannot resolve is re-requested on
+        # every single poll, which is exactly how an IP gets blocked. Keeping
+        # the previous history rather than replacing it with nothing also
+        # stops one failed request from looking like "this strategy has no
+        # history yet" and silently restarting its warm-up.
+        bars = fetched or cached
+        self._bar_cache[key] = (now, bars)
+        return bars[-limit:]
 
     def upsert_quotes(self, db: Session, quotes: dict[str, Quote]) -> None:
         for symbol, quote in quotes.items():
