@@ -20,4 +20,7 @@ class AIResult:
 
 
 class AIProvider(Protocol):
-    def ask(self, message: str) -> AIResult: ...
+    # `system` overrides SYSTEM_PROMPT for callers with a different contract to
+    # teach the model (strategy generation), so they get the multi-model
+    # fallback and the error phrasing without reimplementing either.
+    def ask(self, message: str, system: str | None = None) -> AIResult: ...

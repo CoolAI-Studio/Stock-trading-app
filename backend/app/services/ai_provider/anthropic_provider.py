@@ -7,7 +7,7 @@ class AnthropicProvider:
     (commented out in requirements.txt -- uncomment it if you select
     AI_PROVIDER=anthropic)."""
 
-    def ask(self, message: str) -> AIResult:
+    def ask(self, message: str, system: str | None = None) -> AIResult:
         if not settings.AI_API_KEY:
             return AIResult(ok=False, error="AI_API_KEY is not configured")
 
@@ -25,7 +25,7 @@ class AnthropicProvider:
             response = client.messages.create(
                 model=settings.AI_MODEL or "claude-sonnet-4-5",
                 max_tokens=1024,
-                system=SYSTEM_PROMPT,
+                system=system or SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": message}],
             )
             reply = "".join(block.text for block in response.content if block.type == "text")

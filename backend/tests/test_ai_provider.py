@@ -42,6 +42,17 @@ def test_openai_compatible_success(ai_configured):
     assert mock_post.call_args.kwargs["json"]["model"] == "model-a"
 
 
+def test_a_caller_supplied_system_prompt_replaces_the_default(ai_configured):
+    """The strategy generator needs its own contract prompt, but must keep the
+    multi-model fallback that lives in this class."""
+    with patch("httpx.post", return_value=_mock_response()) as mock_post:
+        result = OpenAICompatibleProvider().ask("hi", system="you generate strategies")
+
+    assert result.ok is True
+    messages = mock_post.call_args.kwargs["json"]["messages"]
+    assert messages[0] == {"role": "system", "content": "you generate strategies"}
+
+
 def test_openai_compatible_missing_api_key(monkeypatch):
     monkeypatch.setattr("app.config.settings.AI_API_KEY", "")
     result = OpenAICompatibleProvider().ask("hi")

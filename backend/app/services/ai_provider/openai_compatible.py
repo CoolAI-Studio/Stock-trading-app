@@ -48,7 +48,7 @@ class OpenAICompatibleProvider:
     routing parameter keeps this class provider-agnostic.
     """
 
-    def ask(self, message: str) -> AIResult:
+    def ask(self, message: str, system: str | None = None) -> AIResult:
         if not settings.AI_API_KEY:
             return AIResult(ok=False, error="尚未設定 AI_API_KEY。")
 
@@ -58,7 +58,7 @@ class OpenAICompatibleProvider:
 
         last_error = "沒有可用的模型。"
         for model in models:
-            result, try_next = self._ask_one(model, message)
+            result, try_next = self._ask_one(model, message, system or SYSTEM_PROMPT)
             if result.ok:
                 return result
             last_error = result.error or "未知錯誤。"
@@ -67,7 +67,7 @@ class OpenAICompatibleProvider:
 
         return AIResult(ok=False, error=last_error)
 
-    def _ask_one(self, model: str, message: str) -> tuple[AIResult, bool]:
+    def _ask_one(self, model: str, message: str, system: str) -> tuple[AIResult, bool]:
         """Returns (result, whether trying another model could still help)."""
         try:
             response = httpx.post(
@@ -76,7 +76,7 @@ class OpenAICompatibleProvider:
                 json={
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": system},
                         {"role": "user", "content": message},
                     ],
                 },

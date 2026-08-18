@@ -66,6 +66,20 @@ class StrategyValidateResult(BaseModel):
     sample_signals: list[str] | None = None
 
 
+class StrategyGenerateRequest(BaseModel):
+    description: str = Field(min_length=1, max_length=4000)
+    symbol: str | None = Field(default=None, max_length=32)
+
+
+class StrategyGenerateResult(StrategyValidateResult):
+    """Everything /validate returns plus the code it describes, so one round
+    trip is enough for the editor to fill in the source and show
+    "偵測到：名稱（代號）". source_code is None only when generation never got
+    as far as producing any."""
+
+    source_code: str | None = None
+
+
 class SampleStrategyInfo(BaseModel):
     filename: str
     source_code: str

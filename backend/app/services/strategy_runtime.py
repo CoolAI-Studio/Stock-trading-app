@@ -102,6 +102,20 @@ _SAFE_BUILTIN_NAMES = frozenset(
 )  # fmt: skip
 
 
+def allowed_modules() -> list[str]:
+    """Read-only view of the import allowlist for code that needs to *state*
+    the sandbox rules rather than enforce them -- the AI strategy generator
+    puts this list in its system prompt. A retyped copy would go stale the
+    moment the sandbox is widened or narrowed, and the model would then
+    cheerfully generate code that save-time validation rejects."""
+    return sorted(_ALLOWED_MODULES)
+
+
+def forbidden_names() -> list[str]:
+    """Companion to allowed_modules(); same reasoning."""
+    return sorted(_FORBIDDEN_NAMES)
+
+
 def _is_dunder(name: str) -> bool:
     return name.startswith("__") and name.endswith("__")
 
