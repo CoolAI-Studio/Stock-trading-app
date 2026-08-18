@@ -398,6 +398,25 @@ def compile_strategy(source_code: str, timeout_sec: float | None = None) -> Load
     )
 
 
+def effective_warmup(loaded: LoadedStrategy, stored_default: int) -> int:
+    """How many closed candles must exist before this strategy may signal.
+
+    The number is a property of the indicator, which lives in the source, so a
+    `self.warmup_bars` declaration wins outright; the stored default (the
+    Strategy.warmup_bars column, or a backtest request's own value) is the
+    fallback for source that says nothing. Deliberately not max() of the two:
+    the stored default of 30 is a generic number nobody chose, and holding a
+    strategy that needs 5 weekly candles back for 30 weeks because of it would
+    be a bug wearing a safety jacket.
+
+    Lives beside the runtime rather than in the market loop because a backtest
+    has to warm up by exactly the same rule -- if the two ever disagreed, the
+    backtest would be scoring a strategy that starts signalling on a different
+    candle than the live one does.
+    """
+    return loaded.warmup_bars if loaded.warmup_bars is not None else stored_default
+
+
 class StrategyRegistry:
     """Caches live Strategy instances by strategy id, keyed additionally by a
     content hash of the source. The legacy `Strategy` class accumulates state

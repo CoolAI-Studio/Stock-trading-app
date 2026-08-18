@@ -58,8 +58,11 @@ class MarketDataService:
         self._cache: dict[DataSource, tuple[float, dict[str, Quote]]] = {}
         # Keyed per symbol and per timeframe, unlike the quote cache's single
         # per-source bucket. That is what keeps one symbol's fetch schedule
-        # entirely its own business -- see get_bars().
-        self._bar_cache: dict[tuple[DataSource, str, Timeframe], tuple[float, list[Bar]]] = {}
+        # entirely its own business -- see get_bars(). The stored tuple is
+        # (fetched_at, limit_asked_for, bars).
+        self._bar_cache: dict[
+            tuple[DataSource, str, Timeframe], tuple[float, int, list[Bar]]
+        ] = {}
 
     def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
         if not symbols:
@@ -102,11 +105,20 @@ class MarketDataService:
         cache above paid for: with one shared bucket, a symbol the provider
         could never resolve dragged every other symbol's refresh schedule
         around with it. Here a dead symbol only ever wastes its own slot.
+
+        The depth an entry was fetched at is remembered alongside it, because
+        a shallower cached window cannot answer a deeper question. The market
+        loop only ever asks for DEFAULT_BAR_LIMIT candles; a backtest over
+        several years asks for thousands, and serving it the loop's 300 would
+        silently shorten the range the owner asked to test while reporting
+        success. A *smaller* limit is still served from cache -- that is the
+        common case and the one the rate limiter cares about.
         """
         key = (data_source, symbol, timeframe)
         now = self._clock()
-        cached_at, cached = self._bar_cache.get(key, (None, []))
-        if cached_at is not None and (now - cached_at) <= self._bar_ttl_sec[timeframe]:
+        cached_at, cached_limit, cached = self._bar_cache.get(key, (None, 0, []))
+        fresh = cached_at is not None and (now - cached_at) <= self._bar_ttl_sec[timeframe]
+        if fresh and cached_limit >= limit:
             return cached[-limit:]
 
         fetched = closed_bars(self._providers[data_source].get_bars(symbol, timeframe, limit))
@@ -117,7 +129,11 @@ class MarketDataService:
         # stops one failed request from looking like "this strategy has no
         # history yet" and silently restarting its warm-up.
         bars = fetched or cached
-        self._bar_cache[key] = (now, bars)
+        # Stamped with the limit just asked for even when the fetch came back
+        # empty: it records what was requested, so a repeat of the same
+        # request is served from cache rather than hammering a symbol the
+        # provider cannot resolve.
+        self._bar_cache[key] = (now, limit, bars)
         return bars[-limit:]
 
     def upsert_quotes(self, db: Session, quotes: dict[str, Quote]) -> None:

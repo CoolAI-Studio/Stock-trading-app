@@ -19,7 +19,11 @@ from app.services.events import Event, bus
 from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
 from app.services.signals import SignalIn, create_pending_order
-from app.services.strategy_runtime import LoadedStrategy, StrategyRegistry
+from app.services.strategy_runtime import (
+    LoadedStrategy,
+    StrategyRegistry,
+    effective_warmup,
+)
 
 logger = logging.getLogger("app.market_loop")
 
@@ -67,19 +71,6 @@ def _run_tick_strategy(
     db.commit()
 
 
-def _effective_warmup(strategy: Strategy, loaded: LoadedStrategy) -> int:
-    """How many closed candles must exist before this strategy may signal.
-
-    The number is a property of the indicator, which lives in the source, so
-    a `self.warmup_bars` declaration wins outright; the stored
-    Strategy.warmup_bars column is the fallback for source that says nothing.
-    Deliberately not max() of the two: the stored default of 30 is a generic
-    number nobody chose, and holding a strategy that needs 5 weekly candles
-    back for 30 weeks because of it would be a bug wearing a safety jacket.
-    """
-    return loaded.warmup_bars if loaded.warmup_bars is not None else strategy.warmup_bars
-
-
 def _run_bar_strategy(
     db: Session, strategy: Strategy, loaded: LoadedStrategy, bars: list[Bar], events: list[Event]
 ) -> None:
@@ -87,7 +78,7 @@ def _run_bar_strategy(
     for a candle the strategy has already been shown."""
     strategy.last_run_at = utcnow()
 
-    warmup = _effective_warmup(strategy, loaded)
+    warmup = effective_warmup(loaded, strategy.warmup_bars)
     if len(bars) < warmup:
         # An indicator handed 3 of the 35 candles it needs still returns a
         # number, and that number is garbage. Say so where the owner can read

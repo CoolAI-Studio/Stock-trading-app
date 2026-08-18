@@ -9,6 +9,11 @@ from app.db.base import Base
 from app.models.enums import DataSource, NotificationStatus, OrderSide
 from app.models.mixins import TimestampMixin, utcnow
 
+# Generic fallback for source that declares no `self.warmup_bars`. Named
+# rather than inlined because a backtest of *draft* source has no strategies
+# row to read it from, and the two must not drift apart.
+DEFAULT_WARMUP_BARS = 30
+
 
 class Strategy(TimestampMixin, Base):
     __tablename__ = "strategies"
@@ -34,7 +39,7 @@ class Strategy(TimestampMixin, Base):
     # never becomes a pending order. Off for every existing strategy.
     alert_only: Mapped[bool] = mapped_column(default=False)
     default_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(1))
-    warmup_bars: Mapped[int] = mapped_column(default=30)
+    warmup_bars: Mapped[int] = mapped_column(default=DEFAULT_WARMUP_BARS)
 
     # Per-strategy risk overrides. NULL means "inherit the user's global
     # RiskSettings value" -- resolved in services/risk_resolver.py, which is

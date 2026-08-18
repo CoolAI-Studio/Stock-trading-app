@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
+from app.models.backtest import BacktestRun
 from app.models.position import Position
 from app.models.strategy import Strategy
 from app.models.user import User
@@ -284,6 +285,13 @@ def delete_strategy(
     # rather than by constraint so it holds on Postgres too.
     db.query(Position).filter(Position.strategy_id == strategy.id).update(
         {Position.strategy_id: None}, synchronize_session=False
+    )
+    # Backtest runs are released the same way and for the same reason. They
+    # deliberately survive their strategy -- each one snapshots the source it
+    # scored, so it stays readable -- but a run left pointing at a deleted id
+    # would be re-attributed the moment SQLite handed that id to a new row.
+    db.query(BacktestRun).filter(BacktestRun.strategy_id == strategy.id).update(
+        {BacktestRun.strategy_id: None}, synchronize_session=False
     )
     db.delete(strategy)
     db.commit()
