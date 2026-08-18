@@ -15,6 +15,7 @@ const STRATEGY: Strategy = {
   symbol: 'AAPL',
   data_source: 'yfinance',
   is_active: true,
+  alert_only: false,
   default_quantity: '1',
   warmup_bars: 30,
   last_signal: null,

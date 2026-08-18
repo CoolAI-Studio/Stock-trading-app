@@ -16,6 +16,7 @@ const SETTINGS: RiskSettings = {
   max_order_notional: '0',
   max_pending_orders_per_symbol: 3,
   signal_cooldown_sec: 300,
+  alert_interval_sec: 900,
 }
 
 function renderPage() {
@@ -51,6 +52,32 @@ describe('RiskSettingsPage', () => {
       expect(api.put).toHaveBeenCalledWith(
         '/api/risk-settings',
         expect.objectContaining({ max_position_qty: '500' }),
+      ),
+    )
+  })
+  it('shows the alert interval alongside the cooldown and explains what each throttles', async () => {
+    renderPage()
+
+    expect(await screen.findByLabelText('提醒間隔（秒）')).toHaveValue('900')
+    expect(screen.getByLabelText('下單訊號冷卻時間（秒）')).toHaveValue('300')
+    expect(screen.getByText(/在策略的門檻附近上下震盪/)).toBeInTheDocument()
+    expect(screen.getByText(/填 0 表示每次訊號都通知/)).toBeInTheDocument()
+  })
+
+  it('saves the alert interval', async () => {
+    vi.mocked(api.put).mockResolvedValue({ ...SETTINGS, alert_interval_sec: 0 } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    const input = await screen.findByLabelText('提醒間隔（秒）')
+    await user.clear(input)
+    await user.type(input, '0')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    await waitFor(() =>
+      expect(api.put).toHaveBeenCalledWith(
+        '/api/risk-settings',
+        expect.objectContaining({ alert_interval_sec: '0' }),
       ),
     )
   })

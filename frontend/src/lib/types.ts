@@ -28,6 +28,9 @@ export interface Strategy {
   symbol: string
   data_source: DataSource
   is_active: boolean
+  /** Watch-only: the strategy's BUY/SELL signals notify and are recorded as
+   * alerts, but never become an order to confirm. */
+  alert_only: boolean
   default_quantity: string
   warmup_bars: number
   last_signal: string | null
@@ -41,6 +44,19 @@ export interface Strategy {
  * source so the edit form can prefill it. */
 export interface StrategyDetail extends Strategy {
   source_code: string
+}
+
+/** One recorded alert from a watch-only strategy. A `failed` row still means
+ * the strategy fired -- it is only the delivery that did not arrive. */
+export interface StrategyAlert {
+  id: number
+  strategy_id: number
+  symbol: string
+  side: OrderSide
+  price: string
+  status: 'sent' | 'failed'
+  error: string | null
+  created_at: string
 }
 
 export interface StrategyValidateResult {
@@ -89,6 +105,7 @@ export interface RiskSettings {
   max_order_notional: string
   max_pending_orders_per_symbol: number
   signal_cooldown_sec: number
+  alert_interval_sec: number
 }
 
 export interface NotificationChannel {

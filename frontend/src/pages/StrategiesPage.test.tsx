@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrategiesPage } from './StrategiesPage'
 import { ApiError, api } from '../lib/api'
-import type { Strategy } from '../lib/types'
+import type { Strategy, StrategyAlert } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
@@ -17,6 +17,7 @@ const STRATEGY: Strategy = {
   symbol: 'AAPL',
   data_source: 'yfinance',
   is_active: false,
+  alert_only: false,
   default_quantity: '1',
   warmup_bars: 30,
   last_signal: null,
@@ -29,6 +30,18 @@ const STRATEGY: Strategy = {
 const SAVED_SOURCE = 'class Strategy:\n    pass\n'
 const GENERATED_SOURCE = 'class Strategy:\n    def __init__(self):\n        self.name = "TSMC_MA5"\n'
 const AI_DESCRIPTION_LABEL = '想要的策略（用中文描述就可以）'
+const ALERT_ONLY_LABEL = '只提醒，不產生訂單'
+
+const ALERT: StrategyAlert = {
+  id: 7,
+  strategy_id: 1,
+  symbol: 'AAPL',
+  side: 'buy',
+  price: '188.5',
+  status: 'sent',
+  error: null,
+  created_at: '2026-08-18T01:00:00Z',
+}
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -343,6 +356,7 @@ describe('StrategiesPage', () => {
       expect(api.patch).toHaveBeenCalledWith('/api/strategies/1', {
         name: 'renamed',
         symbol: 'AAPL',
+        alert_only: false,
         source_code: SAVED_SOURCE,
       }),
     )
@@ -370,5 +384,128 @@ describe('StrategiesPage', () => {
     await user.click(screen.getByRole('button', { name: '刪除' }))
 
     expect(api.delete).not.toHaveBeenCalled()
+  })
+  it('creates a watch-only strategy when 只提醒 is ticked', async () => {
+    vi.mocked(api.post).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'watcher')
+    await user.type(screen.getByLabelText('股票代號'), 'TSLA')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByLabelText(ALERT_ONLY_LABEL))
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/strategies', {
+        name: 'watcher',
+        symbol: 'TSLA',
+        source_code: 'class Strategy: pass',
+        alert_only: true,
+      }),
+    )
+  })
+
+  it('spells out that a watch-only strategy never produces an order to confirm', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+
+    expect(screen.getByText(/只會發通知給你，不會產生需要確認的訂單/)).toBeInTheDocument()
+  })
+
+  it('turns an existing strategy into a watch-only one from the edit form', async () => {
+    vi.mocked(api.patch).mockResolvedValue({ ...STRATEGY, alert_only: true } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+    await waitFor(() => expect(screen.getByLabelText('原始碼')).toHaveValue(SAVED_SOURCE))
+
+    await user.click(screen.getByLabelText(ALERT_ONLY_LABEL))
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith('/api/strategies/1', {
+        name: 'ma5-cross',
+        symbol: 'AAPL',
+        alert_only: true,
+        source_code: SAVED_SOURCE,
+      }),
+    )
+  })
+
+  it('shows the edit form already ticked for a watch-only strategy', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [{ ...STRATEGY, alert_only: true }] as never
+      if (path === '/api/strategies/1') return { ...STRATEGY, alert_only: true, source_code: SAVED_SOURCE } as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+
+    expect(screen.getByLabelText(ALERT_ONLY_LABEL)).toBeChecked()
+  })
+
+  it('marks in the list which strategies place orders and which only notify', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') {
+        return [STRATEGY, { ...STRATEGY, id: 2, name: 'watcher', alert_only: true }] as never
+      }
+      return [] as never
+    })
+    renderPage()
+
+    const tradingRow = (await screen.findByText('ma5-cross')).closest('tr')
+    expect(within(tradingRow as HTMLElement).getByText('會下單')).toBeInTheDocument()
+
+    const watchingRow = screen.getByText('watcher').closest('tr')
+    expect(within(watchingRow as HTMLElement).getByText('只提醒')).toBeInTheDocument()
+  })
+
+  it('lists the alert history newest first', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/alerts') {
+        return [
+          { ...ALERT, id: 8, side: 'sell', price: '190', created_at: '2026-08-18T02:00:00Z' },
+          ALERT,
+        ] as never
+      }
+      return [] as never
+    })
+    renderPage()
+
+    const table = await screen.findByRole('table', { name: '提醒紀錄' })
+    const rows = within(table).getAllByRole('row')
+    expect(within(rows[1]).getByText('賣出')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('190')).toBeInTheDocument()
+    expect(within(rows[2]).getByText('買進')).toBeInTheDocument()
+    expect(within(rows[2]).getByText('188.5')).toBeInTheDocument()
+    expect(within(rows[2]).getByText('ma5-cross')).toBeInTheDocument()
+  })
+
+  it('marks an alert the owner never actually received', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/alerts') return [{ ...ALERT, status: 'failed', error: 'timeout' }] as never
+      return [] as never
+    })
+    renderPage()
+
+    const table = await screen.findByRole('table', { name: '提醒紀錄' })
+    expect(within(table).getByText('未送達')).toBeInTheDocument()
+  })
+
+  it('shows an empty state when no alert has fired yet', async () => {
+    renderPage()
+
+    expect(await screen.findByText('目前沒有提醒紀錄。')).toBeInTheDocument()
   })
 })

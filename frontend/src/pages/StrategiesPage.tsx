@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import type {
+  OrderSide,
   SampleStrategy,
   Strategy,
+  StrategyAlert,
   StrategyDetail,
   StrategyGenerateResult,
   StrategyValidateResult,
@@ -11,6 +13,11 @@ import type {
 
 const GENERATE_FAILED = '產生策略失敗，請稍後再試一次。'
 const OVERWRITE_CONFIRM = '原始碼欄位已經有內容，AI 產生的程式碼會整個蓋掉它。要繼續嗎？'
+
+const SIDE_LABEL: Record<OrderSide, string> = { buy: '買進', sell: '賣出' }
+
+const ALERT_ONLY_LABEL = '只提醒，不產生訂單'
+const ALERT_ONLY_HELP = '勾選後，這個策略的買賣訊號只會發通知給你，不會產生需要確認的訂單。'
 
 const SAMPLE_LABELS: Record<string, string> = {
   ma5_cross: '5 日均線交叉',
@@ -22,9 +29,38 @@ function sampleLabel(sample: SampleStrategy): string {
   return SAMPLE_LABELS[key] ?? key
 }
 
+function AlertOnlyField({
+  id,
+  checked,
+  onChange,
+}: {
+  id: string
+  checked: boolean
+  onChange: (value: boolean) => void
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="flex items-center gap-2 text-sm">
+        <input
+          id={id}
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+        {ALERT_ONLY_LABEL}
+      </label>
+      <p className="text-xs text-slate-500">{ALERT_ONLY_HELP}</p>
+    </div>
+  )
+}
+
 function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: () => void }) {
   const [name, setName] = useState(strategy.name)
   const [symbol, setSymbol] = useState(strategy.symbol)
+  // Comes straight off the list row: unlike the source, alert_only is already
+  // in hand, so the box never renders in the wrong state while the detail
+  // request is in flight.
+  const [alertOnly, setAlertOnly] = useState(strategy.alert_only)
   const [sourceCode, setSourceCode] = useState<string | null>(null)
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -53,7 +89,7 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const payload: Record<string, unknown> = { name, symbol }
+      const payload: Record<string, unknown> = { name, symbol, alert_only: alertOnly }
       // Only send source_code once the real one has loaded, so a save that
       // races the fetch can't overwrite the stored code with an empty box.
       if (sourceCode !== null) payload.source_code = sourceCode
@@ -91,6 +127,11 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
+      <AlertOnlyField
+        id={`edit-strategy-alert-only-${strategy.id}`}
+        checked={alertOnly}
+        onChange={setAlertOnly}
+      />
       <div>
         <label htmlFor={`edit-strategy-code-${strategy.id}`} className="text-sm text-slate-400">
           原始碼
@@ -171,6 +212,21 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
             {strategy.is_active ? '啟用中' : '已停用'}
           </span>
         </td>
+        {/* Both modes are spelled out rather than only badging the odd one
+            out: an unlabelled row read as the wrong mode is expensive in
+            either direction -- a missed order, or an order that was never
+            meant to exist. */}
+        <td className="py-2 pr-4">
+          <span
+            className={
+              strategy.alert_only
+                ? 'rounded border border-amber-700 bg-amber-950/40 px-2 py-0.5 text-xs text-amber-300'
+                : 'rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-300'
+            }
+          >
+            {strategy.alert_only ? '只提醒' : '會下單'}
+          </span>
+        </td>
         <td className="py-2 pr-4 text-slate-400">{strategy.last_signal ?? '—'}</td>
         <td className="py-2 pr-4 text-red-400">
           {strategy.consecutive_errors > 0 ? strategy.last_error : ''}
@@ -200,7 +256,7 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
       </tr>
       {editing && (
         <tr>
-          <td colSpan={6} className="pb-4">
+          <td colSpan={7} className="pb-4">
             <EditStrategyForm strategy={strategy} onDone={() => setEditing(false)} />
           </td>
         </tr>
@@ -213,6 +269,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [sourceCode, setSourceCode] = useState('')
+  const [alertOnly, setAlertOnly] = useState(false)
   const [description, setDescription] = useState('')
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -275,7 +332,13 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   }
 
   const createMutation = useMutation({
-    mutationFn: () => api.post<Strategy>('/api/strategies', { name, symbol, source_code: sourceCode }),
+    mutationFn: () =>
+      api.post<Strategy>('/api/strategies', {
+        name,
+        symbol,
+        source_code: sourceCode,
+        alert_only: alertOnly,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategies'] })
       onDone()
@@ -360,6 +423,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
+      <AlertOnlyField id="strategy-alert-only" checked={alertOnly} onChange={setAlertOnly} />
       <div>
         <label htmlFor="strategy-code" className="text-sm text-slate-400">
           原始碼
@@ -411,6 +475,73 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   )
 }
 
+function AlertHistory({ strategies }: { strategies: Strategy[] }) {
+  // Already newest-first from the API; rendered in that order so the last
+  // thing a strategy said is the first thing on screen.
+  const alertsQuery = useQuery({
+    queryKey: ['strategy-alerts'],
+    queryFn: () => api.get<StrategyAlert[]>('/api/alerts'),
+  })
+  const alerts = alertsQuery.data ?? []
+  const nameFor = (strategyId: number) =>
+    strategies.find((s) => s.id === strategyId)?.name ?? `#${strategyId}`
+
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-semibold text-slate-300">提醒紀錄</h2>
+      <p className="text-xs text-slate-500">
+        只提醒策略發出過的訊號都記在這裡。這些都沒有下單，可以拿來回頭檢視這個策略準不準，再決定要不要讓它真的下單。
+      </p>
+      {alerts.length === 0 && alertsQuery.isSuccess && (
+        <p className="text-slate-500">目前沒有提醒紀錄。</p>
+      )}
+      {alerts.length > 0 && (
+        <table aria-label="提醒紀錄" className="w-full text-left text-sm">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="pb-2 font-normal">時間</th>
+              <th className="pb-2 font-normal">策略</th>
+              <th className="pb-2 font-normal">股票代號</th>
+              <th className="pb-2 font-normal">方向</th>
+              <th className="pb-2 font-normal">價格</th>
+              <th className="pb-2 font-normal">通知</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.map((alert) => (
+              <tr key={alert.id} className="border-b border-slate-800 text-slate-300">
+                <td className="py-2 pr-4 text-slate-500">
+                  {new Date(alert.created_at).toLocaleString()}
+                </td>
+                <td className="py-2 pr-4 font-medium">{nameFor(alert.strategy_id)}</td>
+                <td className="py-2 pr-4">{alert.symbol}</td>
+                <td
+                  className={`py-2 pr-4 ${alert.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}
+                >
+                  {SIDE_LABEL[alert.side]}
+                </td>
+                <td className="py-2 pr-4">{alert.price}</td>
+                {/* The signal still counts when scoring the strategy, but a
+                    failed row is one the owner never saw -- unmarked it would
+                    read as a notification that arrived. */}
+                <td className="py-2 text-slate-500">
+                  {alert.status === 'sent' ? (
+                    '已送出'
+                  ) : (
+                    <span className="text-red-400" title={alert.error ?? undefined}>
+                      未送達
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
 export function StrategiesPage() {
   const [showForm, setShowForm] = useState(false)
   const strategiesQuery = useQuery({
@@ -422,8 +553,10 @@ export function StrategiesPage() {
     queryFn: () => api.get<SampleStrategy[]>('/api/strategies/samples'),
   })
 
+  const strategies = strategiesQuery.data ?? []
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">策略</h1>
         <button
@@ -444,17 +577,20 @@ export function StrategiesPage() {
             <th className="pb-2 font-normal">名稱</th>
             <th className="pb-2 font-normal">股票代號</th>
             <th className="pb-2 font-normal">狀態</th>
+            <th className="pb-2 font-normal">模式</th>
             <th className="pb-2 font-normal">最新訊號</th>
             <th className="pb-2 font-normal">錯誤</th>
             <th className="pb-2 font-normal">操作</th>
           </tr>
         </thead>
         <tbody>
-          {(strategiesQuery.data ?? []).map((strategy) => (
+          {strategies.map((strategy) => (
             <StrategyRow key={strategy.id} strategy={strategy} />
           ))}
         </tbody>
       </table>
+
+      <AlertHistory strategies={strategies} />
     </div>
   )
 }
