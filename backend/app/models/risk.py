@@ -24,3 +24,11 @@ class RiskSettings(TimestampMixin, Base):
     max_order_notional: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
     max_pending_orders_per_symbol: Mapped[int] = mapped_column(default=3)
     signal_cooldown_sec: Mapped[int] = mapped_column(default=300)
+
+    # Deliberately NOT signal_cooldown_sec: that one gates how often a signal
+    # may become a *pending order*. This one gates how often an alert-only
+    # strategy is allowed to reach the owner's phone, and defaults longer --
+    # a price oscillating around a threshold re-fires the same signal on
+    # every poll, and there is no confirm step to absorb the noise. 0 means
+    # notify on every signal.
+    alert_interval_sec: Mapped[int] = mapped_column(default=900)

@@ -14,6 +14,7 @@ class StrategyCreate(BaseModel):
     source_code: str = Field(min_length=1)
     default_quantity: Decimal = Decimal(1)
     warmup_bars: int = Field(default=30, ge=0)
+    alert_only: bool = False
 
 
 class StrategyUpdate(BaseModel):
@@ -23,6 +24,7 @@ class StrategyUpdate(BaseModel):
     source_code: str | None = Field(default=None, min_length=1)
     default_quantity: Decimal | None = None
     warmup_bars: int | None = Field(default=None, ge=0)
+    alert_only: bool | None = None
 
 
 class StrategyRead(BaseModel):
@@ -33,6 +35,7 @@ class StrategyRead(BaseModel):
     symbol: str
     data_source: DataSource
     is_active: bool
+    alert_only: bool
     default_quantity: MoneyStr
     warmup_bars: int
     last_signal: str | None

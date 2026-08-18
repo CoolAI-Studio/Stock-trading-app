@@ -184,6 +184,7 @@ def create_strategy(
         code_hash=code_hash(payload.source_code),
         default_quantity=payload.default_quantity,
         warmup_bars=payload.warmup_bars,
+        alert_only=payload.alert_only,
     )
     db.add(strategy)
     try:

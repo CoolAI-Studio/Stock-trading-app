@@ -9,6 +9,6 @@ from app.models.notification import NotificationChannel, NotificationLog  # noqa
 from app.models.order import Order  # noqa: F401
 from app.models.position import Position  # noqa: F401
 from app.models.risk import RiskSettings  # noqa: F401
-from app.models.strategy import Strategy  # noqa: F401
+from app.models.strategy import Strategy, StrategyAlert  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.models.webhook import TradingViewWebhookLog  # noqa: F401

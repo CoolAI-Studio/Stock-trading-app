@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.common import MoneyStr
 
@@ -15,6 +15,7 @@ class RiskSettingsRead(BaseModel):
     max_order_notional: MoneyStr
     max_pending_orders_per_symbol: int
     signal_cooldown_sec: int
+    alert_interval_sec: int
 
 
 class RiskSettingsUpdate(BaseModel):
@@ -25,3 +26,4 @@ class RiskSettingsUpdate(BaseModel):
     max_order_notional: Decimal | None = None
     max_pending_orders_per_symbol: int | None = None
     signal_cooldown_sec: int | None = None
+    alert_interval_sec: int | None = Field(default=None, ge=0)

@@ -13,7 +13,7 @@ from app.models.position import Position
 from app.models.risk import RiskSettings
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.services import risk, worker_health
+from app.services import alerts, risk, worker_health
 from app.services.events import Event, bus
 from app.services.market_data.base import Quote
 from app.services.market_data.service import MarketDataService, get_market_data_service
@@ -57,8 +57,13 @@ def _run_strategy(db: Session, strategy: Strategy, quote: Quote, events: list[Ev
     strategy.consecutive_errors = 0
 
     if signal_str in ("BUY", "SELL"):
-        user = db.get(User, strategy.user_id)
         side = OrderSide.BUY if signal_str == "BUY" else OrderSide.SELL
+        if strategy.alert_only:
+            _emit_alert_only_signal(db, strategy, side, quote, signal_str, events)
+            db.commit()
+            return
+
+        user = db.get(User, strategy.user_id)
         result = create_pending_order(
             db,
             user,
@@ -78,6 +83,27 @@ def _run_strategy(db: Session, strategy: Strategy, quote: Quote, events: list[Ev
             events.append(Event(type="order.created", data=order_data))
 
     db.commit()
+
+
+def _emit_alert_only_signal(
+    db: Session,
+    strategy: Strategy,
+    side: OrderSide,
+    quote: Quote,
+    signal_str: str,
+    events: list[Event],
+) -> None:
+    """Watch-only path: no create_pending_order call at all, so none of the
+    order-side gates (dedupe, cooldown, position/notional limits) apply --
+    nothing here can move money."""
+    event = alerts.emit_alert(db, strategy, side, quote.price)
+    if event is None:
+        return
+    # Only stamped when the alert actually went out, matching the order path
+    # where a gated signal leaves last_signal alone.
+    strategy.last_signal = signal_str
+    strategy.last_signal_at = utcnow()
+    events.append(event)
 
 
 def _check_position_exit(

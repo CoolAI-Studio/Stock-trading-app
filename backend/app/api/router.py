@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routers import (
+    alerts,
     auth,
     broker_credentials,
     market,
@@ -15,6 +16,7 @@ from app.api.routers import (
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
+api_router.include_router(alerts.router)
 api_router.include_router(strategies.router)
 api_router.include_router(market.router)
 api_router.include_router(orders.router)

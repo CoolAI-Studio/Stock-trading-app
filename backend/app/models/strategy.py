@@ -1,13 +1,13 @@
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.models.enums import DataSource
-from app.models.mixins import TimestampMixin
+from app.models.enums import DataSource, NotificationStatus, OrderSide
+from app.models.mixins import TimestampMixin, utcnow
 
 
 class Strategy(TimestampMixin, Base):
@@ -30,6 +30,9 @@ class Strategy(TimestampMixin, Base):
     code_hash: Mapped[str] = mapped_column(String(64))
 
     is_active: Mapped[bool] = mapped_column(default=False)
+    # Watch-only: BUY/SELL notifies and is recorded as a StrategyAlert, but
+    # never becomes a pending order. Off for every existing strategy.
+    alert_only: Mapped[bool] = mapped_column(default=False)
     default_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(1))
     warmup_bars: Mapped[int] = mapped_column(default=30)
 
@@ -38,3 +41,34 @@ class Strategy(TimestampMixin, Base):
     last_run_at: Mapped[datetime | None] = mapped_column(default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     consecutive_errors: Mapped[int] = mapped_column(default=0)
+
+
+class StrategyAlert(Base):
+    """One row per alert *attempt* made by an alert-only strategy.
+
+    Failed attempts are kept rather than dropped: the throttle clock in
+    services/alerts.py only starts from a delivered alert, and the retry
+    bound counts the failures recorded since that delivery. Keeping them
+    also tells the owner why their phone went quiet -- a run of FAILED rows
+    is a broken channel, not a strategy that stopped firing.
+    """
+
+    __tablename__ = "strategy_alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    strategy_id: Mapped[int] = mapped_column(
+        ForeignKey("strategies.id", ondelete="CASCADE"), index=True
+    )
+
+    symbol: Mapped[str] = mapped_column(String(32))
+    side: Mapped[OrderSide] = mapped_column(SAEnum(OrderSide, native_enum=False, length=8))
+    # The quote the strategy actually saw, so a past alert can be scored
+    # against what the price did afterwards.
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 8))
+
+    status: Mapped[NotificationStatus] = mapped_column(
+        SAEnum(NotificationStatus, native_enum=False, length=16)
+    )
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
