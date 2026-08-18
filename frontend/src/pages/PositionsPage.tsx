@@ -1,7 +1,19 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
-import type { Position } from '../lib/types'
+import type { Position, Strategy } from '../lib/types'
+
+const GLOBAL_RISK_LABEL = '全域'
+const RISK_OWNER_HELP =
+  '「風險設定」那一欄是這個部位的停損、停利會照誰的數字算。標「全域」表示用風險設定頁的全域值（手動建立或 TradingView 進場的部位都是這種）；標策略名稱則是用那個策略自己的設定。同一檔股票由誰先建立部位就跟誰，後來別的策略再買進也不會換人，要等部位出清才重新認一次。'
+
+/** Whose stop-loss / take-profit thresholds this position is scanned under.
+ * Falls back to the id when the strategy list is momentarily stale -- the
+ * column may not go blank, since blank reads as 全域. */
+function riskOwnerLabel(position: Position, strategies: Strategy[]): string {
+  if (position.strategy_id === null) return GLOBAL_RISK_LABEL
+  return strategies.find((s) => s.id === position.strategy_id)?.name ?? `#${position.strategy_id}`
+}
 
 function AdjustPositionForm({ position, onDone }: { position: Position; onDone: () => void }) {
   const [quantity, setQuantity] = useState(position.quantity)
@@ -64,7 +76,7 @@ function AdjustPositionForm({ position, onDone }: { position: Position; onDone: 
   )
 }
 
-function PositionRow({ position }: { position: Position }) {
+function PositionRow({ position, riskOwner }: { position: Position; riskOwner: string }) {
   const [adjusting, setAdjusting] = useState(false)
   const queryClient = useQueryClient()
 
@@ -93,6 +105,17 @@ function PositionRow({ position }: { position: Position }) {
         <td className="py-2 pr-4 text-slate-500">
           {position.opened_at ? new Date(position.opened_at).toLocaleString() : '—'}
         </td>
+        <td className="py-2 pr-4">
+          <span
+            className={
+              riskOwner === GLOBAL_RISK_LABEL
+                ? 'rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400'
+                : 'rounded border border-sky-700 bg-sky-950/40 px-2 py-0.5 text-xs text-sky-300'
+            }
+          >
+            {riskOwner}
+          </span>
+        </td>
         <td className="flex gap-2 py-2">
           <button
             onClick={() => setAdjusting((v) => !v)}
@@ -111,7 +134,7 @@ function PositionRow({ position }: { position: Position }) {
       </tr>
       {adjusting && (
         <tr>
-          <td colSpan={6} className="pb-4">
+          <td colSpan={7} className="pb-4">
             <AdjustPositionForm position={position} onDone={() => setAdjusting(false)} />
           </td>
         </tr>
@@ -195,8 +218,15 @@ export function PositionsPage() {
     queryKey: ['positions'],
     queryFn: () => api.get<Position[]>('/api/positions'),
   })
+  // Only for turning the attributed strategy id into a name; a position whose
+  // strategy has been deleted comes back unattributed anyway.
+  const strategiesQuery = useQuery({
+    queryKey: ['strategies'],
+    queryFn: () => api.get<Strategy[]>('/api/strategies'),
+  })
 
   const positions = positionsQuery.data ?? []
+  const strategies = strategiesQuery.data ?? []
 
   return (
     <div className="space-y-4">
@@ -216,6 +246,11 @@ export function PositionsPage() {
         <p className="text-slate-500">目前沒有持有部位。</p>
       )}
 
+      {/* The owner agreed to first-opener-wins on condition they could see
+          which strategy a position landed under, so the rule is spelled out
+          next to the column rather than left in a tooltip. */}
+      {positions.length > 0 && <p className="text-xs text-slate-500">{RISK_OWNER_HELP}</p>}
+
       {positions.length > 0 && (
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
@@ -225,12 +260,17 @@ export function PositionsPage() {
               <th className="pb-2 font-normal">平均成本</th>
               <th className="pb-2 font-normal">已實現損益</th>
               <th className="pb-2 font-normal">建倉時間</th>
+              <th className="pb-2 font-normal">風險設定</th>
               <th className="pb-2 font-normal">操作</th>
             </tr>
           </thead>
           <tbody>
             {positions.map((position) => (
-              <PositionRow key={position.symbol} position={position} />
+              <PositionRow
+                key={position.symbol}
+                position={position}
+                riskOwner={riskOwnerLabel(position, strategies)}
+              />
             ))}
           </tbody>
         </table>

@@ -4,14 +4,40 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrategiesPage } from './StrategiesPage'
 import { ApiError, api } from '../lib/api'
-import type { Strategy, StrategyAlert } from '../lib/types'
+import type { RiskSettings, Strategy, StrategyAlert } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }))
 
+// A strategy that never opted in to its own risk settings: every overridable
+// column is NULL, which is what every row written before overrides existed
+// holds.
+const NO_OVERRIDES = {
+  capital: null,
+  stop_loss_pct: null,
+  take_profit_pct: null,
+  max_position_qty: null,
+  max_order_notional: null,
+  max_pending_orders_per_symbol: null,
+  signal_cooldown_sec: null,
+  alert_interval_sec: null,
+}
+
+const GLOBAL_RISK: RiskSettings = {
+  capital: '100000',
+  stop_loss_pct: '0.05',
+  take_profit_pct: '0.1',
+  max_position_qty: '0',
+  max_order_notional: '0',
+  max_pending_orders_per_symbol: 3,
+  signal_cooldown_sec: 300,
+  alert_interval_sec: 900,
+}
+
 const STRATEGY: Strategy = {
+  ...NO_OVERRIDES,
   id: 1,
   name: 'ma5-cross',
   symbol: 'AAPL',
@@ -27,10 +53,15 @@ const STRATEGY: Strategy = {
   consecutive_errors: 0,
 }
 
+// The same strategy after opting in to two of the eight knobs; the other
+// six stay NULL and keep inheriting.
+const OVERRIDDEN: Strategy = { ...STRATEGY, capital: '50000', stop_loss_pct: '0.02' }
+
 const SAVED_SOURCE = 'class Strategy:\n    pass\n'
 const GENERATED_SOURCE = 'class Strategy:\n    def __init__(self):\n        self.name = "TSMC_MA5"\n'
 const AI_DESCRIPTION_LABEL = '想要的策略（用中文描述就可以）'
 const ALERT_ONLY_LABEL = '只提醒，不產生訂單'
+const RISK_OVERRIDE_LABEL = '使用個別風險設定'
 
 // The owner's own sentence, and the ambiguity inside it that the backend
 // refuses to settle on their behalf.
@@ -95,6 +126,7 @@ describe('StrategiesPage', () => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/strategies/samples') return [] as never
       if (path === '/api/strategies/1') return { ...STRATEGY, source_code: SAVED_SOURCE } as never
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
       return [] as never
     })
   })
@@ -699,5 +731,179 @@ describe('StrategiesPage', () => {
     await user.click(screen.getByRole('button', { name: '新增策略' }))
 
     expect(api.get).not.toHaveBeenCalledWith('/api/indicators')
+  })
+
+  it('keeps the per-strategy risk fields hidden until the strategy opts in', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+
+    expect(screen.getByLabelText(RISK_OVERRIDE_LABEL)).not.toBeChecked()
+    expect(screen.queryByLabelText('本金')).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+
+    expect(screen.getByLabelText('本金')).toBeInTheDocument()
+    expect(screen.getByLabelText('停損百分比')).toBeInTheDocument()
+    expect(screen.getByLabelText('提醒間隔（秒）')).toBeInTheDocument()
+  })
+
+  it('creates a strategy carrying no overrides at all while the toggle stays off', async () => {
+    // Off means inherit, and inherit means the columns stay NULL -- so the
+    // payload has to look exactly like it did before overrides existed.
+    vi.mocked(api.post).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'inheritor')
+    await user.type(screen.getByLabelText('股票代號'), 'TSLA')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/strategies', {
+        name: 'inheritor',
+        symbol: 'TSLA',
+        source_code: 'class Strategy: pass',
+        alert_only: false,
+      }),
+    )
+  })
+
+  it('shows the global value each override field would otherwise inherit', async () => {
+    // An empty box with no context is how someone sets a stop-loss to nothing
+    // by accident.
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('本金')).toHaveAttribute('placeholder', '沿用全域：100000'),
+    )
+    expect(screen.getByLabelText('停損百分比')).toHaveAttribute('placeholder', '沿用全域：0.05')
+    expect(screen.getByLabelText('提醒間隔（秒）')).toHaveAttribute('placeholder', '沿用全域：900')
+    expect(screen.getByText(/留空＝沿用全域設定（目前 100000）/)).toBeInTheDocument()
+  })
+
+  it('spells out that a blank box inherits while 0 means unlimited', async () => {
+    // For 本金 and 單筆最大金額 the two readings are expensive in opposite
+    // directions, so neither may be left to be inferred.
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+
+    expect(screen.getByText(/空白的欄位＝繼續沿用全域設定，不是 0/)).toBeInTheDocument()
+    expect(screen.getByText(/填 0 的意思是「不限制」/)).toBeInTheDocument()
+  })
+
+  it('sends null for the override fields left blank so they keep inheriting', async () => {
+    vi.mocked(api.post).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'capped')
+    await user.type(screen.getByLabelText('股票代號'), 'TSLA')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+    await user.type(screen.getByLabelText('本金'), '50000')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/strategies', {
+        name: 'capped',
+        symbol: 'TSLA',
+        source_code: 'class Strategy: pass',
+        alert_only: false,
+        capital: '50000',
+        stop_loss_pct: null,
+        take_profit_pct: null,
+        max_position_qty: null,
+        max_order_notional: null,
+        max_pending_orders_per_symbol: null,
+        signal_cooldown_sec: null,
+        alert_interval_sec: null,
+      }),
+    )
+  })
+
+  it('opens the edit form already switched on for a strategy with its own settings', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [OVERRIDDEN] as never
+      if (path === '/api/strategies/1') return { ...OVERRIDDEN, source_code: SAVED_SOURCE } as never
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+
+    expect(screen.getByLabelText(RISK_OVERRIDE_LABEL)).toBeChecked()
+    expect(screen.getByLabelText('本金')).toHaveValue('50000')
+    expect(screen.getByLabelText('停損百分比')).toHaveValue('0.02')
+    // Not overridden, so still blank rather than pre-filled with the global.
+    expect(screen.getByLabelText('停利百分比')).toHaveValue('')
+  })
+
+  it('clears every override when a strategy is switched back to the global settings', async () => {
+    // PATCH ignores absent fields, so opting back out has to send the nulls
+    // explicitly -- that is the only thing that empties the columns.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [OVERRIDDEN] as never
+      if (path === '/api/strategies/1') return { ...OVERRIDDEN, source_code: SAVED_SOURCE } as never
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
+      return [] as never
+    })
+    vi.mocked(api.patch).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+    await waitFor(() => expect(screen.getByLabelText('原始碼')).toHaveValue(SAVED_SOURCE))
+
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith('/api/strategies/1', {
+        name: 'ma5-cross',
+        symbol: 'AAPL',
+        alert_only: false,
+        source_code: SAVED_SOURCE,
+        capital: null,
+        stop_loss_pct: null,
+        take_profit_pct: null,
+        max_position_qty: null,
+        max_order_notional: null,
+        max_pending_orders_per_symbol: null,
+        signal_cooldown_sec: null,
+        alert_interval_sec: null,
+      }),
+    )
+  })
+
+  it('marks in the list which strategies run on their own risk settings', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') {
+        return [STRATEGY, { ...OVERRIDDEN, id: 2, name: 'own-risk' }] as never
+      }
+      return [] as never
+    })
+    renderPage()
+
+    const inheriting = (await screen.findByText('ma5-cross')).closest('tr')
+    expect(within(inheriting as HTMLElement).getByText('全域')).toBeInTheDocument()
+
+    const overriding = screen.getByText('own-risk').closest('tr')
+    expect(within(overriding as HTMLElement).getByText('自訂')).toBeInTheDocument()
   })
 })

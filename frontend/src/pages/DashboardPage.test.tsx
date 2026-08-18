@@ -9,7 +9,21 @@ import type { Order, Position, Quote, Strategy } from '../lib/types'
 vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 vi.mock('../lib/useWebSocket', () => ({ useWebSocket: vi.fn() }))
 
+// Inherits every risk knob from the global settings, like every strategy
+// written before overrides existed.
+const NO_OVERRIDES = {
+  capital: null,
+  stop_loss_pct: null,
+  take_profit_pct: null,
+  max_position_qty: null,
+  max_order_notional: null,
+  max_pending_orders_per_symbol: null,
+  signal_cooldown_sec: null,
+  alert_interval_sec: null,
+}
+
 const STRATEGY: Strategy = {
+  ...NO_OVERRIDES,
   id: 1,
   name: 's',
   symbol: 'AAPL',
@@ -31,6 +45,7 @@ const POSITION: Position = {
   avg_entry_price: '150',
   realized_pnl: '0',
   opened_at: null,
+  strategy_id: null,
 }
 
 const PENDING_ORDER: Order = {

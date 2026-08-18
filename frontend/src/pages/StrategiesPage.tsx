@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { RISK_FIELDS, riskFieldHelp } from '../lib/riskFields'
 import type {
   IndicatorCatalogue,
   OrderSide,
+  RiskSettings,
   SampleStrategy,
   Strategy,
   StrategyAlert,
@@ -151,6 +153,117 @@ function AlertOnlyField({
   )
 }
 
+const RISK_OVERRIDE_LABEL = '使用個別風險設定'
+const RISK_OVERRIDE_HELP =
+  '不打開的話，這個策略沿用「風險設定」頁的全域數字，跟現在完全一樣。打開之後，只填你真的要改的欄位就好。'
+const RISK_BLANK_MEANS_INHERIT =
+  '空白的欄位＝繼續沿用全域設定，不是 0。本金、最大持倉數量、單筆最大金額填 0 的意思是「不限制」，跟空白剛好相反，不要填錯。'
+
+/** One override box per knob, as raw text: what the owner typed, before it is
+ * read as a number or as "leave this one alone". */
+type RiskOverrideValues = Record<keyof RiskSettings, string>
+
+function emptyOverrides(): RiskOverrideValues {
+  return Object.fromEntries(RISK_FIELDS.map((f) => [f.key, ''])) as RiskOverrideValues
+}
+
+function overridesOf(strategy: Strategy): RiskOverrideValues {
+  return Object.fromEntries(
+    RISK_FIELDS.map((f) => [f.key, strategy[f.key] === null ? '' : String(strategy[f.key])]),
+  ) as RiskOverrideValues
+}
+
+function hasRiskOverrides(strategy: Strategy): boolean {
+  return RISK_FIELDS.some((f) => strategy[f.key] !== null)
+}
+
+/** A blank box means "keep inheriting this one", which the API spells as
+ * null. Never 0 -- for 本金 and 單筆最大金額 that would mean "no ceiling", and
+ * for the rest a real limit of zero, so guessing wrong here is expensive in
+ * both directions. */
+function overridePayload(
+  values: RiskOverrideValues,
+  enabled: boolean,
+): Record<string, string | null> {
+  return Object.fromEntries(
+    RISK_FIELDS.map((f) => {
+      const typed = enabled ? values[f.key].trim() : ''
+      return [f.key, typed === '' ? null : typed]
+    }),
+  )
+}
+
+function RiskOverrideFields({
+  idPrefix,
+  enabled,
+  onToggle,
+  values,
+  onChange,
+}: {
+  idPrefix: string
+  enabled: boolean
+  onToggle: (value: boolean) => void
+  values: RiskOverrideValues
+  onChange: (values: RiskOverrideValues) => void
+}) {
+  // The same key the risk settings page uses, so the globals shown here are
+  // whatever that page last saved rather than a second copy going stale.
+  const globalsQuery = useQuery({
+    queryKey: ['risk-settings'],
+    queryFn: () => api.get<RiskSettings>('/api/risk-settings'),
+  })
+  const globals = globalsQuery.data
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={`${idPrefix}-risk-override`} className="flex items-center gap-2 text-sm">
+        <input
+          id={`${idPrefix}-risk-override`}
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        {RISK_OVERRIDE_LABEL}
+      </label>
+      <p className="text-xs text-slate-500">{RISK_OVERRIDE_HELP}</p>
+
+      {enabled && (
+        <div className="space-y-3 rounded border border-slate-800 p-3">
+          <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+            {RISK_BLANK_MEANS_INHERIT}
+          </p>
+          {RISK_FIELDS.map((field) => {
+            // Until the globals land there is no number to name; the box still
+            // works and still means "inherit", it just cannot say what from.
+            const inherited = globals ? String(globals[field.key]) : null
+            const help = riskFieldHelp(field)
+            return (
+              <div key={field.key}>
+                <label htmlFor={`${idPrefix}-${field.key}`} className="text-sm text-slate-400">
+                  {field.label}
+                </label>
+                <input
+                  id={`${idPrefix}-${field.key}`}
+                  value={values[field.key]}
+                  onChange={(e) => onChange({ ...values, [field.key]: e.target.value })}
+                  placeholder={inherited === null ? '沿用全域' : `沿用全域：${inherited}`}
+                  className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  {inherited === null
+                    ? '留空＝沿用全域設定。'
+                    : `留空＝沿用全域設定（目前 ${inherited}）。`}
+                  {help}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: () => void }) {
   const [name, setName] = useState(strategy.name)
   const [symbol, setSymbol] = useState(strategy.symbol)
@@ -158,6 +271,10 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
   // in hand, so the box never renders in the wrong state while the detail
   // request is in flight.
   const [alertOnly, setAlertOnly] = useState(strategy.alert_only)
+  // Same reasoning: the eight override columns ride on the list row, so the
+  // toggle never renders off for a strategy that has its own settings.
+  const [riskOverride, setRiskOverride] = useState(() => hasRiskOverrides(strategy))
+  const [riskValues, setRiskValues] = useState(() => overridesOf(strategy))
   const [sourceCode, setSourceCode] = useState<string | null>(null)
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -190,6 +307,12 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
       // Only send source_code once the real one has loaded, so a save that
       // races the fetch can't overwrite the stored code with an empty box.
       if (sourceCode !== null) payload.source_code = sourceCode
+      // PATCH leaves absent fields alone, so a strategy that neither has
+      // overrides nor wants any sends none. Switching the toggle off has to
+      // send the nulls explicitly -- that is what empties the columns.
+      if (riskOverride || hasRiskOverrides(strategy)) {
+        Object.assign(payload, overridePayload(riskValues, riskOverride))
+      }
       return api.patch<Strategy>(`/api/strategies/${strategy.id}`, payload)
     },
     onSuccess: () => {
@@ -228,6 +351,13 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
         id={`edit-strategy-alert-only-${strategy.id}`}
         checked={alertOnly}
         onChange={setAlertOnly}
+      />
+      <RiskOverrideFields
+        idPrefix={`edit-strategy-${strategy.id}`}
+        enabled={riskOverride}
+        onToggle={setRiskOverride}
+        values={riskValues}
+        onChange={setRiskValues}
       />
       <div>
         <label htmlFor={`edit-strategy-code-${strategy.id}`} className="text-sm text-slate-400">
@@ -318,6 +448,21 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
             {strategy.alert_only ? '只提醒' : '會下單'}
           </span>
         </td>
+        {/* Which risk numbers this strategy is actually running on. An
+            override is invisible from the rest of the row, and a strategy
+            silently on someone else's limits is the thing this column exists
+            to stop. */}
+        <td className="py-2 pr-4">
+          <span
+            className={
+              hasRiskOverrides(strategy)
+                ? 'rounded border border-sky-700 bg-sky-950/40 px-2 py-0.5 text-xs text-sky-300'
+                : 'rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400'
+            }
+          >
+            {hasRiskOverrides(strategy) ? '自訂' : '全域'}
+          </span>
+        </td>
         <td className="py-2 pr-4 text-slate-400">{strategy.last_signal ?? '—'}</td>
         <td className="py-2 pr-4 text-red-400">
           {strategy.consecutive_errors > 0 ? strategy.last_error : ''}
@@ -347,7 +492,7 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
       </tr>
       {editing && (
         <tr>
-          <td colSpan={7} className="pb-4">
+          <td colSpan={8} className="pb-4">
             <EditStrategyForm strategy={strategy} onDone={() => setEditing(false)} />
           </td>
         </tr>
@@ -361,6 +506,8 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [symbol, setSymbol] = useState('')
   const [sourceCode, setSourceCode] = useState('')
   const [alertOnly, setAlertOnly] = useState(false)
+  const [riskOverride, setRiskOverride] = useState(false)
+  const [riskValues, setRiskValues] = useState(emptyOverrides)
   const [description, setDescription] = useState('')
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -454,6 +601,10 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         symbol,
         source_code: sourceCode,
         alert_only: alertOnly,
+        // Left out entirely while the toggle is off: the columns default to
+        // NULL, which is inherit, so an untouched form sends what it always
+        // sent.
+        ...(riskOverride ? overridePayload(riskValues, true) : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategies'] })
@@ -575,6 +726,13 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         />
       </div>
       <AlertOnlyField id="strategy-alert-only" checked={alertOnly} onChange={setAlertOnly} />
+      <RiskOverrideFields
+        idPrefix="strategy"
+        enabled={riskOverride}
+        onToggle={setRiskOverride}
+        values={riskValues}
+        onChange={setRiskValues}
+      />
       <div>
         <label htmlFor="strategy-code" className="text-sm text-slate-400">
           原始碼
@@ -723,6 +881,7 @@ export function StrategiesPage() {
             <th className="pb-2 font-normal">股票代號</th>
             <th className="pb-2 font-normal">狀態</th>
             <th className="pb-2 font-normal">模式</th>
+            <th className="pb-2 font-normal">風險設定</th>
             <th className="pb-2 font-normal">最新訊號</th>
             <th className="pb-2 font-normal">錯誤</th>
             <th className="pb-2 font-normal">操作</th>

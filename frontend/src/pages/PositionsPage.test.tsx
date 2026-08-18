@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PositionsPage } from './PositionsPage'
@@ -16,6 +16,7 @@ const POSITION: Position = {
   avg_entry_price: '150',
   realized_pnl: '25.50',
   opened_at: '2026-08-16T00:00:00Z',
+  strategy_id: null,
 }
 
 function renderPage() {
@@ -99,5 +100,33 @@ describe('PositionsPage', () => {
         avg_entry_price: '200',
       }),
     )
+  })
+
+  it("shows whose risk settings each position's stop-loss runs on", async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/positions') return [{ ...POSITION, strategy_id: 7 }] as never
+      if (path === '/api/strategies') return [{ id: 7, name: 'ma5-cross' }] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr')
+    expect(within(row as HTMLElement).getByText('ma5-cross')).toBeInTheDocument()
+  })
+
+  it('shows 全域 for a position no strategy opened', async () => {
+    // Manual orders and TradingView fills are unattributed and run on the
+    // global thresholds.
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr')
+    expect(within(row as HTMLElement).getByText('全域')).toBeInTheDocument()
+  })
+
+  it('explains that the strategy which opened a position keeps it', async () => {
+    // The owner accepted first-opener-wins only on condition it is visible.
+    renderPage()
+
+    expect(await screen.findByText(/由誰先建立部位就跟誰/)).toBeInTheDocument()
   })
 })

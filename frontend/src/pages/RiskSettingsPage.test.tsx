@@ -64,6 +64,23 @@ describe('RiskSettingsPage', () => {
     expect(screen.getByText(/填 0 表示每次訊號都通知/)).toBeInTheDocument()
   })
 
+  it('frames these as the defaults every strategy inherits unless it overrides them', async () => {
+    renderPage()
+
+    expect(await screen.findByText(/這一頁是全域預設值/)).toBeInTheDocument()
+    expect(screen.getByText(/沒有打開的策略一律沿用這裡/)).toBeInTheDocument()
+  })
+
+  it('warns that 本金 now rejects orders and that 0 means unlimited', async () => {
+    // 本金 was stored and displayed since v1 but enforced nowhere, so a
+    // number typed in months ago is about to start blocking buys.
+    renderPage()
+
+    expect(await screen.findByText(/本金現在會真的擋單/)).toBeInTheDocument()
+    expect(screen.getByText(/以前這個欄位只是存起來顯示/)).toBeInTheDocument()
+    expect(screen.getAllByText(/填 0 表示不限制/).length).toBeGreaterThan(0)
+  })
+
   it('saves the alert interval', async () => {
     vi.mocked(api.put).mockResolvedValue({ ...SETTINGS, alert_interval_sec: 0 } as never)
     const user = userEvent.setup()

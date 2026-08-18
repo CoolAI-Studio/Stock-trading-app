@@ -1,28 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { RISK_FIELDS, riskFieldHelp } from '../lib/riskFields'
 import type { RiskSettings } from '../lib/types'
-
-// The last two are both throttles and are easy to mistake for each other,
-// so each says in its own label and help text which pipeline it gates.
-const FIELDS: Array<{ key: keyof RiskSettings; label: string; help?: string }> = [
-  { key: 'capital', label: '本金' },
-  { key: 'stop_loss_pct', label: '停損百分比' },
-  { key: 'take_profit_pct', label: '停利百分比' },
-  { key: 'max_position_qty', label: '最大持倉數量' },
-  { key: 'max_order_notional', label: '單筆最大金額' },
-  { key: 'max_pending_orders_per_symbol', label: '單一代號最大待確認訂單數' },
-  {
-    key: 'signal_cooldown_sec',
-    label: '下單訊號冷卻時間（秒）',
-    help: '管「下單」：同一個策略的訊號在這段時間內，只會產生一張待確認訂單，避免同一波行情被重複下單。',
-  },
-  {
-    key: 'alert_interval_sec',
-    label: '提醒間隔（秒）',
-    help: '管「通知」：只提醒策略最快每隔這麼久才會再通知你一次，跟上面的下單冷卻是兩回事，這個完全不影響訂單。價格在策略的門檻附近上下震盪時，同一個訊號會一直重複觸發，這個間隔就是用來避免手機被洗版。填 0 表示每次訊號都通知。',
-  },
-]
 
 export function RiskSettingsPage() {
   const queryClient = useQueryClient()
@@ -49,21 +29,37 @@ export function RiskSettingsPage() {
     <div className="max-w-md space-y-4">
       <h1 className="text-lg font-semibold">風險設定</h1>
 
+      <div className="space-y-2">
+        <p className="text-sm text-slate-400">
+          這一頁是全域預設值，手動下單和 TradingView
+          訊號一律照這裡的數字走。個別策略可以在「策略」頁打開「使用個別風險設定」自己覆蓋，沒有打開的策略一律沿用這裡，改了這裡它們就跟著改。
+        </p>
+        {/* Not a footnote: 本金 has been stored and displayed since v1 while
+            doing nothing at all, so a number typed in months ago is about to
+            start rejecting orders without anybody having changed it. */}
+        <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+          注意：本金現在會真的擋單了。以前這個欄位只是存起來顯示，什麼都不會做；從現在起，買進後持倉總成本會超過本金的訊號會被拒絕。如果這個數字是你很久以前隨手填的，請先確認它還是你要的——填 0 表示不限制。
+        </p>
+      </div>
+
       <div className="space-y-3">
-        {FIELDS.map(({ key, label, help }) => (
-          <div key={key}>
-            <label htmlFor={key} className="text-sm text-slate-400">
-              {label}
-            </label>
-            <input
-              id={key}
-              value={String(form[key])}
-              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
-            />
-            {help && <p className="mt-1 text-xs text-slate-500">{help}</p>}
-          </div>
-        ))}
+        {RISK_FIELDS.map((field) => {
+          const help = riskFieldHelp(field)
+          return (
+            <div key={field.key}>
+              <label htmlFor={field.key} className="text-sm text-slate-400">
+                {field.label}
+              </label>
+              <input
+                id={field.key}
+                value={String(form[field.key])}
+                onChange={(e) => setForm({ ...form, [field.key]: e.target.value })}
+                className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              />
+              {help && <p className="mt-1 text-xs text-slate-500">{help}</p>}
+            </div>
+          )
+        })}
       </div>
 
       <button
