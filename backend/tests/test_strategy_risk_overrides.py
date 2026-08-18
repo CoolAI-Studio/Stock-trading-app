@@ -622,6 +622,64 @@ def test_flattening_a_position_clears_its_attribution(auth_client, db_session):
     assert position.strategy_id is None
 
 
+def test_deleting_a_strategy_releases_the_positions_it_owned(auth_client, db_session):
+    """positions.strategy_id is declared ondelete="SET NULL", but SQLite only
+    honours a foreign key when PRAGMA foreign_keys is on and nothing in this
+    app turns it on -- so the declaration alone leaves the column pointing at
+    a strategy that no longer exists.
+
+    That is the one state where the exit scan and the positions page disagree:
+    the scan resolves the missing id to None and quietly reverts to the global
+    stop-loss, while the page still badges the position with the dead
+    strategy. Cleared here for the same reason flatten_position clears it, and
+    explicitly rather than by constraint so it holds on either backend.
+    """
+    user = _current_user(db_session)
+    strategy = _make_strategy(db_session, user, stop_loss_pct=Decimal("0.02"))
+    position = _make_position(
+        db_session,
+        user,
+        quantity=Decimal(10),
+        avg_entry_price=Decimal(100),
+        strategy_id=strategy.id,
+    )
+
+    assert auth_client.delete(f"/api/strategies/{strategy.id}").status_code == 204
+
+    db_session.refresh(position)
+    assert position.strategy_id is None
+    # And the owner is told so, rather than being shown a dead strategy's name.
+    assert auth_client.get("/api/positions").json()[0]["strategy_id"] is None
+
+
+def test_deleting_a_strategy_leaves_other_positions_attributed(auth_client, db_session):
+    """The release is targeted: deleting one strategy must not knock every
+    other position back onto the global thresholds."""
+    user = _current_user(db_session)
+    doomed = _make_strategy(db_session, user, name="doomed")
+    survivor = _make_strategy(db_session, user, name="survivor")
+    _make_position(
+        db_session,
+        user,
+        quantity=Decimal(10),
+        avg_entry_price=Decimal(100),
+        strategy_id=doomed.id,
+    )
+    kept = _make_position(
+        db_session,
+        user,
+        symbol="TSLA",
+        quantity=Decimal(5),
+        avg_entry_price=Decimal(200),
+        strategy_id=survivor.id,
+    )
+
+    assert auth_client.delete(f"/api/strategies/{doomed.id}").status_code == 204
+
+    db_session.refresh(kept)
+    assert kept.strategy_id == survivor.id
+
+
 # ---- migration against a populated database ----
 
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
+from app.models.position import Position
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.schemas.strategy import (
@@ -272,6 +273,18 @@ def delete_strategy(
     strategy_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
 ) -> None:
     strategy = _get_owned_strategy(db, user, strategy_id)
+    # Release the positions this strategy owned before it goes. The column
+    # declares ondelete="SET NULL", but SQLite only enforces a foreign key
+    # when PRAGMA foreign_keys is on and nothing here turns it on, so the
+    # constraint alone would leave it pointing at a row that no longer exists.
+    # The exit scan resolves that dangling id to None and reverts to the
+    # global stop-loss, while the positions page goes on badging the position
+    # with the dead strategy -- the gate and the display disagreeing is the
+    # one outcome the attribution column exists to prevent. Done explicitly
+    # rather than by constraint so it holds on Postgres too.
+    db.query(Position).filter(Position.strategy_id == strategy.id).update(
+        {Position.strategy_id: None}, synchronize_session=False
+    )
     db.delete(strategy)
     db.commit()
 
