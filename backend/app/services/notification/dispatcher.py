@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.session import SessionLocal
 from app.models.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
@@ -76,6 +77,13 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
     Returns what was delivered. The bus discards the return value; callers
     that need to know whether the user was actually reached (services/alerts.py)
     call this directly."""
+    # Checked here, not only at the bus subscription in main.py: services/alerts.py
+    # calls this function directly, so a switch applied only at subscribe time
+    # would leave alert-only strategies -- the one pipeline that exists purely
+    # to notify -- still notifying after the owner turned notifications off.
+    if not settings.NOTIFICATIONS_ENABLED:
+        return DispatchResult(error="notifications are disabled")
+
     user_id = event.data.get("user_id")
     if user_id is None or event.type not in _DISPATCHED_EVENT_TYPES:
         return DispatchResult()

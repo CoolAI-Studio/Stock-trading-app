@@ -1,14 +1,15 @@
 """Alert-only strategies: a strategy whose BUY/SELL notifies the owner and
 records the signal, but never creates a pending order."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from alembic.config import Config
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 
 from alembic import command
 from app.models.enums import ChannelType, DataSource, NotificationStatus, OrderSide
@@ -20,9 +21,11 @@ from app.models.strategy import Strategy, StrategyAlert
 from app.models.user import User
 from app.services import alerts, market_loop
 from app.services.events import Event
+from app.services.market_data.base import Quote
 from app.services.market_data.providers.mock_provider import MockProvider
 from app.services.market_data.service import MarketDataService
 from app.services.notification import dispatcher
+from app.services.notification.base import SendResult
 
 ALWAYS_BUY_SOURCE = """
 class Strategy:
@@ -46,10 +49,10 @@ def _make_user(db_session, email="alert@example.com") -> User:
 def _make_strategy(db_session, user, alert_only=True, **overrides) -> Strategy:
     overrides.setdefault("is_active", True)
     overrides.setdefault("name", "test-strategy")
+    overrides.setdefault("source_code", ALWAYS_BUY_SOURCE)
     strategy = Strategy(
         user_id=user.id,
         symbol="AAPL",
-        source_code=ALWAYS_BUY_SOURCE,
         code_hash="irrelevant-for-tests",
         alert_only=alert_only,
         **overrides,
@@ -265,6 +268,28 @@ def test_a_delivery_nobody_received_is_not_a_success(db_session):
     assert db_session.query(StrategyAlert).one().status == NotificationStatus.FAILED
 
 
+def test_notifications_disabled_silences_alert_only_strategies_too(db_session, monkeypatch):
+    """NOTIFICATIONS_ENABLED is the owner's off switch for the whole
+    notification subsystem. Alerts dispatch inline instead of through the
+    bus, which is the only place main.py applies that switch, so turning
+    notifications off has to be honoured here as well -- otherwise the one
+    pipeline that exists purely to send notifications keeps sending them."""
+    monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", False)
+    user = _make_user(db_session)
+    _make_channel(db_session, user)
+    _make_strategy(db_session, user, alert_only=True)
+
+    with patch("httpx.post") as mock_post:
+        _tick(db_session)
+
+    mock_post.assert_not_called()
+    # Recorded, not swallowed: the strategy did fire, and an alert the owner
+    # was never sent must not start the throttle clock.
+    row = db_session.query(StrategyAlert).one()
+    assert row.status == NotificationStatus.FAILED
+    assert "disabled" in (row.error or "")
+
+
 def test_retry_is_bounded_for_a_permanently_dead_channel(db_session):
     user = _make_user(db_session)
     _make_channel(db_session, user)
@@ -342,6 +367,21 @@ def test_dispatcher_with_no_channels_is_not_a_success(db_session):
 
     assert result.ok is False
     assert result.delivered == 0
+
+
+def test_dispatcher_sends_nothing_when_notifications_are_disabled(db_session, monkeypatch):
+    monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", False)
+    user = _make_user(db_session)
+    _make_channel(db_session, user)
+
+    with patch("httpx.post") as mock_post:
+        result = dispatcher.handle_event(
+            Event(type="order.created", data={"order_id": 1, "user_id": user.id}), db=db_session
+        )
+
+    mock_post.assert_not_called()
+    assert result.ok is False
+    assert "disabled" in (result.error or "")
 
 
 def test_alert_message_names_the_strategy_symbol_side_and_price():
@@ -538,3 +578,131 @@ def test_migration_leaves_existing_rows_alone(tmp_path, monkeypatch):
             connection.execute(text("SELECT alert_interval_sec FROM risk_settings")).scalar() == 900
         )
     engine.dispose()
+
+
+# ---- end to end: a price series that oscillates across the threshold ----
+
+
+class _FakeClock:
+    """Drives both halves of the throttle -- the cutoff it compares against
+    and the timestamp stamped on each recorded alert -- so hours of polling
+    can be replayed in milliseconds."""
+
+    def __init__(self) -> None:
+        self.now = datetime(2026, 8, 18, 13, 30, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, seconds: int) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
+class _StubSender:
+    """Stands in for Telegram/email/web push: counts what actually went out."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def send(self, config: dict, message: str) -> SendResult:
+        self.messages.append(message)
+        return SendResult(ok=True)
+
+
+class _FixedPriceProvider:
+    """MockProvider walks the price randomly, which would cross the threshold
+    on its own schedule. This one says exactly what the series says."""
+
+    def __init__(self) -> None:
+        self.price = 100.0
+
+    def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
+        return {
+            symbol: Quote(
+                symbol=symbol,
+                data_source=DataSource.YFINANCE,
+                price=Decimal(str(self.price)),
+                quote_time=datetime.now(UTC),
+            )
+            for symbol in symbols
+        }
+
+
+THRESHOLD_SOURCE = """
+class Strategy:
+    def __init__(self):
+        self.name = "threshold_watch"
+        self.symbol = "AAPL"
+
+    def on_tick(self, current_price: float) -> str:
+        return "BUY" if current_price > 100 else "SELL"
+"""
+
+_OSCILLATION_TICKS = 240
+_POLL_SEC = 5
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(alerts, "utcnow", clock)
+
+    def _stamp(_mapper, _connection, target):
+        target.created_at = clock.now
+
+    event.listen(StrategyAlert, "before_insert", _stamp)
+    try:
+        yield clock
+    finally:
+        event.remove(StrategyAlert, "before_insert", _stamp)
+
+
+@pytest.fixture
+def stub_sender(monkeypatch):
+    sender = _StubSender()
+    monkeypatch.setitem(dispatcher.SENDERS, ChannelType.TELEGRAM, sender)
+    return sender
+
+
+def _drive_oscillation(db_session, clock, interval_sec: int) -> int:
+    """Polls a strategy whose threshold sits at 100 with a price that steps
+    over and back under it on every tick -- the exact shape the interval
+    exists for. Returns how many BUY/SELL signals the strategy produced."""
+    user = _make_user(db_session)
+    _make_channel(db_session, user)
+    _make_strategy(db_session, user, alert_only=True, source_code=THRESHOLD_SOURCE)
+    _set_alert_interval(db_session, user, interval_sec)
+
+    provider = _FixedPriceProvider()
+    service = MarketDataService(
+        providers={DataSource.YFINANCE: provider}, ttl_sec={DataSource.YFINANCE: 0.0}
+    )
+    for tick in range(_OSCILLATION_TICKS):
+        provider.price = 100.5 if tick % 2 == 0 else 99.5
+        market_loop.tick_once(db=db_session, market_data_service=service)
+        clock.advance(_POLL_SEC)
+    return _OSCILLATION_TICKS
+
+
+def test_oscillation_across_the_threshold_is_throttled_to_the_interval(
+    db_session, fake_clock, stub_sender
+):
+    signals = _drive_oscillation(db_session, fake_clock, interval_sec=900)
+
+    # 240 polls x 5s = 1200 simulated seconds, so a 900s interval opens two
+    # windows, and BUY and SELL run their own clocks: 2 sides x 2 windows.
+    assert signals == 240
+    assert len(stub_sender.messages) == 4
+    assert db_session.query(StrategyAlert).count() == 4
+    assert db_session.query(Order).count() == 0
+
+
+def test_interval_zero_notifies_on_every_one_of_those_signals(
+    db_session, fake_clock, stub_sender
+):
+    signals = _drive_oscillation(db_session, fake_clock, interval_sec=0)
+
+    assert signals == 240
+    assert len(stub_sender.messages) == 240
+    assert db_session.query(StrategyAlert).count() == 240
+    assert db_session.query(Order).count() == 0

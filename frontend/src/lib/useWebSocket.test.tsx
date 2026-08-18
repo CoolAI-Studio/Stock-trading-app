@@ -77,6 +77,24 @@ describe('useWebSocket', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['market-quotes'] })
   })
 
+  it('refreshes the alert history on a strategy.alert event', async () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    renderWithClient(queryClient)
+
+    await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    MockWebSocket.instances[0].emit({
+      type: 'strategy.alert',
+      ts: 'now',
+      v: 1,
+      data: { strategy_id: 1, side: 'buy' },
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['strategy-alerts'] })
+    // The row's 最新訊號 moves with a delivered alert, so the list is stale too.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['strategies'] })
+  })
+
   it('does not connect when disabled', async () => {
     const queryClient = new QueryClient()
     const wrapper = ({ children }: { children: ReactNode }) => (

@@ -19,6 +19,14 @@ function handleMessage(message: WsEvent, queryClient: QueryClient): void {
     case 'strategy.error':
       queryClient.invalidateQueries({ queryKey: ['strategies'] })
       break
+    // A watch-only strategy produces nothing else -- no order, no position --
+    // so this event is the only thing that can move its record on screen, and
+    // refetchOnWindowFocus is off. Without it the alert history the mode
+    // exists to build sits frozen for as long as the page stays open.
+    case 'strategy.alert':
+      queryClient.invalidateQueries({ queryKey: ['strategy-alerts'] })
+      queryClient.invalidateQueries({ queryKey: ['strategies'] })
+      break
     default:
       break
   }
