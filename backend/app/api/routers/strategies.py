@@ -26,6 +26,7 @@ from app.services.strategy_generator import (
     build_request_prompt,
     build_system_prompt,
     extract_code,
+    extract_question,
 )
 from app.services.strategy_runtime import StrategyValidationError, code_hash, compile_strategy
 
@@ -93,6 +94,11 @@ def _to_generate_result(
         source_code=source_code,
         detected_name=validation.detected_name,
         detected_symbol=validation.detected_symbol,
+        # Carried through so the editor can say which candle the strategy
+        # decided to work in: "周線" was the owner's word, and a strategy that
+        # quietly came back daily reads identically in the source box.
+        entry_point=validation.entry_point,
+        timeframe=validation.timeframe,
         sample_signals=validation.sample_signals,
     )
 
@@ -135,11 +141,21 @@ def generate_strategy(
     """
     provider = get_ai_provider()
     system_prompt = build_system_prompt()
-    request_prompt = build_request_prompt(payload.description, payload.symbol)
+    request_prompt = build_request_prompt(
+        payload.description, payload.symbol, payload.question, payload.answer
+    )
 
     first = provider.ask(request_prompt, system=system_prompt)
     if not first.ok:
         return StrategyGenerateResult(ok=False, error=first.error)
+
+    # Checked before the code, and only on this first round: a question is not
+    # something the repair round can fix, and by then the model has committed
+    # to source the owner can still read and correct. `error` stays None --
+    # being asked something is not a failure.
+    question = extract_question(first.reply)
+    if question:
+        return StrategyGenerateResult(ok=False, question=question)
 
     source_code = extract_code(first.reply)
     if not source_code:

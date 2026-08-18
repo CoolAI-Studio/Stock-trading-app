@@ -32,6 +32,42 @@ const GENERATED_SOURCE = 'class Strategy:\n    def __init__(self):\n        self
 const AI_DESCRIPTION_LABEL = '想要的策略（用中文描述就可以）'
 const ALERT_ONLY_LABEL = '只提醒，不產生訂單'
 
+// The owner's own sentence, and the ambiguity inside it that the backend
+// refuses to settle on their behalf.
+const OWNER_DESCRIPTION =
+  '台積電周線 RSI>80 後，等待 MACD 快慢線交叉向下後的第二根K線收盤時，快慢線沒收斂時觸發賣出警訊'
+const CLARIFYING_QUESTION =
+  '「快慢線沒收斂」有兩種讀法：（A）兩線的距離還在繼續擴大（B）只要兩線還沒交叉回來。你要哪一種？'
+
+const CATALOGUE = {
+  categories: [
+    { name: 'trend', label: '趨勢', count: 1 },
+    { name: 'momentum', label: '動能', count: 1 },
+  ],
+  indicators: [
+    {
+      name: 'macd',
+      category: 'trend',
+      title: '指數平滑異同移動平均 (MACD)',
+      description: 'macd 是快線，signal 是慢線。',
+      signature: 'macd(values, fast_period=12, slow_period=26, signal_period=9)',
+      result: 'series_map',
+      keys: ['macd', 'signal', 'histogram'],
+      params: [],
+    },
+    {
+      name: 'rsi',
+      category: 'momentum',
+      title: '相對強弱指標 (RSI)',
+      description: '0~100 的動能指標。',
+      signature: 'rsi(values, period=14)',
+      result: 'series',
+      keys: [],
+      params: [],
+    },
+  ],
+}
+
 const ALERT: StrategyAlert = {
   id: 7,
   strategy_id: 1,
@@ -507,5 +543,161 @@ describe('StrategiesPage', () => {
     renderPage()
 
     expect(await screen.findByText('目前沒有提醒紀錄。')).toBeInTheDocument()
+  })
+
+  it('shows which candle a generated strategy decided to work in', async () => {
+    // 「周線」 was the owner's own word. A strategy that quietly came back
+    // daily reads identically in the source box, so the box cannot be the
+    // only place this is visible.
+    vi.mocked(api.post).mockResolvedValue({
+      ok: true,
+      error: null,
+      source_code: GENERATED_SOURCE,
+      detected_name: 'TSMC_WEEKLY',
+      detected_symbol: '2330.TW',
+      entry_point: 'on_bar',
+      timeframe: '1wk',
+      question: null,
+      sample_signals: ['HOLD'],
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), OWNER_DESCRIPTION)
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(
+      await screen.findByText('偵測到：TSMC_WEEKLY（2330.TW）・每根週線收盤時判斷'),
+    ).toBeInTheDocument()
+  })
+
+  it('says a tick strategy reacts to every quote rather than to a candle', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ok: true,
+      error: null,
+      source_code: GENERATED_SOURCE,
+      detected_name: 'TSMC_MA5',
+      detected_symbol: '2330.TW',
+      entry_point: 'on_tick',
+      timeframe: null,
+      question: null,
+      sample_signals: ['HOLD'],
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線向上就買進')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(
+      await screen.findByText('偵測到：TSMC_MA5（2330.TW）・每次報價更新時判斷'),
+    ).toBeInTheDocument()
+  })
+
+  it('surfaces a clarifying question instead of a guessed strategy', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ok: false,
+      error: null,
+      source_code: null,
+      detected_name: null,
+      detected_symbol: null,
+      entry_point: null,
+      timeframe: null,
+      question: CLARIFYING_QUESTION,
+      sample_signals: null,
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), OWNER_DESCRIPTION)
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(await screen.findByText(CLARIFYING_QUESTION)).toBeInTheDocument()
+    // Nothing may land in the code box: a guess there would look finished.
+    expect(screen.getByLabelText('原始碼')).toHaveValue('')
+    // And it is a question, not a failure -- the generic failure text would
+    // train the owner to ignore it.
+    expect(screen.queryByText(/產生策略失敗/)).not.toBeInTheDocument()
+  })
+
+  it('sends the answer back with the question and then fills in the strategy', async () => {
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({
+        ok: false,
+        error: null,
+        source_code: null,
+        detected_name: null,
+        detected_symbol: null,
+        entry_point: null,
+        timeframe: null,
+        question: CLARIFYING_QUESTION,
+        sample_signals: null,
+      } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        error: null,
+        source_code: GENERATED_SOURCE,
+        detected_name: 'TSMC_WEEKLY',
+        detected_symbol: '2330.TW',
+        entry_point: 'on_bar',
+        timeframe: '1wk',
+        question: null,
+        sample_signals: ['HOLD'],
+      } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), OWNER_DESCRIPTION)
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    await screen.findByText(CLARIFYING_QUESTION)
+    await user.type(screen.getByLabelText('你的回答'), '（A）兩線的距離還在繼續擴大')
+    await user.click(screen.getByRole('button', { name: '回答並重新產生' }))
+
+    // The question travels back with the answer: the model is single-turn, so
+    // "（A）" on its own answers nothing.
+    await waitFor(() =>
+      expect(api.post).toHaveBeenLastCalledWith('/api/strategies/generate', {
+        description: OWNER_DESCRIPTION,
+        symbol: null,
+        question: CLARIFYING_QUESTION,
+        answer: '（A）兩線的距離還在繼續擴大',
+      }),
+    )
+    await waitFor(() => expect(screen.getByLabelText('原始碼')).toHaveValue(GENERATED_SOURCE))
+    expect(screen.queryByText(CLARIFYING_QUESTION)).not.toBeInTheDocument()
+  })
+
+  it('lets the owner browse the indicators the runtime already provides', async () => {
+    // Otherwise "which indicators do I have?" is answered by guessing, and a
+    // description that names one that does not exist comes back hand-rolled.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/indicators') return CATALOGUE as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '看看有哪些指標可以用' }))
+
+    expect(await screen.findByText('rsi(values, period=14)')).toBeInTheDocument()
+    expect(screen.getByText('相對強弱指標 (RSI)')).toBeInTheDocument()
+    expect(screen.getByText('動能（1）')).toBeInTheDocument()
+    expect(screen.getByText('趨勢（1）')).toBeInTheDocument()
+  })
+
+  it('does not fetch the indicator catalogue until it is asked for', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+
+    expect(api.get).not.toHaveBeenCalledWith('/api/indicators')
   })
 })

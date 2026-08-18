@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from app.services import strategy_runtime
 from app.services.ai_provider import AIResult
+from app.services.market_data.base import Timeframe, bars_from_closes
 
 # .strip() throughout: the endpoint trims the whitespace it peels the code
 # out of, so untrimmed fixtures would never compare equal to a response.
@@ -322,3 +323,196 @@ def test_a_realistic_reply_yields_code_that_saves_and_ticks(auth_client):
 def test_generate_requires_auth(client):
     resp = client.post("/api/strategies/generate", json={"description": "均線策略"})
     assert resp.status_code == 401
+
+
+# --- candles, and asking instead of guessing ---------------------------------
+
+# The owner's own sentence, verbatim. Everything below drives the endpoint with
+# it, because it is the request the whole candle/indicator foundation was built
+# to be able to answer -- and the one that contains an ambiguity ("沒收斂") a
+# model must not settle on its own.
+OWNER_REQUEST = (
+    "台積電周線 RSI>80 後，等待 MACD 快慢線交叉向下後的第二根K線收盤時，"
+    "快慢線沒收斂時觸發賣出警訊"
+)
+
+CLARIFYING_QUESTION = (
+    "「快慢線沒收斂」有兩種讀法，會做出兩種不同的策略，請問你要哪一種？"
+    "（A）兩線的距離還在繼續擴大（B）只要兩線還沒有再交叉回來就算"
+)
+
+# What the contract asks for once 收斂 has been pinned down: weekly candles,
+# on_bar, and the runtime's own RSI/MACD rather than a hand-rolled pair.
+WEEKLY_MACD_SOURCE = '''class Strategy:
+    def __init__(self):
+        self.name = "TSMC_WEEKLY_MACD"
+        self.symbol = "2330.TW"
+        # 周線：一根 K 線就是一週，只在收盤時判斷一次
+        self.timeframe = "1wk"
+        # MACD(12,26,9) 的慢線要到第 34 根 K 線才有值
+        self.warmup_bars = 40
+        self.closes = []
+        self.rsi_hot = False
+        self.bars_since_cross = None
+
+    def on_bar(self, bar) -> str:
+        self.closes.append(bar.close)
+        if len(self.closes) > 200:
+            self.closes.pop(0)
+
+        rsi = indicators.rsi(self.closes, 14)
+        macd = indicators.macd(self.closes)
+        fast = macd["macd"]
+        slow = macd["signal"]
+        if len(fast) < 2:
+            return "HOLD"
+        if fast[-1] is None or slow[-1] is None or fast[-2] is None or slow[-2] is None:
+            return "HOLD"
+
+        # RSI 超買（>80）先記下來，等後面的死亡交叉
+        if rsi[-1] is not None and rsi[-1] > 80:
+            self.rsi_hot = True
+
+        # 死亡交叉：快線由上往下穿過慢線
+        if self.rsi_hot and fast[-2] >= slow[-2] and fast[-1] < slow[-1]:
+            self.bars_since_cross = 0
+            return "HOLD"
+
+        if self.bars_since_cross is None:
+            return "HOLD"
+
+        # 數的是已收盤的 K 線，不是 tick
+        self.bars_since_cross += 1
+        if self.bars_since_cross < 2:
+            return "HOLD"
+
+        # 交叉後第二根 K 線收盤：兩線距離還在擴大（沒收斂）就發賣出警訊
+        self.bars_since_cross = None
+        self.rsi_hot = False
+        if abs(fast[-1] - slow[-1]) > abs(fast[-2] - slow[-2]):
+            return "SELL"
+        return "HOLD"
+'''.strip()
+
+
+def test_an_ambiguous_description_comes_back_as_a_question_instead_of_code(auth_client):
+    """The owner cannot read Python, so a guess is indistinguishable from an
+    answer -- and it gets traded on. The question has to reach them as a
+    question, not as a strategy that quietly picked a reading."""
+    provider = FakeProvider(AIResult(ok=True, reply=f"QUESTION: {CLARIFYING_QUESTION}"))
+
+    resp = _generate(auth_client, provider, description=OWNER_REQUEST)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["question"] == CLARIFYING_QUESTION
+    assert body["source_code"] is None
+    assert body["ok"] is False
+    # A question is not a failure, so it must not be dressed as one.
+    assert body["error"] is None
+    # And it is not something a repair round can fix, so no second call.
+    assert len(provider.calls) == 1
+
+
+def test_code_attached_to_a_question_is_not_handed_over_as_a_strategy(auth_client):
+    """A model hedging by asking AND attaching its guess is the exact failure
+    this exists to stop: the attached code looks finished."""
+    reply = f"QUESTION: {CLARIFYING_QUESTION}\n\n```python\n{GENERATED_SOURCE}\n```"
+    provider = FakeProvider(AIResult(ok=True, reply=reply))
+
+    resp = _generate(auth_client, provider, description=OWNER_REQUEST)
+
+    body = resp.json()
+    assert body["question"] == CLARIFYING_QUESTION
+    assert body["source_code"] is None
+
+
+def test_the_owners_answer_goes_back_with_the_original_request(auth_client):
+    provider = FakeProvider(AIResult(ok=True, reply=WEEKLY_MACD_SOURCE))
+
+    resp = _generate(
+        auth_client,
+        provider,
+        description=OWNER_REQUEST,
+        question=CLARIFYING_QUESTION,
+        answer="（A）兩線的距離還在繼續擴大",
+    )
+
+    assert resp.json()["ok"] is True, resp.text
+    message = provider.calls[0]["message"]
+    # Both halves: the answer alone is unreadable without the question, and
+    # the original request alone would have the model ask all over again.
+    assert OWNER_REQUEST in message
+    assert CLARIFYING_QUESTION in message
+    assert "（A）兩線的距離還在繼續擴大" in message
+
+
+def test_generate_reports_the_candle_size_an_on_bar_strategy_declared(auth_client):
+    """「周線」 is the owner's own word for it, and a strategy that quietly
+    came back daily looks identical in the editor."""
+    provider = FakeProvider(AIResult(ok=True, reply=WEEKLY_MACD_SOURCE))
+
+    resp = _generate(auth_client, provider, description=OWNER_REQUEST)
+
+    body = resp.json()
+    assert body["ok"] is True, body
+    assert body["entry_point"] == "on_bar"
+    assert body["timeframe"] == "1wk"
+
+
+def test_a_tick_strategy_still_reports_no_candle_size(auth_client):
+    provider = FakeProvider(AIResult(ok=True, reply=GENERATED_SOURCE))
+
+    resp = _generate(auth_client, provider)
+
+    body = resp.json()
+    assert body["entry_point"] == "on_tick"
+    assert body["timeframe"] is None
+    assert body["question"] is None
+
+
+def test_the_owners_sentence_end_to_end_asks_then_answers_in_weekly_candles(auth_client):
+    """The whole point, driven with the owner's actual words.
+
+    Round one must come back as a question about 收斂. Round two, with that
+    answered, must come back as a strategy that saves, runs on weekly candles
+    and actually fires -- on the second closed candle after the cross, using
+    the runtime's RSI and MACD rather than a hand-rolled pair.
+    """
+    asking = FakeProvider(AIResult(ok=True, reply=f"QUESTION: {CLARIFYING_QUESTION}"))
+    first = _generate(auth_client, asking, description=OWNER_REQUEST).json()
+    assert first["question"] == CLARIFYING_QUESTION
+    assert first["source_code"] is None
+
+    answering = FakeProvider(AIResult(ok=True, reply=WEEKLY_MACD_SOURCE))
+    second = _generate(
+        auth_client,
+        answering,
+        description=OWNER_REQUEST,
+        question=first["question"],
+        answer="（A）兩線的距離還在繼續擴大",
+    ).json()
+    assert second["ok"] is True, second
+    assert second["question"] is None
+    assert second["timeframe"] == "1wk"
+
+    created = auth_client.post(
+        "/api/strategies",
+        json={"name": "tsmc-weekly", "symbol": "2330.TW", "source_code": second["source_code"]},
+    )
+    assert created.status_code == 201, created.text
+
+    loaded = strategy_runtime.compile_strategy(second["source_code"])
+    assert loaded.timeframe is Timeframe.WEEK_1
+    assert loaded.entry_point == "on_bar"
+    assert loaded.warmup_bars == 40
+
+    # A long weekly advance (RSI well over 80, MACD fast above slow) and then
+    # a slide steep enough to cross the lines down and keep widening the gap.
+    rising = [100.0 * 1.03**i for i in range(60)]
+    falling = [rising[-1] * 0.96**i for i in range(1, 16)]
+    bars = bars_from_closes("2330.TW", Timeframe.WEEK_1, rising + falling)
+    signals = [loaded.on_bar(bar) for bar in bars]
+
+    assert set(signals) <= {"BUY", "SELL", "HOLD"}
+    assert "SELL" in signals

@@ -64,6 +64,13 @@ export interface StrategyValidateResult {
   error: string | null
   detected_name: string | null
   detected_symbol: string | null
+  /** "on_tick" (every quote) or "on_bar" (once per closed candle). The two
+   * read almost alike in source, so the form says which one it turned out to
+   * be rather than leaving it to be inferred. */
+  entry_point: string | null
+  /** The candle size an on_bar strategy declared; null for on_tick, which has
+   * no candles to declare. */
+  timeframe: string | null
   sample_signals: string[] | null
 }
 
@@ -72,6 +79,43 @@ export interface StrategyValidateResult {
  * null only when generation never got as far as producing any. */
 export interface StrategyGenerateResult extends StrategyValidateResult {
   source_code: string | null
+  /** Set when the description was ambiguous and the model asked instead of
+   * guessing. Never arrives together with source_code: a guess attached to a
+   * question would look like a finished strategy. */
+  question: string | null
+}
+
+export type IndicatorCategoryName = 'trend' | 'momentum' | 'volatility' | 'volume' | 'price'
+
+export interface IndicatorParam {
+  name: string
+  type: string
+  required: boolean
+  default: number | string | boolean | null
+}
+
+/** One entry of GET /api/indicators -- what the runtime can already compute,
+ * so a strategy description never has to guess at what exists. */
+export interface Indicator {
+  name: string
+  category: IndicatorCategoryName
+  title: string
+  description: string
+  signature: string
+  result: 'series' | 'series_map' | 'value_map'
+  keys: string[]
+  params: IndicatorParam[]
+}
+
+export interface IndicatorCategoryInfo {
+  name: IndicatorCategoryName
+  label: string
+  count: number
+}
+
+export interface IndicatorCatalogue {
+  categories: IndicatorCategoryInfo[]
+  indicators: Indicator[]
 }
 
 export interface SampleStrategy {

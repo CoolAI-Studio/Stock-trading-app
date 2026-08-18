@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import type {
+  IndicatorCatalogue,
   OrderSide,
   SampleStrategy,
   Strategy,
@@ -16,6 +17,19 @@ const OVERWRITE_CONFIRM = '原始碼欄位已經有內容，AI 產生的程式�
 
 const SIDE_LABEL: Record<OrderSide, string> = { buy: '買進', sell: '賣出' }
 
+// The runtime's own candle sizes, in the words the owner uses for them. Kept
+// as a lookup rather than shown raw: "1wk" is the value yfinance wants, not
+// something a non-programmer should have to recognise.
+const TIMEFRAME_LABEL: Record<string, string> = {
+  '1m': '1 分線',
+  '5m': '5 分線',
+  '15m': '15 分線',
+  '1h': '小時線',
+  '1d': '日線',
+  '1wk': '週線',
+  '1mo': '月線',
+}
+
 const ALERT_ONLY_LABEL = '只提醒，不產生訂單'
 const ALERT_ONLY_HELP = '勾選後，這個策略的買賣訊號只會發通知給你，不會產生需要確認的訂單。'
 
@@ -27,6 +41,89 @@ const SAMPLE_LABELS: Record<string, string> = {
 function sampleLabel(sample: SampleStrategy): string {
   const key = sample.filename.replace(/\.py$/, '')
   return SAMPLE_LABELS[key] ?? key
+}
+
+/** What the validator worked out about the code, in one line.
+ *
+ * The entry point is part of it because on_tick and on_bar read almost alike:
+ * a strategy the owner asked for in 週線 that quietly came back reacting to
+ * every quote looks exactly like one that did as it was told. */
+function detectionSummary(result: StrategyValidateResult): string {
+  const detected = `偵測到：${result.detected_name}（${result.detected_symbol}）`
+  if (result.entry_point === 'on_bar') {
+    const candle = TIMEFRAME_LABEL[result.timeframe ?? ''] ?? result.timeframe
+    return `${detected}・每根${candle}收盤時判斷`
+  }
+  if (result.entry_point === 'on_tick') {
+    return `${detected}・每次報價更新時判斷`
+  }
+  return detected
+}
+
+function ValidationSummary({ validation }: { validation: StrategyValidateResult }) {
+  return (
+    <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
+      {validation.ok ? detectionSummary(validation) : validation.error}
+    </p>
+  )
+}
+
+/** The indicator catalogue, on demand.
+ *
+ * The runtime ships 40 verified indicators, and nothing in the UI said so:
+ * the owner had to guess what was available, and a description naming
+ * something that does not exist comes back hand-rolled -- which is the exact
+ * failure the catalogue was built to remove. Fetched only when opened, since
+ * most visits to this form never need it. */
+function IndicatorCatalogueBrowser() {
+  const [open, setOpen] = useState(false)
+  const catalogueQuery = useQuery({
+    queryKey: ['indicators'],
+    queryFn: () => api.get<IndicatorCatalogue>('/api/indicators'),
+    enabled: open,
+  })
+  const catalogue = catalogueQuery.data
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded border border-slate-700 px-3 py-1 text-sm hover:bg-slate-800"
+      >
+        {open ? '收合指標清單' : '看看有哪些指標可以用'}
+      </button>
+      {open && (
+        <div className="space-y-3 rounded border border-slate-800 bg-slate-950/60 p-3">
+          <p className="text-xs text-slate-500">
+            這些指標系統都算好了，描述策略時直接講名字（例如「RSI」「MACD 快慢線」）就可以，不用自己算，也不要請
+            AI 自己寫一個——手寫的指標很容易差一點點，而且從結果看不出來。
+          </p>
+          {catalogueQuery.isError && (
+            <p className="text-sm text-red-400">指標清單讀取失敗，請重新整理再試。</p>
+          )}
+          {catalogue?.categories.map((category) => (
+            <div key={category.name} className="space-y-1">
+              <p className="text-sm font-semibold text-slate-300">
+                {category.label}（{category.count}）
+              </p>
+              <ul className="space-y-1">
+                {catalogue.indicators
+                  .filter((indicator) => indicator.category === category.name)
+                  .map((indicator) => (
+                    <li key={indicator.name} className="border-l border-slate-800 pl-2">
+                      <p className="font-mono text-xs text-emerald-300">{indicator.signature}</p>
+                      <p className="text-sm text-slate-300">{indicator.title}</p>
+                      <p className="text-xs text-slate-500">{indicator.description}</p>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function AlertOnlyField({
@@ -147,13 +244,7 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
         />
       </div>
 
-      {validation && (
-        <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
-          {validation.ok
-            ? `偵測到：${validation.detected_name}（${validation.detected_symbol}）`
-            : validation.error}
-        </p>
-      )}
+      {validation && <ValidationSummary validation={validation} />}
       {saveError && <p className="text-red-400">{saveError}</p>}
 
       <div className="flex gap-2">
@@ -274,6 +365,9 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
+  // What the AI asked instead of writing code, and what the owner replies.
+  const [question, setQuestion] = useState<string | null>(null)
+  const [answer, setAnswer] = useState('')
   const queryClient = useQueryClient()
 
   // Fill in from the code's own self.name/self.symbol so a sample, pasted
@@ -294,12 +388,29 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   })
 
   const generateMutation = useMutation({
-    mutationFn: () =>
-      api.post<StrategyGenerateResult>('/api/strategies/generate', {
+    mutationFn: (clarification: { question: string; answer: string } | null) => {
+      const payload: Record<string, unknown> = {
         description: description.trim(),
         symbol: symbol.trim() || null,
-      }),
+      }
+      // Only on a retry, and always as a pair: the model is single-turn, so
+      // an answer arriving without the question it answers is unreadable.
+      if (clarification) {
+        payload.question = clarification.question
+        payload.answer = clarification.answer
+      }
+      return api.post<StrategyGenerateResult>('/api/strategies/generate', payload)
+    },
     onSuccess: (result) => {
+      setQuestion(result.question)
+      if (result.question) {
+        // Nothing goes in the code box. The description had more than one
+        // reading and the model refused to pick one -- filling the box now
+        // would show the owner a finished-looking strategy built on a guess
+        // they never made.
+        setAnswer('')
+        return
+      }
       // The endpoint already compiled and tick-tested what it wrote, so its
       // answer doubles as the 驗證 outcome and the owner lands exactly where
       // 建立 expects them. Code that failed validation still goes in the box:
@@ -315,13 +426,18 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
     onError: (err) => setGenerateError(err instanceof ApiError ? err.message : GENERATE_FAILED),
   })
 
-  function handleGenerate() {
+  function startGeneration(clarification: { question: string; answer: string } | null) {
     if (!description.trim()) return
     if (sourceCode && !window.confirm(OVERWRITE_CONFIRM)) return
     setValidation(null)
     setCreateError(null)
     setGenerateError(null)
-    generateMutation.mutate()
+    generateMutation.mutate(clarification)
+  }
+
+  function handleAnswer() {
+    if (!question || !answer.trim()) return
+    startGeneration({ question, answer: answer.trim() })
   }
 
   function applySample(sample: SampleStrategy) {
@@ -387,7 +503,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           <button
             type="button"
             disabled={generateMutation.isPending || !description.trim()}
-            onClick={handleGenerate}
+            onClick={() => startGeneration(null)}
             className="rounded bg-slate-700 px-3 py-1 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
           >
             {generateMutation.isPending ? '產生中…' : 'AI 產生策略'}
@@ -399,6 +515,41 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           )}
         </div>
         {generateError && <p className="text-sm text-red-400">{generateError}</p>}
+
+        {/* Deliberately not styled as an error: being asked something is the
+            AI doing its job. The alternative -- letting it guess -- produces
+            a strategy that looks finished and does something else, and the
+            owner cannot read Python well enough to notice. */}
+        {question && (
+          <div className="space-y-2 rounded border border-amber-700 bg-amber-950/40 p-3">
+            <p className="text-sm font-semibold text-amber-300">AI 需要你先確認一件事</p>
+            <p className="text-xs text-amber-200/80">
+              你的描述有一個地方可以有兩種以上的解讀，猜錯會變成完全不同的策略，而且從程式碼上你也看不出來它猜了。先回答，再讓它重新寫。
+            </p>
+            <p className="whitespace-pre-line text-sm text-slate-200">{question}</p>
+            <label htmlFor="strategy-ai-answer" className="text-sm text-slate-400">
+              你的回答
+            </label>
+            <textarea
+              id="strategy-ai-answer"
+              value={answer}
+              onChange={(e) => setAnswer(e.target.value)}
+              rows={2}
+              placeholder="用中文回答就可以，例如：選（A），兩線的距離還在擴大"
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+            />
+            <button
+              type="button"
+              disabled={generateMutation.isPending || !answer.trim()}
+              onClick={handleAnswer}
+              className="rounded bg-amber-700 px-3 py-1 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+            >
+              {generateMutation.isPending ? '重新產生中…' : '回答並重新產生'}
+            </button>
+          </div>
+        )}
+
+        <IndicatorCatalogueBrowser />
       </div>
 
       <div>
@@ -437,13 +588,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         />
       </div>
 
-      {validation && (
-        <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
-          {validation.ok
-            ? `偵測到：${validation.detected_name}（${validation.detected_symbol}）`
-            : validation.error}
-        </p>
-      )}
+      {validation && <ValidationSummary validation={validation} />}
       {createError && <p className="text-red-400">{createError}</p>}
 
       {/* Both are locked while the AI writes: the answer is about to replace

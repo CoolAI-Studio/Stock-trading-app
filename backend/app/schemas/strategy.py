@@ -79,6 +79,11 @@ class StrategyValidateResult(BaseModel):
 class StrategyGenerateRequest(BaseModel):
     description: str = Field(min_length=1, max_length=4000)
     symbol: str | None = Field(default=None, max_length=32)
+    # A previous round can come back as a question instead of code. These
+    # carry it and the owner's answer into the retry, because ask() is
+    # single-turn: anything not restated here never reaches the model.
+    question: str | None = Field(default=None, max_length=2000)
+    answer: str | None = Field(default=None, max_length=2000)
 
 
 class StrategyGenerateResult(StrategyValidateResult):
@@ -88,6 +93,13 @@ class StrategyGenerateResult(StrategyValidateResult):
     as far as producing any."""
 
     source_code: str | None = None
+    # Set when the model asked for a clarification instead of writing code.
+    # A separate field from `error` on purpose: being asked a question is not
+    # a failure, and showing it as one would train the owner to ignore it.
+    # The alternative -- letting the model guess -- produces a strategy that
+    # looks finished and quietly does something else, which the owner cannot
+    # read Python well enough to catch.
+    question: str | None = None
 
 
 class SampleStrategyInfo(BaseModel):
