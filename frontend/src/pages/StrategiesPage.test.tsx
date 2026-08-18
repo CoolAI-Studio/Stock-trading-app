@@ -25,6 +25,8 @@ const STRATEGY: Strategy = {
   consecutive_errors: 0,
 }
 
+const SAVED_SOURCE = 'class Strategy:\n    pass\n'
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -40,6 +42,7 @@ describe('StrategiesPage', () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/strategies/samples') return [] as never
+      if (path === '/api/strategies/1') return { ...STRATEGY, source_code: SAVED_SOURCE } as never
       return [] as never
     })
   })
@@ -113,13 +116,28 @@ describe('StrategiesPage', () => {
     expect(screen.getByLabelText('股票代號')).toHaveValue('AAPL')
   })
 
-  it('edits a strategy without touching its source code', async () => {
+  it('prefills the editor with the saved source code', async () => {
+    // Regression: the editor opened blank because the list response omits
+    // source_code and nothing fetched it. That is indistinguishable from the
+    // code having been lost -- and saving from that state used to be the only
+    // thing standing between the user and actually losing it.
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+
+    await waitFor(() => expect(screen.getByLabelText('原始碼')).toHaveValue(SAVED_SOURCE))
+  })
+
+  it('edits a strategy and resends its source code unchanged', async () => {
     vi.mocked(api.patch).mockResolvedValue({ ...STRATEGY, name: 'renamed' } as never)
     const user = userEvent.setup()
     renderPage()
 
     await screen.findByText('ma5-cross')
     await user.click(screen.getByRole('button', { name: '編輯' }))
+    await waitFor(() => expect(screen.getByLabelText('原始碼')).toHaveValue(SAVED_SOURCE))
 
     const nameInput = screen.getByLabelText('名稱')
     await user.clear(nameInput)
@@ -127,7 +145,11 @@ describe('StrategiesPage', () => {
     await user.click(screen.getByRole('button', { name: '儲存' }))
 
     await waitFor(() =>
-      expect(api.patch).toHaveBeenCalledWith('/api/strategies/1', { name: 'renamed', symbol: 'AAPL' }),
+      expect(api.patch).toHaveBeenCalledWith('/api/strategies/1', {
+        name: 'renamed',
+        symbol: 'AAPL',
+        source_code: SAVED_SOURCE,
+      }),
     )
   })
 

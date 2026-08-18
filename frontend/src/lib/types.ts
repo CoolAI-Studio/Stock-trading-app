@@ -37,6 +37,12 @@ export interface Strategy {
   consecutive_errors: number
 }
 
+/** GET /api/strategies/{id} -- unlike the list response, this carries the
+ * source so the edit form can prefill it. */
+export interface StrategyDetail extends Strategy {
+  source_code: string
+}
+
 export interface StrategyValidateResult {
   ok: boolean
   error: string | null

@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.strategy import (
     SampleStrategyInfo,
     StrategyCreate,
+    StrategyDetail,
     StrategyRead,
     StrategyUpdate,
     StrategyValidateRequest,
@@ -119,7 +120,7 @@ def create_strategy(
     return strategy
 
 
-@router.get("/{strategy_id}", response_model=StrategyRead)
+@router.get("/{strategy_id}", response_model=StrategyDetail)
 def get_strategy(
     strategy_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
 ) -> Strategy:

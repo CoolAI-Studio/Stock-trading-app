@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
-import type { SampleStrategy, Strategy, StrategyValidateResult } from '../lib/types'
+import type {
+  SampleStrategy,
+  Strategy,
+  StrategyDetail,
+  StrategyValidateResult,
+} from '../lib/types'
 
 const SAMPLE_LABELS: Record<string, string> = {
   ma5_cross: '5 日均線交叉',
@@ -16,10 +21,25 @@ function sampleLabel(sample: SampleStrategy): string {
 function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: () => void }) {
   const [name, setName] = useState(strategy.name)
   const [symbol, setSymbol] = useState(strategy.symbol)
-  const [sourceCode, setSourceCode] = useState('')
+  const [sourceCode, setSourceCode] = useState<string | null>(null)
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // The list response omits source_code, so the editor has to fetch it. Until
+  // it arrives sourceCode stays null and the textarea is disabled -- rendering
+  // an empty box first reads as "my code is gone", which is what this whole
+  // form previously did.
+  const detailQuery = useQuery({
+    queryKey: ['strategy', strategy.id],
+    queryFn: () => api.get<StrategyDetail>(`/api/strategies/${strategy.id}`),
+  })
+
+  useEffect(() => {
+    if (detailQuery.data && sourceCode === null) {
+      setSourceCode(detailQuery.data.source_code)
+    }
+  }, [detailQuery.data, sourceCode])
 
   const validateMutation = useMutation({
     mutationFn: () =>
@@ -30,11 +50,14 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
   const saveMutation = useMutation({
     mutationFn: () => {
       const payload: Record<string, unknown> = { name, symbol }
-      if (sourceCode.trim()) payload.source_code = sourceCode
+      // Only send source_code once the real one has loaded, so a save that
+      // races the fetch can't overwrite the stored code with an empty box.
+      if (sourceCode !== null) payload.source_code = sourceCode
       return api.patch<Strategy>(`/api/strategies/${strategy.id}`, payload)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['strategies'] })
+      queryClient.invalidateQueries({ queryKey: ['strategy', strategy.id] })
       onDone()
     },
     onError: (err) => setSaveError(err instanceof ApiError ? err.message : '儲存失敗'),
@@ -66,15 +89,16 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
       </div>
       <div>
         <label htmlFor={`edit-strategy-code-${strategy.id}`} className="text-sm text-slate-400">
-          原始碼（留空表示不變更）
+          原始碼
         </label>
         <textarea
           id={`edit-strategy-code-${strategy.id}`}
-          value={sourceCode}
+          value={sourceCode ?? ''}
           onChange={(e) => setSourceCode(e.target.value)}
+          disabled={sourceCode === null}
           rows={10}
-          placeholder="貼上新的原始碼以取代現有策略程式碼；留空則保留原本的程式碼"
-          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm"
+          placeholder={detailQuery.isError ? '讀取原始碼失敗，請重新整理' : '載入中…'}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm disabled:opacity-50"
         />
       </div>
 
@@ -96,7 +120,7 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
           驗證
         </button>
         <button
-          disabled={saveMutation.isPending || !name || !symbol}
+          disabled={saveMutation.isPending || !name || !symbol || sourceCode === null}
           onClick={() => saveMutation.mutate()}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >

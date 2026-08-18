@@ -42,6 +42,17 @@ class StrategyRead(BaseModel):
     consecutive_errors: int
 
 
+class StrategyDetail(StrategyRead):
+    """Single-strategy read. Carries the source; the list response
+    deliberately does not, since the dashboard polls it and would otherwise
+    ship every strategy's full text on every poll. The edit form loads this
+    one -- opening that editor blank is indistinguishable from the code
+    having been lost, and saving from there would then lose it for real.
+    """
+
+    source_code: str
+
+
 class StrategyValidateRequest(BaseModel):
     source_code: str = Field(min_length=1)
     sample_prices: list[float] | None = None

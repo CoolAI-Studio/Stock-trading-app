@@ -133,3 +133,31 @@ def test_list_samples_returns_ma5_sample(auth_client):
     assert resp.status_code == 200
     names = [s["filename"] for s in resp.json()]
     assert "ma5_cross.py" in names
+
+
+def test_get_one_strategy_returns_its_source_code(auth_client):
+    """The edit form prefills from this. It used to omit source_code, so the
+    editor opened blank -- indistinguishable from the code having been lost,
+    and saving from that state would have wiped it for real."""
+    created = auth_client.post(
+        "/api/strategies",
+        json={"name": "prefill-me", "symbol": "AAPL", "source_code": MA5_SOURCE},
+    )
+    strategy_id = created.json()["id"]
+
+    resp = auth_client.get(f"/api/strategies/{strategy_id}")
+    assert resp.status_code == 200
+    assert resp.json()["source_code"] == MA5_SOURCE
+
+
+def test_listing_strategies_still_omits_source_code(auth_client):
+    """Kept out of the list on purpose: the dashboard polls it, and shipping
+    every strategy's full source on each poll is wasted bytes."""
+    auth_client.post(
+        "/api/strategies",
+        json={"name": "in-a-list", "symbol": "AAPL", "source_code": MA5_SOURCE},
+    )
+
+    resp = auth_client.get("/api/strategies")
+    assert resp.status_code == 200
+    assert "source_code" not in resp.json()[0]
