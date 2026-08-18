@@ -5,8 +5,12 @@ import type {
   SampleStrategy,
   Strategy,
   StrategyDetail,
+  StrategyGenerateResult,
   StrategyValidateResult,
 } from '../lib/types'
+
+const GENERATE_FAILED = '產生策略失敗，請稍後再試一次。'
+const OVERWRITE_CONFIRM = '原始碼欄位已經有內容，AI 產生的程式碼會整個蓋掉它。要繼續嗎？'
 
 const SAMPLE_LABELS: Record<string, string> = {
   ma5_cross: '5 日均線交叉',
@@ -209,29 +213,65 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [sourceCode, setSourceCode] = useState('')
+  const [description, setDescription] = useState('')
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [generateError, setGenerateError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  // Fill in from the code's own self.name/self.symbol so a sample, pasted
+  // code or an AI answer doesn't have to be retyped -- but never overwrite
+  // something the user already typed themselves.
+  function prefillDetected(result: StrategyValidateResult) {
+    if (!name && result.detected_name) setName(result.detected_name)
+    if (!symbol && result.detected_symbol) setSymbol(result.detected_symbol)
+  }
 
   const validateMutation = useMutation({
     mutationFn: () =>
       api.post<StrategyValidateResult>('/api/strategies/validate', { source_code: sourceCode }),
     onSuccess: (result) => {
       setValidation(result)
-      // Auto-fill from the code's own self.name/self.symbol so loading a
-      // sample (or pasting existing code) doesn't require retyping them --
-      // but never overwrite something the user already typed themselves.
-      if (result.ok) {
-        if (!name && result.detected_name) setName(result.detected_name)
-        if (!symbol && result.detected_symbol) setSymbol(result.detected_symbol)
-      }
+      if (result.ok) prefillDetected(result)
     },
   })
+
+  const generateMutation = useMutation({
+    mutationFn: () =>
+      api.post<StrategyGenerateResult>('/api/strategies/generate', {
+        description: description.trim(),
+        symbol: symbol.trim() || null,
+      }),
+    onSuccess: (result) => {
+      // The endpoint already compiled and tick-tested what it wrote, so its
+      // answer doubles as the 驗證 outcome and the owner lands exactly where
+      // 建立 expects them. Code that failed validation still goes in the box:
+      // it can be read and fixed, which beats an error with nothing attached.
+      if (result.source_code) {
+        setSourceCode(result.source_code)
+        setValidation(result)
+        prefillDetected(result)
+      } else {
+        setGenerateError(result.error ?? GENERATE_FAILED)
+      }
+    },
+    onError: (err) => setGenerateError(err instanceof ApiError ? err.message : GENERATE_FAILED),
+  })
+
+  function handleGenerate() {
+    if (!description.trim()) return
+    if (sourceCode && !window.confirm(OVERWRITE_CONFIRM)) return
+    setValidation(null)
+    setCreateError(null)
+    setGenerateError(null)
+    generateMutation.mutate()
+  }
 
   function applySample(sample: SampleStrategy) {
     setSourceCode(sample.source_code)
     setValidation(null)
     setCreateError(null)
+    setGenerateError(null)
   }
 
   const createMutation = useMutation({
@@ -262,6 +302,42 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           </div>
         </div>
       )}
+      <div className="space-y-2 rounded border border-slate-800 p-3">
+        <p className="text-sm font-semibold text-slate-300">用 AI 產生策略</p>
+        {/* Always on screen, with no way to dismiss it: an active strategy's
+            signals turn into real orders. */}
+        <p className="rounded border border-red-800 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+          AI 產生的程式碼務必自己讀過、看懂每一行在做什麼，再決定要不要啟用。這不是投資建議；策略一旦啟用，系統就會照它給的訊號送出真實委託，盈虧由你自己承擔。
+        </p>
+        <label htmlFor="strategy-ai-description" className="text-sm text-slate-400">
+          想要的策略（用中文描述就可以）
+        </label>
+        <textarea
+          id="strategy-ai-description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+          placeholder="例如：台積電，5 日均線由下往上穿過 20 日均線就買進，反向穿過就賣出"
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={generateMutation.isPending || !description.trim()}
+            onClick={handleGenerate}
+            className="rounded bg-slate-700 px-3 py-1 text-sm font-medium hover:bg-slate-600 disabled:opacity-50"
+          >
+            {generateMutation.isPending ? '產生中…' : 'AI 產生策略'}
+          </button>
+          {generateMutation.isPending && (
+            <span className="text-sm text-slate-400">
+              AI 正在寫程式，通常要數十秒，請耐心等一下。不要重複點擊——每按一次都會用掉當天的額度。
+            </span>
+          )}
+        </div>
+        {generateError && <p className="text-sm text-red-400">{generateError}</p>}
+      </div>
+
       <div>
         <label htmlFor="strategy-name" className="text-sm text-slate-400">
           名稱

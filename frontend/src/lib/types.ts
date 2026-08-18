@@ -51,6 +51,13 @@ export interface StrategyValidateResult {
   sample_signals: string[] | null
 }
 
+/** POST /api/strategies/generate -- everything /validate returns plus the
+ * code it describes, so one round trip fills the whole form. source_code is
+ * null only when generation never got as far as producing any. */
+export interface StrategyGenerateResult extends StrategyValidateResult {
+  source_code: string | null
+}
+
 export interface SampleStrategy {
   filename: string
   source_code: string

@@ -3,10 +3,11 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrategiesPage } from './StrategiesPage'
-import { api } from '../lib/api'
+import { ApiError, api } from '../lib/api'
 import type { Strategy } from '../lib/types'
 
-vi.mock('../lib/api', () => ({
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
   api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }))
 
@@ -26,6 +27,8 @@ const STRATEGY: Strategy = {
 }
 
 const SAVED_SOURCE = 'class Strategy:\n    pass\n'
+const GENERATED_SOURCE = 'class Strategy:\n    def __init__(self):\n        self.name = "TSMC_MA5"\n'
+const AI_DESCRIPTION_LABEL = '想要的策略（用中文描述就可以）'
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -114,6 +117,178 @@ describe('StrategiesPage', () => {
 
     expect(await screen.findByLabelText('名稱')).toHaveValue('AAPL_MA5_Trend')
     expect(screen.getByLabelText('股票代號')).toHaveValue('AAPL')
+  })
+
+  it('generates a strategy from a plain-language description and fills the form', async () => {
+    vi.mocked(api.post).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies/generate') {
+        return {
+          ok: true,
+          error: null,
+          source_code: GENERATED_SOURCE,
+          detected_name: 'TSMC_MA5',
+          detected_symbol: '2330.TW',
+          sample_signals: ['HOLD', 'BUY'],
+        } as never
+      }
+      return STRATEGY as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '台積電五日均線向上就買進')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/strategies/generate', {
+        description: '台積電五日均線向上就買進',
+        symbol: null,
+      }),
+    )
+    expect(await screen.findByText('偵測到：TSMC_MA5（2330.TW）')).toBeInTheDocument()
+    expect(screen.getByLabelText('原始碼')).toHaveValue(GENERATED_SOURCE)
+    expect(screen.getByLabelText('名稱')).toHaveValue('TSMC_MA5')
+    expect(screen.getByLabelText('股票代號')).toHaveValue('2330.TW')
+  })
+
+  it('sends the symbol already typed in the form as the generation target', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ok: true,
+      error: null,
+      source_code: GENERATED_SOURCE,
+      detected_name: 'TSMC_MA5',
+      detected_symbol: '2330.TW',
+      sample_signals: ['HOLD'],
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('股票代號'), '2330.TW')
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線向上就買進')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/strategies/generate', {
+        description: '五日均線向上就買進',
+        symbol: '2330.TW',
+      }),
+    )
+  })
+
+  it('shows a readable error when generation fails', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ok: false,
+      error: 'AI_API_KEY 尚未設定，請先填好金鑰再試一次。',
+      source_code: null,
+      detected_name: null,
+      detected_symbol: null,
+      sample_signals: null,
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '隨便給我一個策略')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(await screen.findByText(/AI_API_KEY 尚未設定/)).toBeInTheDocument()
+    expect(screen.getByLabelText('原始碼')).toHaveValue('')
+  })
+
+  it('shows a network failure as text rather than a blank panel', async () => {
+    vi.mocked(api.post).mockRejectedValue(new ApiError(503, 'Service Unavailable'))
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '隨便給我一個策略')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(await screen.findByText(/Service Unavailable/)).toBeInTheDocument()
+  })
+
+  it('fills in code that failed validation together with the reason', async () => {
+    // The backend hands back the rejected code on purpose -- the owner can
+    // read and fix it, which beats being told only that something went wrong.
+    vi.mocked(api.post).mockResolvedValue({
+      ok: false,
+      error: "AI 產生的程式碼無法通過驗證：import of module 'pandas' is not allowed",
+      source_code: GENERATED_SOURCE,
+      detected_name: null,
+      detected_symbol: null,
+      sample_signals: null,
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '用 pandas 算均線')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(await screen.findByText(/pandas' is not allowed/)).toBeInTheDocument()
+    expect(screen.getByLabelText('原始碼')).toHaveValue(GENERATED_SOURCE)
+  })
+
+  it('disables the generate button and shows a pending state while the AI works', async () => {
+    vi.mocked(api.post).mockReturnValue(new Promise(() => {}) as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    const pending = await screen.findByRole('button', { name: '產生中…' })
+    expect(pending).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'AI 產生策略' })).not.toBeInTheDocument()
+  })
+
+  it('does not overwrite existing source code when the confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('原始碼'), 'my own work')
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    expect(window.confirm).toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('原始碼')).toHaveValue('my own work')
+  })
+
+  it('overwrites existing source code once the confirmation is accepted', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(api.post).mockResolvedValue({
+      ok: true,
+      error: null,
+      source_code: GENERATED_SOURCE,
+      detected_name: 'TSMC_MA5',
+      detected_symbol: '2330.TW',
+      sample_signals: ['HOLD'],
+    } as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('原始碼'), 'my own work')
+    await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
+    await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
+
+    await waitFor(() => expect(screen.getByLabelText('原始碼')).toHaveValue(GENERATED_SOURCE))
+  })
+
+  it('always shows the read-before-you-activate warning', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+
+    expect(screen.getByText(/自己讀過、看懂/)).toBeInTheDocument()
+    expect(screen.getByText(/不是投資建議/)).toBeInTheDocument()
   })
 
   it('prefills the editor with the saved source code', async () => {
