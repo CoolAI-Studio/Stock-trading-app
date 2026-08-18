@@ -98,13 +98,38 @@ def bar_end(timestamp: datetime, timeframe: Timeframe) -> datetime:
     is the failure this whole entry point exists to prevent.
     """
     if timeframe is Timeframe.MONTH_1:
-        first = timestamp.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        return (
-            first.replace(year=first.year + 1, month=1)
-            if first.month == 12
-            else first.replace(month=first.month + 1)
-        )
+        start = _month_start_nearest(timestamp)
+        return _next_month(start) + (timestamp - start)
     return timestamp + _FIXED_DURATION[timeframe]
+
+
+def _next_month(first_of_month: datetime) -> datetime:
+    return (
+        first_of_month.replace(year=first_of_month.year + 1, month=1)
+        if first_of_month.month == 12
+        else first_of_month.replace(month=first_of_month.month + 1)
+    )
+
+
+def _month_start_nearest(timestamp: datetime) -> datetime:
+    """Midnight on the 1st of the month this candle belongs to, as a UTC instant.
+
+    A monthly candle is labelled midnight on the 1st in the EXCHANGE's own
+    timezone, and the provider hands that over converted to UTC. For anything
+    east of UTC the result lands in the previous calendar month -- 2330.TW's
+    August candle is 2026-07-31 16:00 UTC -- so reading the month off the UTC
+    date names July, and the candle still being built gets called finished for
+    the whole of August.
+
+    The offset is recovered instead of assumed: whichever month boundary the
+    label is nearest to is the one it means, since every real UTC offset is
+    under 14 hours and no month is shorter than 28 days. Keeping the leftover
+    as an offset is also what survives a short February -- advancing the label
+    itself by a month would turn 28 February into 28 March, three days early.
+    """
+    truncated = timestamp.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    following = _next_month(truncated)
+    return following if (following - timestamp) < (timestamp - truncated) else truncated
 
 
 # Any date will do: it exists only to ask bar_end() how long one candle of a

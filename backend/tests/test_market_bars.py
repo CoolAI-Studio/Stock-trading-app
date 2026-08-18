@@ -57,6 +57,45 @@ def test_a_december_candle_rolls_into_the_next_year():
     assert end == datetime(2027, 1, 1, tzinfo=UTC)
 
 
+# yfinance labels every candle at midnight in the EXCHANGE's timezone, so for
+# any market east of UTC the UTC instant lands in the previous calendar month.
+# Truncating that instant to day 1 therefore names the wrong month, and the
+# candle still being built gets reported as finished -- for the whole month.
+def test_a_monthly_candle_east_of_utc_ends_when_its_own_month_does():
+    """2330.TW's August candle is stamped 2026-08-01 00:00+08:00, which is
+    2026-07-31 16:00 UTC. It ends at 2026-09-01 00:00+08:00, not on 1 August."""
+    taipei_august = datetime(2026, 7, 31, 16, 0, tzinfo=UTC)
+
+    assert bar_end(taipei_august, Timeframe.MONTH_1) == datetime(2026, 8, 31, 16, 0, tzinfo=UTC)
+
+
+def test_a_monthly_candle_east_of_utc_survives_a_short_february():
+    """The March candle is stamped 2026-02-28 16:00 UTC. Advancing the label
+    by one month lands on 28 March -- three days early -- so the month has to
+    be resolved in the exchange's own calendar, not by date arithmetic on UTC."""
+    taipei_march = datetime(2026, 2, 28, 16, 0, tzinfo=UTC)
+
+    assert bar_end(taipei_march, Timeframe.MONTH_1) == datetime(2026, 3, 31, 16, 0, tzinfo=UTC)
+
+
+def test_a_monthly_candle_west_of_utc_ends_when_its_own_month_does():
+    """The mirror image: New York stamps August at 2026-08-01 04:00 UTC."""
+    new_york_august = datetime(2026, 8, 1, 4, 0, tzinfo=UTC)
+
+    assert bar_end(new_york_august, Timeframe.MONTH_1) == datetime(2026, 9, 1, 4, 0, tzinfo=UTC)
+
+
+def test_the_forming_monthly_candle_of_a_taiwan_symbol_is_dropped():
+    """The regression that matters: mid-August, a monthly strategy on a Taiwan
+    symbol must not be handed August as though it had closed."""
+    july = _bar(datetime(2026, 6, 30, 16, 0, tzinfo=UTC), timeframe=Timeframe.MONTH_1)
+    august = _bar(datetime(2026, 7, 31, 16, 0, tzinfo=UTC), timeframe=Timeframe.MONTH_1)
+
+    settled = closed_bars([july, august], now=datetime(2026, 8, 18, 6, 0, tzinfo=UTC))
+
+    assert settled == [july]
+
+
 # --- closed vs still forming ------------------------------------------------
 
 
