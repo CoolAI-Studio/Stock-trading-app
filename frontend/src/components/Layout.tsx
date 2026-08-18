@@ -5,6 +5,7 @@ import { useWebSocket } from '../lib/useWebSocket'
 const NAV_ITEMS = [
   { to: '/', label: '儀表板', end: true },
   { to: '/strategies', label: '策略' },
+  { to: '/backtest', label: '回測' },
   { to: '/orders', label: '訂單' },
   { to: '/positions', label: '部位' },
   { to: '/notifications', label: '通知' },

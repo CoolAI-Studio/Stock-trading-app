@@ -1,0 +1,470 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ApiError, api } from '../lib/api'
+import { EquityCurveChart } from '../components/EquityCurveChart'
+import type {
+  BacktestRun,
+  BacktestRunDetail,
+  BacktestSummary,
+  BacktestTrade,
+  FillPriceBasis,
+  Strategy,
+} from '../lib/types'
+
+const FILL_BASIS_LABEL: Record<FillPriceBasis, string> = {
+  next_open: '下一根 K 棒開盤價',
+  close: '當根 K 棒收盤價',
+}
+
+/** Taiwan retail defaults, so the form is runnable without the owner having to
+ * research brokerage fees first. Tax is left at 0 because it only applies to
+ * Taiwan equities -- charging it silently on a US backtest would overstate the
+ * costs as confidently as omitting it understates them. */
+const DEFAULTS = {
+  fill_price_basis: 'next_open' as FillPriceBasis,
+  commission_rate: '0.001425',
+  slippage_rate: '0.0005',
+  sell_tax_rate: '0',
+  quantity: '1',
+  initial_capital: '100000',
+}
+
+function isoDay(date: Date): string {
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${m}-${d}`
+}
+
+function defaultRange(): { start: string; end: string } {
+  const today = new Date()
+  const lastYear = new Date(today)
+  lastYear.setFullYear(lastYear.getFullYear() - 1)
+  return { start: isoDay(lastYear), end: isoDay(today) }
+}
+
+/** 0.001425 tells nobody anything; 0.1425% does. */
+function asPercent(rate: string): string {
+  const value = Number(rate)
+  if (!Number.isFinite(value)) return '—'
+  return `${Number((value * 100).toFixed(6))}%`
+}
+
+function money(value: string): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : value
+}
+
+function signedMoney(value: string): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return value
+  return `${n >= 0 ? '+' : ''}${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+}
+
+function signedPercent(value: string): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return value
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
+}
+
+function toneOf(value: string): string {
+  return Number(value) >= 0 ? 'text-emerald-400' : 'text-red-400'
+}
+
+function StatCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded border border-slate-800 p-4">
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className={`text-2xl font-semibold ${tone ?? ''}`}>{value}</p>
+    </div>
+  )
+}
+
+/** Turns a backend failure into something the owner can act on. The 422 body
+ * is already written for them, so it is passed through untouched; the rest
+ * would otherwise surface as bare English. */
+function runErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return error instanceof Error ? error.message : '回測失敗，請稍後再試。'
+  }
+  if (error.status === 422) return error.message
+  if (error.status === 404) return '找不到這個策略，可能已經被刪掉了。請重新整理頁面。'
+  return `回測失敗（${error.status}）：${error.message}`
+}
+
+function AssumptionsBox({ run }: { run: BacktestRunDetail }) {
+  const a = run.result.assumptions
+  const rows: [string, string][] = [
+    ['成交價基準', FILL_BASIS_LABEL[a.fill_price_basis]],
+    ['手續費率（單邊）', asPercent(a.commission_rate)],
+    ['滑價率', asPercent(a.slippage_rate)],
+    ['賣出交易稅率', asPercent(a.sell_tax_rate)],
+    ['每次下單數量', money(a.quantity)],
+    ['起始本金', money(a.initial_capital)],
+  ]
+
+  return (
+    <section
+      aria-label="這次回測的假設"
+      className="space-y-2 rounded border border-slate-800 bg-slate-900/40 p-4"
+    >
+      <h3 className="text-sm font-semibold text-slate-300">這次回測的假設</h3>
+      <p className="text-xs text-slate-500">
+        上面的數字是在這些條件下算出來的。換一組成本，結果就會不一樣。
+      </p>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm md:grid-cols-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-2">
+            <dt className="text-slate-500">{label}</dt>
+            <dd className="text-slate-200">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {run.result.assumption_notes.length > 0 && (
+        <ul className="list-inside list-disc text-xs text-slate-400">
+          {run.result.assumption_notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function Headline({ summary }: { summary: BacktestSummary }) {
+  return (
+    <section aria-label="績效總覽" className="grid grid-cols-2 gap-4 md:grid-cols-3">
+      <StatCard
+        label="總報酬率"
+        value={signedPercent(summary.total_return_pct)}
+        tone={toneOf(summary.total_return_pct)}
+      />
+      <StatCard label="最終權益" value={money(summary.final_equity)} />
+      <StatCard
+        label="已實現損益"
+        value={signedMoney(summary.net_pnl)}
+        tone={toneOf(summary.net_pnl)}
+      />
+      <StatCard
+        label="最大回撤"
+        value={`-${Number(summary.max_drawdown_pct).toFixed(2)}%`}
+        tone="text-red-400"
+      />
+      <StatCard label="交易次數" value={String(summary.trade_count)} />
+      <StatCard
+        label="勝率"
+        // "0% 勝率" reads as every trade losing, which is a different and much
+        // worse thing than never having traded at all.
+        value={summary.win_rate_pct === null ? '沒有交易' : `${Number(summary.win_rate_pct)}%`}
+      />
+    </section>
+  )
+}
+
+function TradeTable({ trades }: { trades: BacktestTrade[] }) {
+  if (trades.length === 0) return null
+
+  return (
+    <table aria-label="交易明細" className="w-full text-left text-sm">
+      <thead className="text-slate-500">
+        <tr>
+          <th className="pb-2 font-normal">結果</th>
+          <th className="pb-2 font-normal">進場時間</th>
+          <th className="pb-2 font-normal">出場時間</th>
+          <th className="pb-2 font-normal">數量</th>
+          <th className="pb-2 font-normal">進場價</th>
+          <th className="pb-2 font-normal">出場價</th>
+          <th className="pb-2 font-normal">損益</th>
+          <th className="pb-2 font-normal">報酬率</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trades.map((t) => {
+          const tone = toneOf(t.pnl)
+          return (
+            <tr key={`${t.opened_at}-${t.closed_at}`} className="border-b border-slate-800">
+              <td className={`py-2 pr-4 ${tone}`}>{Number(t.pnl) >= 0 ? '獲利' : '虧損'}</td>
+              <td className="py-2 pr-4 text-slate-400">
+                {new Date(t.opened_at).toLocaleDateString()}
+              </td>
+              <td className="py-2 pr-4 text-slate-400">
+                {new Date(t.closed_at).toLocaleDateString()}
+              </td>
+              <td className="py-2 pr-4">{money(t.quantity)}</td>
+              <td className="py-2 pr-4">{money(t.entry_price)}</td>
+              <td className="py-2 pr-4">{money(t.exit_price)}</td>
+              <td className={`py-2 pr-4 ${tone}`}>{signedMoney(t.pnl)}</td>
+              <td className={`py-2 ${tone}`}>{signedPercent(t.return_pct)}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+function RunResult({ run }: { run: BacktestRunDetail }) {
+  const { result } = run
+
+  // A run that reached no testable candle would otherwise render as a
+  // confident flat 0% -- indistinguishable from a strategy that traded and
+  // broke even. The engine's own note says which of the several causes it was.
+  if (result.summary.bars_tested === 0) {
+    return (
+      <div className="space-y-2 rounded border border-amber-800 bg-amber-950/30 p-4">
+        <p className="font-medium text-amber-300">這次回測沒有測到任何一根 K 棒。</p>
+        {result.notes.map((note) => (
+          <p key={note} className="text-sm text-amber-200/80">
+            {note}
+          </p>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <Headline summary={result.summary} />
+      <AssumptionsBox run={run} />
+      <EquityCurveChart
+        points={result.equity_curve}
+        initialCapital={result.assumptions.initial_capital}
+      />
+      {result.notes.length > 0 && (
+        <ul className="list-inside list-disc space-y-1 text-sm text-slate-400">
+          {result.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+      <TradeTable trades={result.trades} />
+    </div>
+  )
+}
+
+export function BacktestPage() {
+  const queryClient = useQueryClient()
+  const [strategyId, setStrategyId] = useState<string>('')
+  const [range, setRange] = useState(defaultRange)
+  const [costs, setCosts] = useState(DEFAULTS)
+  const [run, setRun] = useState<BacktestRunDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const strategiesQuery = useQuery({
+    queryKey: ['strategies'],
+    queryFn: () => api.get<Strategy[]>('/api/strategies'),
+  })
+  const historyQuery = useQuery({
+    queryKey: ['backtests'],
+    queryFn: () => api.get<BacktestRun[]>('/api/backtests'),
+  })
+
+  const strategies = strategiesQuery.data ?? []
+  const selectedId = strategyId || (strategies[0] ? String(strategies[0].id) : '')
+
+  const runMutation = useMutation({
+    mutationFn: () =>
+      api.post<BacktestRunDetail>('/api/backtests', {
+        strategy_id: Number(selectedId),
+        // Whole days: ending at the chosen day's midnight would cut that day's
+        // own candle out of the range the owner thought they asked for.
+        start: `${range.start}T00:00:00Z`,
+        end: `${range.end}T23:59:59Z`,
+        ...costs,
+      }),
+    onSuccess: (result) => {
+      setRun(result)
+      setError(null)
+      queryClient.invalidateQueries({ queryKey: ['backtests'] })
+    },
+    onError: (err) => {
+      setRun(null)
+      setError(runErrorMessage(err))
+    },
+  })
+
+  const openMutation = useMutation({
+    mutationFn: (id: number) => api.get<BacktestRunDetail>(`/api/backtests/${id}`),
+    onSuccess: (result) => {
+      setRun(result)
+      setError(null)
+    },
+    onError: (err) => setError(runErrorMessage(err)),
+  })
+
+  function costField(key: keyof typeof DEFAULTS, label: string, hint?: string) {
+    return (
+      <div>
+        <label htmlFor={`bt-${key}`} className="text-sm text-slate-400">
+          {label}
+        </label>
+        <input
+          id={`bt-${key}`}
+          value={costs[key]}
+          onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+        {hint && <p className="text-xs text-slate-500">{hint}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-lg font-semibold">回測</h1>
+        <p className="text-sm text-slate-500">
+          拿歷史 K 棒把策略重跑一遍，不用真的下單就能看出它過去表現如何。
+          回測跑的是策略本人的程式碼，跟實際執行時走同一套流程。
+        </p>
+      </div>
+
+      <div className="space-y-3 rounded border border-slate-800 p-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <label htmlFor="bt-strategy" className="text-sm text-slate-400">
+              策略
+            </label>
+            <select
+              id="bt-strategy"
+              value={selectedId}
+              onChange={(e) => setStrategyId(e.target.value)}
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            >
+              {strategies.map((s) => (
+                <option key={s.id} value={String(s.id)}>
+                  {s.name}（{s.symbol}）
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="bt-start" className="text-sm text-slate-400">
+              開始日期
+            </label>
+            <input
+              id="bt-start"
+              type="date"
+              value={range.start}
+              onChange={(e) => setRange((prev) => ({ ...prev, start: e.target.value }))}
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            />
+          </div>
+          <div>
+            <label htmlFor="bt-end" className="text-sm text-slate-400">
+              結束日期
+            </label>
+            <input
+              id="bt-end"
+              type="date"
+              value={range.end}
+              onChange={(e) => setRange((prev) => ({ ...prev, end: e.target.value }))}
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          <div>
+            <label htmlFor="bt-fill_price_basis" className="text-sm text-slate-400">
+              成交價基準
+            </label>
+            <select
+              id="bt-fill_price_basis"
+              value={costs.fill_price_basis}
+              onChange={(e) =>
+                setCosts((prev) => ({
+                  ...prev,
+                  fill_price_basis: e.target.value as FillPriceBasis,
+                }))
+              }
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            >
+              <option value="next_open">{FILL_BASIS_LABEL.next_open}</option>
+              <option value="close">{FILL_BASIS_LABEL.close}</option>
+            </select>
+            <p className="text-xs text-slate-500">
+              收盤價要等 K 棒收完才知道，所以最早能成交的時間點是下一根開盤。
+            </p>
+          </div>
+          {costField('commission_rate', '手續費率（單邊）', `＝ ${asPercent(costs.commission_rate)}`)}
+          {costField('slippage_rate', '滑價率', `＝ ${asPercent(costs.slippage_rate)}`)}
+          {costField('sell_tax_rate', '賣出交易稅率', `＝ ${asPercent(costs.sell_tax_rate)}`)}
+          {costField('quantity', '每次下單數量')}
+          {costField('initial_capital', '起始本金')}
+        </div>
+
+        {strategiesQuery.isSuccess && strategies.length === 0 && (
+          <p className="text-sm text-amber-300">
+            還沒有任何策略可以回測。請先到「策略」頁建立一支。
+          </p>
+        )}
+
+        <div className="flex items-center gap-3">
+          <button
+            disabled={runMutation.isPending || strategies.length === 0}
+            onClick={() => runMutation.mutate()}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {runMutation.isPending ? '回測中…' : '開始回測'}
+          </button>
+          {runMutation.isPending && (
+            <span className="text-sm text-slate-400">
+              要回放整段歷史的每一根 K 棒，需要一點時間，請不要重複點擊。
+            </span>
+          )}
+        </div>
+
+        {error && <p className="text-red-400">{error}</p>}
+      </div>
+
+      {run && <RunResult run={run} />}
+
+      {(historyQuery.data ?? []).length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-slate-300">過去的回測</h2>
+          <table aria-label="過去的回測" className="w-full text-left text-sm">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-normal">策略</th>
+                <th className="pb-2 font-normal">代號</th>
+                <th className="pb-2 font-normal">週期</th>
+                <th className="pb-2 font-normal">區間</th>
+                <th className="pb-2 font-normal">總報酬率</th>
+                <th className="pb-2 font-normal">執行時間</th>
+                <th className="pb-2 font-normal">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(historyQuery.data ?? []).map((row) => (
+                <tr key={row.id} className="border-b border-slate-800">
+                  <td className="py-2 pr-4 font-medium">{row.strategy_name}</td>
+                  <td className="py-2 pr-4">{row.symbol}</td>
+                  <td className="py-2 pr-4 text-slate-400">{row.timeframe}</td>
+                  <td className="py-2 pr-4 text-slate-400">
+                    {new Date(row.range_start).toLocaleDateString()} –{' '}
+                    {new Date(row.range_end).toLocaleDateString()}
+                  </td>
+                  <td className={`py-2 pr-4 ${toneOf(row.summary.total_return_pct)}`}>
+                    {signedPercent(row.summary.total_return_pct)}
+                  </td>
+                  <td className="py-2 pr-4 text-slate-500">
+                    {new Date(row.created_at).toLocaleString()}
+                  </td>
+                  <td className="py-2">
+                    <button
+                      disabled={openMutation.isPending}
+                      onClick={() => openMutation.mutate(row.id)}
+                      className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+                    >
+                      查看
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}

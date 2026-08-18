@@ -213,3 +213,108 @@ export interface WsEvent {
   v: number
   data: Record<string, unknown>
 }
+
+/** Which price the simulation assumed a signal was filled at.
+ * `next_open` is the honest one -- you only learn a close once the candle is
+ * over, so the earliest you could have acted on it is the next open. */
+export type FillPriceBasis = 'next_open' | 'close'
+
+/** What the simulation charged for. Every backtest response echoes this back,
+ * because a return figure read without its costs is not a number anyone can
+ * act on. Rates are decimal fractions, not percentages: 0.001425 is 0.1425%. */
+export interface BacktestAssumptions {
+  fill_price_basis: FillPriceBasis
+  commission_rate: string
+  slippage_rate: string
+  sell_tax_rate: string
+  quantity: string
+  initial_capital: string
+}
+
+/** One realized round trip. The prices are the simulated fills, so they
+ * already carry slippage, commission and tax -- pnl is net. */
+export interface BacktestTrade {
+  opened_at: string
+  closed_at: string
+  quantity: string
+  entry_price: string
+  exit_price: string
+  pnl: string
+  return_pct: string
+}
+
+/** One point of the equity chart: the account marked to that candle's close. */
+export interface EquityPoint {
+  timestamp: string
+  close: string
+  position_qty: string
+  cash: string
+  equity: string
+}
+
+export interface BacktestSummary {
+  bars_total: number
+  bars_tested: number
+  signals: number
+  skipped_signals: number
+  unfilled_signals: number
+  trade_count: number
+  wins: number
+  losses: number
+  /** null, not 0, when nothing ever traded -- "0% 勝率" reads as a strategy
+   * that lost every time rather than one that never opened a position. */
+  win_rate_pct: string | null
+  average_win: string | null
+  average_loss: string | null
+  net_pnl: string
+  total_costs: string
+  total_return_pct: string
+  max_drawdown_pct: string
+  final_equity: string
+  open_quantity: string
+  open_avg_entry_price: string
+}
+
+export interface BacktestResult {
+  strategy_name: string
+  symbol: string
+  timeframe: string
+  entry_point: string
+  warmup_bars: number
+  first_bar_at: string | null
+  last_bar_at: string | null
+  assumptions: BacktestAssumptions
+  /** What the simulation assumed, already in Traditional Chinese. */
+  assumption_notes: string[]
+  /** What happened in this particular run that the owner should know about:
+   * signals that could not be acted on, a position still open at the end, a
+   * range too short to test at all. */
+  notes: string[]
+  trades: BacktestTrade[]
+  equity_curve: EquityPoint[]
+  summary: BacktestSummary
+}
+
+/** One row of GET /api/backtests. Deliberately carries no equity curve --
+ * the list is for scanning. */
+export interface BacktestRun {
+  id: number
+  strategy_id: number | null
+  strategy_name: string
+  symbol: string
+  timeframe: string
+  data_source: DataSource
+  range_start: string
+  range_end: string
+  created_at: string
+  assumptions: BacktestAssumptions
+  summary: BacktestSummary
+}
+
+/** POST /api/backtests, and GET /api/backtests/{id}: one run in full,
+ * including the source it actually scored. */
+export interface BacktestRunDetail extends BacktestRun {
+  source_code: string
+  code_hash: string
+  result: BacktestResult
+}

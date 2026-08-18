@@ -9,6 +9,7 @@ import { PositionsPage } from './pages/PositionsPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { RiskSettingsPage } from './pages/RiskSettingsPage'
 import { BrokerSettingsPage } from './pages/BrokerSettingsPage'
+import { BacktestPage } from './pages/BacktestPage'
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/risk-settings" element={<RiskSettingsPage />} />
           <Route path="/broker-settings" element={<BrokerSettingsPage />} />
+          <Route path="/backtest" element={<BacktestPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
