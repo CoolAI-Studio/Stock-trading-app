@@ -7,7 +7,26 @@ from app.models.enums import DataSource
 from app.schemas.common import MoneyStr
 
 
-class StrategyCreate(BaseModel):
+class StrategyRiskOverrides(BaseModel):
+    """The eight global risk knobs a strategy may take over for itself.
+
+    None means inherit, and is what a strategy that never opts in keeps
+    holding -- see services/risk_resolver.py, which owns that rule. Mixed into
+    both write schemas so opting in and opting back out are the same field
+    either way: send a number to override, send null to go back to global.
+    """
+
+    capital: Decimal | None = Field(default=None, ge=0)
+    stop_loss_pct: Decimal | None = Field(default=None, ge=0)
+    take_profit_pct: Decimal | None = Field(default=None, ge=0)
+    max_position_qty: Decimal | None = Field(default=None, ge=0)
+    max_order_notional: Decimal | None = Field(default=None, ge=0)
+    max_pending_orders_per_symbol: int | None = Field(default=None, ge=0)
+    signal_cooldown_sec: int | None = Field(default=None, ge=0)
+    alert_interval_sec: int | None = Field(default=None, ge=0)
+
+
+class StrategyCreate(StrategyRiskOverrides):
     name: str = Field(min_length=1, max_length=120)
     symbol: str = Field(min_length=1, max_length=32)
     data_source: DataSource = DataSource.YFINANCE
@@ -17,7 +36,7 @@ class StrategyCreate(BaseModel):
     alert_only: bool = False
 
 
-class StrategyUpdate(BaseModel):
+class StrategyUpdate(StrategyRiskOverrides):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     symbol: str | None = Field(default=None, min_length=1, max_length=32)
     data_source: DataSource | None = None
@@ -43,6 +62,18 @@ class StrategyRead(BaseModel):
     last_run_at: datetime | None
     last_error: str | None
     consecutive_errors: int
+
+    # Deliberately not the StrategyRiskOverrides mixin: these are read back as
+    # MoneyStr so a Numeric column round-tripped through SQLite doesn't reach
+    # the UI as "0E-8".
+    capital: MoneyStr | None
+    stop_loss_pct: MoneyStr | None
+    take_profit_pct: MoneyStr | None
+    max_position_qty: MoneyStr | None
+    max_order_notional: MoneyStr | None
+    max_pending_orders_per_symbol: int | None
+    signal_cooldown_sec: int | None
+    alert_interval_sec: int | None
 
 
 class StrategyDetail(StrategyRead):

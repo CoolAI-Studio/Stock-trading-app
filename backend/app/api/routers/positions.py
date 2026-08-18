@@ -74,4 +74,8 @@ def flatten_position(
     position = _get_owned_position(db, user, symbol)
     position.quantity = Decimal(0)
     position.avg_entry_price = Decimal(0)
+    # Same reasoning as apply_fill's flat branch: a position nobody holds has
+    # no owning strategy, and leaving one behind would show the next re-open
+    # under the wrong settings.
+    position.strategy_id = None
     db.commit()

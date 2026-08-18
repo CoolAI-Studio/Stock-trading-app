@@ -66,20 +66,29 @@ def apply_fill(db: Session, order: Order, fill_price: Decimal, fill_quantity: De
         db.flush()
 
     if order.side == OrderSide.BUY:
+        was_flat = position.quantity == 0
         total_cost = position.avg_entry_price * position.quantity + fill_price * fill_quantity
         position.quantity = position.quantity + fill_quantity
         # quantity is guaranteed positive here: ensure_fill_applicable rejects
         # a negative starting position, and a BUY only ever adds to it.
         position.avg_entry_price = total_cost / position.quantity
+        if was_flat:
+            # Only the fill that opens the position sets its owner, so a
+            # second strategy buying into the same symbol does not take the
+            # first one's stop-loss thresholds away from it mid-trade. None
+            # for a manual order or a webhook, which stay on the globals.
+            position.strategy_id = order.strategy_id
         if position.opened_at is None:
             position.opened_at = utcnow()
     else:
         position.realized_pnl += (fill_price - position.avg_entry_price) * fill_quantity
         position.quantity -= fill_quantity
         if position.quantity == 0:
-            # Flat: drop the cost basis so a later re-open starts clean rather
-            # than averaging against a stale price.
+            # Flat: drop the cost basis and the owning strategy so a later
+            # re-open starts clean rather than averaging against a stale price
+            # or inheriting thresholds from whoever last held it.
             position.avg_entry_price = Decimal(0)
+            position.strategy_id = None
 
     db.commit()
     db.refresh(position)

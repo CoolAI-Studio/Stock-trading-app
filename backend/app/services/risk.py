@@ -34,3 +34,23 @@ def check_position_limit(
     if max_position <= 0:
         return True
     return (current_position + incoming_qty) < max_position
+
+
+def check_capital_limit(
+    committed_cost: Decimal, incoming_cost: Decimal, capital: Decimal
+) -> bool:
+    """True = the incoming buy fits inside the allocated capital.
+
+    `capital <= 0` means "not configured yet" (allow), the same convention
+    check_position_limit uses above -- and here it is load-bearing rather than
+    merely tidy. capital has been stored and displayed since v1 but enforced
+    nowhere, so every row in the wild holds 0. Reading that literally the day
+    this gate ships would reject every buy the owner makes.
+
+    Unlike check_position_limit this is `<=`, not `<`: that one inherited a
+    strict comparison from the legacy RiskControl, whereas spending exactly
+    the capital you allocated is the allocation being used, not exceeded.
+    """
+    if capital <= 0:
+        return True
+    return (committed_cost + incoming_cost) <= capital

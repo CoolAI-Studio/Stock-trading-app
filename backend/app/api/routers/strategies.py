@@ -19,6 +19,7 @@ from app.schemas.strategy import (
     StrategyValidateRequest,
     StrategyValidateResult,
 )
+from app.services import risk_resolver
 from app.services.ai_provider import get_ai_provider
 from app.services.market_data.base import bars_from_closes
 from app.services.strategy_generator import (
@@ -211,6 +212,9 @@ def create_strategy(
         default_quantity=payload.default_quantity,
         warmup_bars=payload.warmup_bars,
         alert_only=payload.alert_only,
+        # Straight from the shared list so a knob added to the overrides can
+        # never be accepted by the schema and then dropped on the floor here.
+        **{field: getattr(payload, field) for field in risk_resolver.OVERRIDABLE_FIELDS},
     )
     db.add(strategy)
     try:

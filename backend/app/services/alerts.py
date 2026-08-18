@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.models.enums import NotificationStatus, OrderSide
 from app.models.mixins import utcnow
-from app.models.risk import RiskSettings
 from app.models.strategy import Strategy, StrategyAlert
+from app.services import risk_resolver
 from app.services.events import Event
 from app.services.notification import dispatcher
 
@@ -33,15 +33,6 @@ ALERT_EVENT_TYPE = "strategy.alert"
 # with no manual reset. The count is measured from the last delivered alert,
 # so a single success clears it.
 MAX_DELIVERY_ATTEMPTS = 3
-
-
-def _alert_interval_sec(db: Session, user_id: int) -> int:
-    row = db.query(RiskSettings).filter(RiskSettings.user_id == user_id).first()
-    if row is None:
-        row = RiskSettings(user_id=user_id)
-        db.add(row)
-        db.flush()
-    return row.alert_interval_sec
 
 
 def _is_throttled(db: Session, strategy_id: int, side: OrderSide, interval_sec: int) -> bool:
@@ -93,7 +84,10 @@ def emit_alert(
     whether the throttle clock may start; the returned event is stamped so the
     bus-subscribed dispatcher does not send a second copy.
     """
-    if _is_throttled(db, strategy.id, side, _alert_interval_sec(db, strategy.user_id)):
+    interval_sec = risk_resolver.resolve_for_user(
+        db, strategy.user_id, strategy
+    ).alert_interval_sec
+    if _is_throttled(db, strategy.id, side, interval_sec):
         return None
 
     event = Event(

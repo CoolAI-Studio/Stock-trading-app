@@ -36,6 +36,19 @@ class Strategy(TimestampMixin, Base):
     default_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(1))
     warmup_bars: Mapped[int] = mapped_column(default=30)
 
+    # Per-strategy risk overrides. NULL means "inherit the user's global
+    # RiskSettings value" -- resolved in services/risk_resolver.py, which is
+    # the only place that coalescing happens. Every strategy that predates
+    # these columns holds NULL, so it keeps behaving exactly as it did.
+    capital: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), default=None)
+    stop_loss_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), default=None)
+    take_profit_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), default=None)
+    max_position_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), default=None)
+    max_order_notional: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), default=None)
+    max_pending_orders_per_symbol: Mapped[int | None] = mapped_column(default=None)
+    signal_cooldown_sec: Mapped[int | None] = mapped_column(default=None)
+    alert_interval_sec: Mapped[int | None] = mapped_column(default=None)
+
     last_signal: Mapped[str | None] = mapped_column(String(8), default=None)
     last_signal_at: Mapped[datetime | None] = mapped_column(default=None)
     last_run_at: Mapped[datetime | None] = mapped_column(default=None)

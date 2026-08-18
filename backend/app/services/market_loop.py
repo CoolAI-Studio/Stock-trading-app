@@ -14,7 +14,7 @@ from app.models.position import Position
 from app.models.risk import RiskSettings
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.services import alerts, risk, worker_health
+from app.services import alerts, risk, risk_resolver, worker_health
 from app.services.events import Event, bus
 from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
@@ -198,11 +198,16 @@ def _check_position_exit(
     if risk_settings is None:
         return
 
-    hit_stop = risk.check_stop_loss(
-        position.avg_entry_price, quote.price, risk_settings.stop_loss_pct
-    )
+    # Stop-loss and take-profit are position-level, so the thresholds come
+    # from whichever strategy opened this position -- not from whatever
+    # strategy happens to be running now. Unattributed (manual order,
+    # TradingView webhook) resolves to the global settings.
+    owner = db.get(Strategy, position.strategy_id) if position.strategy_id else None
+    limits = risk_resolver.resolve(risk_settings, owner)
+
+    hit_stop = risk.check_stop_loss(position.avg_entry_price, quote.price, limits.stop_loss_pct)
     hit_target = risk.check_take_profit(
-        position.avg_entry_price, quote.price, risk_settings.take_profit_pct
+        position.avg_entry_price, quote.price, limits.take_profit_pct
     )
     if not (hit_stop or hit_target):
         return

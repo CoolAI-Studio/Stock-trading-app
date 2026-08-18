@@ -14,6 +14,10 @@ class PositionRead(BaseModel):
     avg_entry_price: MoneyStr
     realized_pnl: MoneyStr
     opened_at: datetime | None
+    # Which strategy opened this position, and therefore whose stop-loss /
+    # take-profit thresholds it is being scanned under. None means the global
+    # settings apply. Surfaced so the owner can see that rather than guess it.
+    strategy_id: int | None
 
 
 class PositionAdjust(BaseModel):

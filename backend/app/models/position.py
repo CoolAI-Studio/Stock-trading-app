@@ -16,6 +16,14 @@ class Position(TimestampMixin, Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     symbol: Mapped[str] = mapped_column(String(32), index=True)
 
+    # Which strategy opened this position, so the stop-loss / take-profit scan
+    # can use *that* strategy's thresholds. The first strategy to open it owns
+    # it until the position goes flat; NULL for a manual order or a
+    # TradingView webhook, which fall back to the global settings.
+    strategy_id: Mapped[int | None] = mapped_column(
+        ForeignKey("strategies.id", ondelete="SET NULL"), default=None
+    )
+
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
     avg_entry_price: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
     realized_pnl: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
