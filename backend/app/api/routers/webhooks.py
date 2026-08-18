@@ -1,5 +1,7 @@
 import hmac
 import json
+import logging
+from datetime import timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,15 +12,62 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.session import get_db
 from app.models.enums import OrderSide, OrderSource
+from app.models.mixins import utcnow
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.models.webhook import TradingViewWebhookLog
 from app.schemas.webhook import TradingViewAlert
 from app.services.signals import SignalIn, create_pending_order
 
+logger = logging.getLogger("app.webhooks")
+
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-_MAX_LOGGED_BODY_BYTES = 8 * 1024
+# A TradingView alert message is a few hundred bytes. 64KB is already absurd
+# for one, so anything past it is refused without being read to the end --
+# the whole point of the limit is to not spend memory or a database row on
+# something no legitimate caller sends.
+_MAX_BODY_BYTES = 64 * 1024
+
+# How much of an accepted payload is kept. This is an audit trail, not a
+# replay log.
+_MAX_LOGGED_BODY_CHARS = 8 * 1024
+
+# Retention for the audit table. Two bounds, because they fail differently:
+# the age bound keeps old alerts from lingering but does nothing about a burst
+# inside the window, and the row bound is the one that actually caps disk.
+# Neon's free tier is 0.5GB for the entire database, and a database with no
+# space left fails *writes* -- orders, positions, the worker, all of it. An
+# audit trail is not worth taking the app down for.
+_LOG_RETENTION_DAYS = 30
+_LOG_MAX_ROWS = 500
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+async def _read_bounded_body(request: Request) -> bytes | None:
+    """The request body, or None if the client sent more than the limit.
+
+    Streamed rather than `await request.body()` so an oversized body is
+    abandoned partway through instead of being buffered in full first. The
+    Content-Length header is checked too, but only as a shortcut: a chunked
+    request declares no length at all, so the arriving bytes are what has to
+    be counted.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > _MAX_BODY_BYTES:
+        return None
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > _MAX_BODY_BYTES:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User | None:
@@ -38,10 +87,42 @@ def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User |
     return db.query(User).order_by(User.id).first()
 
 
-def _reject_with_log(db: Session, log: TradingViewWebhookLog, error: str) -> JSONResponse:
-    log.error = error
+def _prune_audit_log(db: Session) -> None:
+    """Enforces the two retention bounds described at _LOG_MAX_ROWS.
+
+    Only the authenticated path reaches this, so it runs at TradingView alert
+    volume -- a handful a day -- not at whatever rate a stranger can generate.
+    """
+    cutoff = utcnow() - timedelta(days=_LOG_RETENTION_DAYS)
+    db.query(TradingViewWebhookLog).filter(TradingViewWebhookLog.received_at < cutoff).delete(
+        synchronize_session=False
+    )
+
+    # Deleted by id rather than with DELETE ... LIMIT, which SQLite and
+    # Postgres disagree about: "older than the Nth newest id" is plain SQL on
+    # both, and ids are monotonic here.
+    oldest_kept = (
+        db.query(TradingViewWebhookLog.id)
+        .order_by(TradingViewWebhookLog.id.desc())
+        .offset(_LOG_MAX_ROWS - 1)
+        .first()
+    )
+    if oldest_kept is not None:
+        db.query(TradingViewWebhookLog).filter(TradingViewWebhookLog.id < oldest_kept[0]).delete(
+            synchronize_session=False
+        )
+    db.commit()
+
+
+def _persist_audit(db: Session, log: TradingViewWebhookLog) -> None:
     db.add(log)
     db.commit()
+    _prune_audit_log(db)
+
+
+def _reject_with_log(db: Session, log: TradingViewWebhookLog, error: str) -> JSONResponse:
+    log.error = error
+    _persist_audit(db, log)
     return JSONResponse(status_code=status.HTTP_200_OK, content={"ok": False, "error": error})
 
 
@@ -49,36 +130,64 @@ def _reject_with_log(db: Session, log: TradingViewWebhookLog, error: str) -> JSO
 async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
     """Public endpoint, secured by a shared secret carried in the JSON body
     (not a header: TradingView alert webhooks can't send custom headers,
-    and the body often arrives as text/plain). Always writes an audit row.
+    and the body often arrives as text/plain).
+
+    Nothing is written to the database until that secret checks out. The path
+    is public and guessable, nothing else authenticates the caller, and no
+    cleanup existed for the audit table -- so an audit row written before the
+    check meant anyone who found the URL could append storage in a loop until
+    Neon's 0.5GB free tier was full, and a database with no space left fails
+    every write the app makes. Rejected requests are reported to the
+    application log instead, which the hosting platform already rotates.
 
     Returns 202 for a genuinely accepted signal. TradingView retries any
     non-2xx response, so failures that would never succeed on retry
     (malformed JSON, an invalid payload shape, no user to attribute it to)
     return 200 with the error logged instead of a 4xx/5xx."""
-    raw_body = await request.body()
-    log = TradingViewWebhookLog(
-        raw_body=raw_body[:_MAX_LOGGED_BODY_BYTES].decode("utf-8", errors="replace"),
-        remote_ip=request.client.host if request.client else None,
-    )
+    raw_body = await _read_bounded_body(request)
+    if raw_body is None:
+        logger.warning(
+            "tradingview webhook: refused a body over %d bytes from %s",
+            _MAX_BODY_BYTES,
+            _client_ip(request),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="payload too large"
+        )
 
     try:
         payload = json.loads(raw_body)
         if not isinstance(payload, dict):
             raise ValueError("payload must be a JSON object")
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-        log.parsed_ok = False
-        return _reject_with_log(db, log, f"invalid JSON: {exc}")
+        # The secret travels inside the JSON, so a body that will not parse is
+        # a body that cannot be authenticated. No row.
+        logger.warning("tradingview webhook: unparseable body from %s", _client_ip(request))
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"ok": False, "error": f"invalid JSON: {exc}"},
+        )
 
     secret = str(payload.get("secret", ""))
     if not hmac.compare_digest(secret, settings.TV_WEBHOOK_SECRET):
-        log.parsed_ok = True
-        log.signature_valid = False
-        log.error = "invalid secret"
-        db.add(log)
-        db.commit()
+        logger.warning("tradingview webhook: invalid secret from %s", _client_ip(request))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
 
-    log.signature_valid = True
+    # Authenticated from here, so audit rows are worth writing: their volume is
+    # bounded by whoever holds the secret, and _prune_audit_log caps them even
+    # if that assumption ever stops holding.
+    #
+    # Stored re-serialized without the secret rather than as the bytes that
+    # arrived: the secret is a bearer credential, and an audit row quoting it
+    # back would be a second, unencrypted copy of the password guarding this
+    # endpoint. Everything with audit value -- symbol, action, quantity, the
+    # alert id -- is kept.
+    audited = {key: value for key, value in payload.items() if key != "secret"}
+    log = TradingViewWebhookLog(
+        raw_body=json.dumps(audited, ensure_ascii=False)[:_MAX_LOGGED_BODY_CHARS],
+        remote_ip=_client_ip(request),
+        signature_valid=True,
+    )
 
     try:
         alert = TradingViewAlert.model_validate(payload)
@@ -104,13 +213,12 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
             quantity=alert.quantity or Decimal(1),
             signal_price=alert.price,
             idempotency_key=alert.id,
-            raw_payload=payload,
+            raw_payload=audited,
         ),
     )
 
     if result.order is not None:
         log.order_id = result.order.id
-    db.add(log)
-    db.commit()
+    _persist_audit(db, log)
 
     return {"ok": True, "created": result.created, "reason": result.reason}

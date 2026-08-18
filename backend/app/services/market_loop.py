@@ -160,11 +160,15 @@ def _apply_signal(
             strategy_id=strategy.id,
         ),
     )
+    # Nothing announces the order here: create_pending_order() publishes
+    # order.created itself, for every caller (worker loop, webhook, manual
+    # POST) alike. Announcing it again from the loop sent the owner two
+    # identical Telegram/email/push messages and wrote two notification_logs
+    # rows for one order -- while a manual order, the one path that skips the
+    # loop, correctly sent one.
     if result.created:
         strategy.last_signal = signal_str
         strategy.last_signal_at = utcnow()
-        order_data = {"order_id": result.order.id, "user_id": strategy.user_id}
-        events.append(Event(type="order.created", data=order_data))
 
 
 def _emit_alert_only_signal(
@@ -188,9 +192,7 @@ def _emit_alert_only_signal(
     events.append(event)
 
 
-def _check_position_exit(
-    db: Session, position: Position, quote: Quote, events: list[Event]
-) -> None:
+def _check_position_exit(db: Session, position: Position, quote: Quote) -> None:
     if position.avg_entry_price <= 0:
         return
 
@@ -213,7 +215,10 @@ def _check_position_exit(
         return
 
     user = db.get(User, position.user_id)
-    result = create_pending_order(
+    # Return value deliberately unused: the exit order announces itself from
+    # inside create_pending_order (see _apply_signal), and a refused exit --
+    # one already pending for this symbol/side -- needs nothing recorded here.
+    create_pending_order(
         db,
         user,
         SignalIn(
@@ -225,9 +230,6 @@ def _check_position_exit(
             risk_notes={"trigger": "stop_loss" if hit_stop else "take_profit"},
         ),
     )
-    if result.created:
-        order_data = {"order_id": result.order.id, "user_id": position.user_id}
-        events.append(Event(type="order.created", data=order_data))
 
 
 def _expire_stale_orders(db: Session, events: list[Event]) -> None:
@@ -322,7 +324,7 @@ def tick_once(
         for position in positions:
             quote = quotes.get(position.symbol)
             if quote is not None:
-                _check_position_exit(session, position, quote, events)
+                _check_position_exit(session, position, quote)
 
         _expire_stale_orders(session, events)
     finally:

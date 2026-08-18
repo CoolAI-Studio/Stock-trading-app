@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -8,6 +10,7 @@ import app.models
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.services.events import Event, bus
 
 
 @pytest.fixture(autouse=True)
@@ -74,3 +77,21 @@ def auth_client(client, monkeypatch):
     token = login_resp.json()["access_token"]
     client.headers.update({"Authorization": f"Bearer {token}"})
     return client
+
+
+@pytest.fixture
+def published_events() -> Iterator[list[Event]]:
+    """Every event that reached services.events.bus during the test.
+
+    The bus is what the outside world reacts to -- Telegram/email/push sends,
+    the notification log, the WebSocket push -- so it is the only place that
+    can answer "was the owner told once, or twice?". Functions that also
+    return an event list return it for their caller's convenience; publishing
+    is what actually notifies anyone.
+    """
+    collected: list[Event] = []
+    bus.subscribe(collected.append)
+    try:
+        yield collected
+    finally:
+        bus.unsubscribe(collected.append)

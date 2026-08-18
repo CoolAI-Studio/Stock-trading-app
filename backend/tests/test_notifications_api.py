@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 
 def test_create_telegram_channel_and_secret_is_never_returned(auth_client):
     resp = auth_client.post(
@@ -143,3 +145,44 @@ def test_vapid_public_key_endpoint(auth_client, monkeypatch):
 def test_vapid_public_key_requires_auth(client):
     resp = client.get("/api/notifications/push/vapid-public-key")
     assert resp.status_code == 401
+
+
+def test_a_rejected_telegram_send_never_leaks_the_bot_token_through_the_api(auth_client):
+    """A wrong/revoked bot token is the most likely Telegram failure there is,
+    and httpx names the full request URL -- token included -- in the error it
+    raises for it. That string is persisted in NotificationChannel.last_error
+    and NotificationLog.error and handed straight back by these two endpoints,
+    so a leak here would publish the credential the encrypted config column
+    exists to protect."""
+    bot_token = "7654321:AAHthis-bot-token-must-never-be-echoed"
+    create_resp = auth_client.post(
+        "/api/notifications/channels",
+        json={
+            "channel_type": "telegram",
+            "label": "phone",
+            "config": {"bot_token": bot_token, "chat_id": "999"},
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+    channel_id = create_resp.json()["id"]
+
+    request = httpx.Request("POST", f"https://api.telegram.org/bot{bot_token}/sendMessage")
+    unauthorized = httpx.Response(
+        401,
+        json={"ok": False, "error_code": 401, "description": "Unauthorized"},
+        request=request,
+    )
+    with patch("httpx.post", return_value=unauthorized):
+        test_resp = auth_client.post(f"/api/notifications/channels/{channel_id}/test")
+
+    assert test_resp.status_code == 200
+    assert test_resp.json()["ok"] is False
+    assert bot_token not in test_resp.text
+
+    channels_resp = auth_client.get("/api/notifications/channels")
+    logs_resp = auth_client.get("/api/notifications/logs")
+    assert bot_token not in channels_resp.text
+    assert bot_token not in logs_resp.text
+    # The failure is still reported -- the point is a usable error, not a
+    # blank one.
+    assert "401" in logs_resp.json()[0]["error"]

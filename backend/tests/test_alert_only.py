@@ -119,17 +119,19 @@ def test_alert_only_strategy_creates_no_order(db_session):
     assert any(e.type == "strategy.alert" for e in events)
 
 
-def test_normal_strategy_still_creates_a_pending_order(db_session):
+def test_normal_strategy_still_creates_a_pending_order(db_session, published_events):
     user = _make_user(db_session)
     _make_channel(db_session, user)
     _make_strategy(db_session, user, alert_only=False)
 
     with _delivery_succeeds():
-        events = _tick(db_session)
+        _tick(db_session)
 
     assert db_session.query(Order).count() == 1
     assert db_session.query(StrategyAlert).count() == 0
-    assert any(e.type == "order.created" for e in events)
+    # Observed on the bus, not on tick_once()'s return value: the order path
+    # announces itself from inside create_pending_order.
+    assert any(e.type == "order.created" for e in published_events)
 
 
 def test_alert_row_records_who_what_and_when(db_session):

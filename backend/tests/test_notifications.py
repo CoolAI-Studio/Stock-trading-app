@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+import httpx
+
 from app.models.enums import ChannelType, NotificationStatus
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.user import User
@@ -40,12 +42,71 @@ def test_telegram_sender_missing_config():
 
 
 def test_telegram_sender_http_failure():
-    import httpx
-
     with patch("httpx.post", side_effect=httpx.ConnectError("boom")):
         result = TelegramSender().send({"bot_token": "t", "chat_id": "123"}, "hello")
 
     assert result.ok is False
+
+
+# A send failure is written verbatim into NotificationLog.error and
+# NotificationChannel.last_error -- plain Text columns, sitting right next to
+# the deliberately Fernet-encrypted config -- and both are served back by the
+# API. So whatever a sender puts in SendResult.error is effectively public,
+# and must never contain a credential.
+_BOT_TOKEN = "7654321:AAHthis-bot-token-must-never-be-echoed"
+
+
+def _telegram_401(token: str) -> httpx.Response:
+    """A real httpx.Response rather than a MagicMock: the leak under test is
+    created by httpx itself, which formats the request URL -- and the token
+    embedded in Telegram's URL -- into the HTTPStatusError message. A mock
+    that fabricates the exception would not reproduce it."""
+    request = httpx.Request("POST", f"https://api.telegram.org/bot{token}/sendMessage")
+    return httpx.Response(
+        401,
+        json={"ok": False, "error_code": 401, "description": "Unauthorized"},
+        request=request,
+    )
+
+
+def test_telegram_status_error_reports_the_code_without_the_bot_token():
+    with patch("httpx.post", return_value=_telegram_401(_BOT_TOKEN)):
+        result = TelegramSender().send({"bot_token": _BOT_TOKEN, "chat_id": "123"}, "hello")
+
+    assert result.ok is False
+    assert _BOT_TOKEN not in result.error
+    # Still diagnostic: the owner needs to know it was rejected, and why.
+    assert "401" in result.error
+    assert "Unauthorized" in result.error
+
+
+def test_telegram_transport_error_never_contains_the_bot_token():
+    """Not every httpx failure is an HTTP status. A transport error can carry
+    the URL in its own message too, so the guard cannot be status-only."""
+    request = httpx.Request("POST", f"https://api.telegram.org/bot{_BOT_TOKEN}/sendMessage")
+    exc = httpx.ConnectError(f"failed to connect to {request.url}", request=request)
+
+    with patch("httpx.post", side_effect=exc):
+        result = TelegramSender().send({"bot_token": _BOT_TOKEN, "chat_id": "123"}, "hello")
+
+    assert result.ok is False
+    assert _BOT_TOKEN not in result.error
+
+
+def test_line_error_never_contains_the_access_token():
+    """LINE authenticates with an Authorization header, not a token in the
+    URL, so httpx's message should already be clean. Verified rather than
+    assumed -- this is the sibling sender the Telegram leak prompted a check
+    of, and a regression here would be just as invisible."""
+    access_token = "line-channel-access-token-DO-NOT-LEAK"
+    request = httpx.Request("POST", "https://api.line.me/v2/bot/message/push")
+    response = httpx.Response(401, json={"message": "Authentication failed"}, request=request)
+
+    with patch("httpx.post", return_value=response):
+        result = LineSender().send({"access_token": access_token, "to": "u123"}, "hello")
+
+    assert result.ok is False
+    assert access_token not in result.error
 
 
 def test_line_sender_success():

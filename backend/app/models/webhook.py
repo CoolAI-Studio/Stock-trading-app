@@ -14,8 +14,12 @@ class TradingViewWebhookLog(Base):
     received_at: Mapped[datetime] = mapped_column(default=utcnow)
     remote_ip: Mapped[str | None] = mapped_column(String(64), default=None)
     signature_valid: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Truncated to 8KB on write by the webhook handler -- this is an audit
-    # trail, not a full-fidelity replay log.
+    # The accepted payload re-serialized with the shared secret removed, then
+    # truncated, by the webhook handler -- see app/api/routers/webhooks.py.
+    # An audit trail, not a full-fidelity replay log, and deliberately not a
+    # second unencrypted copy of the credential that guards the endpoint.
+    # Only requests that passed the secret are ever recorded, so the table
+    # cannot be grown by an anonymous caller; the handler also prunes it.
     raw_body: Mapped[str] = mapped_column(Text)
     parsed_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     user_id: Mapped[int | None] = mapped_column(
