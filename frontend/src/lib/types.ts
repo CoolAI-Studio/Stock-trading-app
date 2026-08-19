@@ -411,3 +411,17 @@ export interface StrategyPerformance {
   sold_value: string
   notes: string[]
 }
+
+/** Automatic emailed backups.
+ *
+ * `has_passphrase` rather than the passphrase itself: the worker is the only
+ * thing that needs the value, and reading it back would put it in every
+ * browser cache for no gain. */
+export interface BackupSchedule {
+  is_enabled: boolean
+  interval_days: number
+  to_addr: string | null
+  last_sent_at: string | null
+  last_error: string | null
+  has_passphrase: boolean
+}

@@ -15,7 +15,14 @@ from app.models.position import Position
 from app.models.risk import RiskSettings
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.services import alerts, market_calendar, risk, risk_resolver, worker_health
+from app.services import (
+    alerts,
+    backup_schedule,
+    market_calendar,
+    risk,
+    risk_resolver,
+    worker_health,
+)
 from app.services.events import Event, bus
 from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
@@ -424,6 +431,11 @@ def tick_once(
         # stop-loss checks above it off schedule.
         try:
             notification_retry.retry_pending(session)
+            # Cheap: one indexed query, and it only does real work on the day a
+            # backup comes due. Living in the same sweep as the retry means
+            # there is one place where "the worker is alive" implies "the
+            # background chores are happening".
+            backup_schedule.run_due(session)
         except Exception:
             # Never let a re-send failure take the market loop down with it --
             # the loop stopping is a strictly worse outcome than one alert
