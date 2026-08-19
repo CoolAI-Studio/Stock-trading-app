@@ -13,7 +13,13 @@ config = context.config
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False, which is *not* the default: fileConfig
+    # otherwise walks every logger created so far and sets .disabled = True.
+    # Every app logger built at import time would be dead for the rest of the
+    # process -- and the first thing that costs is the market-data warnings
+    # added so a blocked provider stops failing silently. A silent failure
+    # whose detection is itself silenced.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

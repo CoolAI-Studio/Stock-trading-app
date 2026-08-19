@@ -46,4 +46,21 @@ class NotificationLog(Base):
         SAEnum(NotificationStatus, native_enum=False, length=16)
     )
     error: Mapped[str | None] = mapped_column(Text, default=None)
+
+    # What was actually sent. Kept because the event that produced it is long
+    # gone by the time a retry runs, and re-rendering it from scratch is not
+    # possible -- there is nothing left to render from. NULL on rows written
+    # before retries existed, which is exactly why those are never retried:
+    # inventing the text would mean telling the owner about something that
+    # may no longer be true.
+    message: Mapped[str | None] = mapped_column(Text, default=None)
+    # How many sends have been made for this one notification, first attempt
+    # included.
+    attempts: Mapped[int] = mapped_column(default=1)
+    # When the next attempt is due. NULL means nothing more is owed: delivered,
+    # given up on, or a channel the owner switched off.
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

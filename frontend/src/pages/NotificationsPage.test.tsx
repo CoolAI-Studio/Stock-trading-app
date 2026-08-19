@@ -248,3 +248,63 @@ describe('SMTP credentials', () => {
     expect(screen.getByLabelText('密碼')).toHaveAttribute('type', 'password')
   })
 })
+
+describe('whether a channel is actually working', () => {
+  it('marks a disabled channel as switched off', async () => {
+    // It used to look identical to an enabled one, so a channel the owner (or
+    // the dead-endpoint sweep) turned off read as still delivering.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('channels')) return [{ ...CHANNEL, is_enabled: false }] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText(CHANNEL.label)).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('channel-health')).toHaveTextContent('已停用')
+  })
+
+  it('shows the reason a channel stopped working, not just that it did', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('channels'))
+        return [
+          {
+            ...CHANNEL,
+            is_enabled: false,
+            last_error: '瀏覽器的推播訂閱已失效（HTTP 410），這個管道已自動停用。請重新建立。',
+          },
+        ] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText(CHANNEL.label)).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('請重新建立')
+  })
+
+  it('flags a channel that is still enabled but failing', async () => {
+    // The dangerous middle state: on, and quietly not delivering.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('channels'))
+        return [{ ...CHANNEL, is_enabled: true, last_error: 'Read timed out' }] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText(CHANNEL.label)).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('channel-health')).toHaveTextContent('上次失敗')
+  })
+
+  it('says a working channel is working', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('channels'))
+        return [
+          { ...CHANNEL, is_enabled: true, last_error: null, last_sent_at: '2026-08-19T01:30:00Z' },
+        ] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText(CHANNEL.label)).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('channel-health')).toHaveTextContent('正常')
+  })
+})

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import timedelta
 from decimal import Decimal
 
@@ -18,6 +19,7 @@ from app.services import alerts, risk, risk_resolver, worker_health
 from app.services.events import Event, bus
 from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
+from app.services.notification import retry as notification_retry
 from app.services.signals import SignalIn, create_pending_order
 from app.services.strategy_runtime import (
     LoadedStrategy,
@@ -29,6 +31,10 @@ logger = logging.getLogger("app.market_loop")
 
 # Module-level so strategy instances (and their accumulated self.prices
 # state) survive across ticks, not just across a single tick_once() call.
+# How many poll intervals a tick may take before it is worth a log line. Three
+# is past "a slow provider day" and into "something is not coming back".
+_SLOW_TICK_FACTOR = 3
+
 _registry = StrategyRegistry()
 
 
@@ -317,6 +323,18 @@ def tick_once(
             if fetched:
                 events.append(Event(type="quote.update", data={"symbols": sorted(fetched)}))
 
+        # Only meaningful when something was actually asked for: an account
+        # with no strategies and no positions requests nothing, and that is
+        # not an outage. Asking and getting nothing is, and it is the state
+        # that used to look perfectly healthy -- the providers swallow every
+        # exception, so the loop kept completing polls on schedule while not
+        # one price came back.
+        if symbols_by_source:
+            if quotes:
+                worker_health.heartbeat.mark_quotes_fetched()
+            else:
+                worker_health.heartbeat.mark_quotes_empty()
+
         # One fetch per distinct symbol+timeframe, shared by every strategy
         # asking for it -- the history cache bounds this further still.
         bars_by_key: dict[tuple[DataSource, str, Timeframe], list[Bar]] = {}
@@ -348,6 +366,19 @@ def tick_once(
                 _check_position_exit(session, position, quote)
 
         _expire_stale_orders(session, events)
+
+        # Last, and deliberately inside the same try: a notification the owner
+        # never received is this product's critical failure, so the sweep runs
+        # every poll rather than on a timer of its own. It is bounded (one
+        # indexed query, at most a handful of sends) so it cannot push the
+        # stop-loss checks above it off schedule.
+        try:
+            notification_retry.retry_pending(session)
+        except Exception:
+            # Never let a re-send failure take the market loop down with it --
+            # the loop stopping is a strictly worse outcome than one alert
+            # arriving late.
+            logger.exception("notification retry sweep failed")
     finally:
         if owns_session:
             session.close()
@@ -368,12 +399,29 @@ async def run_forever(stop_event: asyncio.Event) -> None:
         # returns to mark anything) shows up in /healthz as a stalled loop
         # rather than as a loop that is merely between polls.
         worker_health.heartbeat.mark_loop()
+        started = time.monotonic()
         try:
             await asyncio.to_thread(tick_once)
         except Exception:
             logger.exception("market loop tick failed")
         else:
             worker_health.heartbeat.mark_poll_success()
+        finally:
+            # A tick that overruns the poll interval several times over is on
+            # its way to wedging, usually on a provider socket that will never
+            # answer. /healthz already catches a fully stuck loop -- mark_loop
+            # stops being called and the age goes stale -- but by then the log
+            # says nothing about which poll it was or how long it had been
+            # degrading. yfinance 1.6 exposes no request timeout worth
+            # trusting, so this records the symptom rather than pretending to
+            # cure it.
+            elapsed = time.monotonic() - started
+            if elapsed > settings.MARKET_DATA_POLL_INTERVAL_SEC * _SLOW_TICK_FACTOR:
+                logger.warning(
+                    "market loop tick took %.1fs (poll interval is %ss)",
+                    elapsed,
+                    settings.MARKET_DATA_POLL_INTERVAL_SEC,
+                )
         try:
             await asyncio.wait_for(
                 stop_event.wait(), timeout=settings.MARKET_DATA_POLL_INTERVAL_SEC

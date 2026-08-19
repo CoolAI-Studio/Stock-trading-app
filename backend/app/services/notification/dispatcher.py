@@ -90,6 +90,10 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
     if event.data.get(DISPATCHED_INLINE_KEY):
         return DispatchResult()
 
+    # Imported here rather than at module scope: retry.py reads SENDERS from
+    # this module, so a top-level import in both directions is a cycle.
+    from app.services.notification import retry
+
     result = DispatchResult()
     owns_session = db is None
     session = db or SessionLocal()
@@ -123,16 +127,24 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
             else:
                 ok, error = send_result.ok, send_result.error
 
-            session.add(
-                NotificationLog(
-                    user_id=user_id,
-                    channel_id=channel.id,
-                    order_id=order_id,
-                    event=event.type,
-                    status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
-                    error=error,
-                )
+            log = NotificationLog(
+                user_id=user_id,
+                channel_id=channel.id,
+                order_id=order_id,
+                event=event.type,
+                status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
+                error=error,
+                # Kept even on success, so the row says what the owner was
+                # actually told rather than only that something was sent.
+                message=message,
             )
+            if not ok:
+                # order.created and strategy.error fire once and never again,
+                # so without a due time here a ten-second provider outage
+                # loses them for good. services/notification/retry.py sweeps
+                # what this queues.
+                retry.schedule_first_retry(log)
+            session.add(log)
             channel.last_sent_at = utcnow()
             channel.last_error = error
             session.commit()

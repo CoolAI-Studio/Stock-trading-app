@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable
 
@@ -38,6 +39,9 @@ _DEFAULT_BAR_TTL_SEC: dict[Timeframe, float] = {
 # and few enough rows that replaying them through a sandboxed strategy on
 # startup costs milliseconds.
 DEFAULT_BAR_LIMIT = 300
+
+
+logger = logging.getLogger("app.market_data")
 
 
 class MarketDataService:
@@ -86,6 +90,20 @@ class MarketDataService:
             # with stop-loss/take-profit comparing against a price that could
             # no longer move.
             self._cache[data_source] = (now if stale else cached_at, cached_quotes)
+
+            # Providers omit what they cannot resolve rather than raising, so
+            # a blocked IP, a renamed API field and a mistyped ticker all
+            # arrive here as the same quiet gap. Naming the missing symbols is
+            # the difference between "the feed broke at 14:05" and the owner
+            # noticing days later that no orders ever appeared.
+            missing_now = [s for s in fetch_list if s not in fresh]
+            if missing_now:
+                logger.warning(
+                    "%s returned no quote for %s (asked for %s)",
+                    data_source.value,
+                    ", ".join(sorted(missing_now)),
+                    len(fetch_list),
+                )
 
         return {s: cached_quotes[s] for s in symbols if s in cached_quotes}
 

@@ -41,4 +41,18 @@ class WebPushSender:
             )
             return SendResult(ok=True)
         except WebPushException as exc:
-            return SendResult(ok=False, error=str(exc))
+            return SendResult(ok=False, error=_describe(exc))
+
+
+def _describe(exc: WebPushException) -> str:
+    """The status code first, because that is the part that decides what
+    happens next: 404 and 410 mean the browser rotated this subscription and
+    it will never work again, everything else is worth retrying. pywebpush's
+    own str() is prose with the code buried in it or missing entirely, so
+    retry.py could not tell the two apart."""
+    response = getattr(exc, "response", None)
+    code = getattr(response, "status_code", None)
+    if code is None:
+        return str(exc)
+    detail = (getattr(response, "text", "") or "").strip()
+    return f"HTTP {code}: {detail}" if detail else f"HTTP {code}"

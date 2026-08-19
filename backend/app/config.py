@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     # probe after a cold start meets a worker that truthfully has never polled.
     # Inside this window that reports as "starting" instead of failing.
     HEALTH_STARTUP_GRACE_SEC: float = 120.0
+    # Polls in a row that fetched nothing before /healthz calls the feed dead.
+    # At the default 15s interval this is about five minutes of total silence
+    # -- long enough that a single provider hiccup does not page anyone, short
+    # enough that a blocked IP is caught the same afternoon rather than
+    # whenever the owner next notices no orders have appeared.
+    HEALTH_MAX_EMPTY_POLLS: int = 20
 
     # A manual-confirm pending order older than this is stale and gets
     # auto-expired by the worker loop rather than sitting there forever.

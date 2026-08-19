@@ -68,6 +68,19 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         checks["market_data"] = _check_age(
             "last_poll_age_sec", beat.last_poll_age_sec, beat.uptime_sec
         )
+        # Age alone said healthy through a total outage: the providers catch
+        # every exception and return {}, so the loop went on completing polls
+        # on schedule while not a single price came back. A run of empty
+        # fetches is the only signal that distinguishes the two, and without
+        # it UptimeRobot never mailed anyone.
+        if (
+            checks["market_data"]["status"] == _OK
+            and beat.consecutive_empty_polls >= settings.HEALTH_MAX_EMPTY_POLLS
+        ):
+            checks["market_data"] = {
+                "status": _FAIL,
+                "consecutive_empty_polls": beat.consecutive_empty_polls,
+            }
     else:
         # An intentionally idle worker (local runs, the test suite) is a
         # configuration choice, not something to wake the owner over.

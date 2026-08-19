@@ -12,6 +12,49 @@ const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', fai
  * Gmail, Outlook, SendGrid -- anything that authenticates -- could not be
  * configured at all, and the test button came back with an authentication
  * error the page had no field to fix. */
+/** Three states worth telling apart: off, on-but-failing, and working.
+ *
+ * The middle one is the dangerous one -- a channel that says 啟用中 while
+ * every send bounces. The retry sweep switches a permanently dead channel off
+ * and writes what to do about it into last_error, and this is where the owner
+ * reads it. */
+function ChannelHealth({ channel }: { channel: NotificationChannel }) {
+  if (!channel.is_enabled) {
+    return (
+      <div className="space-y-1">
+        <span className="rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-400">
+          已停用
+        </span>
+        {channel.last_error && (
+          <p className="max-w-xs text-xs text-amber-300">{channel.last_error}</p>
+        )}
+      </div>
+    )
+  }
+  if (channel.last_error) {
+    return (
+      <div className="space-y-1">
+        <span className="rounded border border-red-800 bg-red-950/40 px-2 py-0.5 text-xs text-red-300">
+          上次失敗
+        </span>
+        <p className="max-w-xs text-xs text-red-300">{channel.last_error}</p>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      <span className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-xs text-emerald-300">
+        正常
+      </span>
+      {channel.last_sent_at && (
+        <p className="text-xs text-slate-500">
+          上次送出 {new Date(channel.last_sent_at).toLocaleString()}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function emailConfig(fields: {
   host: string
   port: string
@@ -276,6 +319,12 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
         <td className="py-2 pr-4 font-medium">{channel.label}</td>
         <td className="py-2 pr-4 uppercase text-slate-400">{channel.channel_type}</td>
         <td className="py-2 pr-4 text-slate-400">{channel.config_preview}</td>
+        {/* Whether it is actually delivering. A disabled channel and a
+            silently failing one used to look exactly like a working one, so
+            "my phone stopped ringing" had no answer anywhere on screen. */}
+        <td className="py-2 pr-4" data-testid="channel-health">
+          <ChannelHealth channel={channel} />
+        </td>
         <td className="py-2 pr-4">
           <div className="flex items-center gap-2">
             <button
@@ -608,6 +657,7 @@ export function NotificationsPage() {
             <th className="pb-2 font-normal">名稱</th>
             <th className="pb-2 font-normal">類型</th>
             <th className="pb-2 font-normal">設定</th>
+            <th className="pb-2 font-normal">狀態</th>
             <th className="pb-2 font-normal">操作</th>
           </tr>
         </thead>

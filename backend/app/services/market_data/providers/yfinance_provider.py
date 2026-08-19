@@ -1,3 +1,4 @@
+import logging
 import math
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -23,6 +24,9 @@ _PERIOD_FOR: dict[Timeframe, str] = {
 }
 
 
+logger = logging.getLogger("app.market_data.yfinance")
+
+
 class YFinanceProvider:
     data_source = DataSource.YFINANCE
 
@@ -38,6 +42,12 @@ class YFinanceProvider:
                 price = fast_info["lastPrice"]
                 prev_close = fast_info.get("previousClose") if hasattr(fast_info, "get") else None
             except Exception:
+                # Carrying on is right -- one bad symbol must not stop the
+                # whole poll -- but until now this `continue` was also the
+                # only record that anything had gone wrong, so a blocked IP
+                # and a quiet market were indistinguishable in the logs
+                # because there were no logs.
+                logger.warning("yfinance quote failed for %s", symbol, exc_info=True)
                 continue
 
             if price is None:
