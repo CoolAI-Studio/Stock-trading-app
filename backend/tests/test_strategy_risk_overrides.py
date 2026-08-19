@@ -1000,3 +1000,63 @@ def test_the_global_ceiling_still_applies_inside_a_generous_strategy_allocation(
 
     assert result.created is False
     assert "全域本金" in result.reason, "the global cap is what bit, and the message must say so"
+
+
+# --- a signal the risk gate refused has to leave a trace --------------------
+#
+# create_pending_order returns a reason on all seven refusal paths, and two of
+# its three callers surface it: the manual POST raises it as a 422, the
+# TradingView webhook returns it in the response body. The worker loop read
+# only `created` and dropped the reason on the floor -- so a strategy shouting
+# BUY every tick and being refused every tick looked exactly like a strategy
+# with nothing to say.
+
+
+def test_a_signal_blocked_by_risk_is_recorded_on_the_strategy(db_session):
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, capital=Decimal(50), is_active=True)
+
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=100.0))
+    db_session.refresh(strategy)
+
+    assert strategy.last_blocked_reason is not None, "the owner has to be able to see why"
+    assert "本金" in strategy.last_blocked_reason
+    assert strategy.last_blocked_at is not None
+    # Untouched: nothing was signalled to anybody, same as before.
+    assert strategy.last_signal is None
+
+
+def test_a_blocked_signal_is_not_counted_as_a_strategy_error(db_session):
+    """The strategy did its job. Routing this through last_error would put a
+    working strategy on the error-backoff path and eventually disable it."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, capital=Decimal(50), is_active=True)
+
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=100.0))
+    db_session.refresh(strategy)
+
+    assert strategy.last_error is None
+    assert strategy.consecutive_errors == 0
+
+
+def test_an_order_getting_through_clears_the_earlier_block(db_session):
+    """Otherwise the reason is sticky and the owner keeps reading a stale
+    explanation for a strategy that has since started trading fine."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, capital=Decimal(50), is_active=True)
+
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=100.0))
+    db_session.refresh(strategy)
+    assert strategy.last_blocked_reason is not None
+
+    strategy.capital = Decimal(100000)
+    db_session.commit()
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=100.0))
+    db_session.refresh(strategy)
+
+    assert strategy.last_signal == "BUY"
+    assert strategy.last_blocked_reason is None
+    assert strategy.last_blocked_at is None

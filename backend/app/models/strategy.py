@@ -55,8 +55,15 @@ class Strategy(TimestampMixin, Base):
     alert_interval_sec: Mapped[int | None] = mapped_column(default=None)
 
     last_signal: Mapped[str | None] = mapped_column(String(8), default=None)
-    last_signal_at: Mapped[datetime | None] = mapped_column(default=None)
-    last_run_at: Mapped[datetime | None] = mapped_column(default=None)
+    last_signal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # Why the last signal did not become an order. Deliberately separate from
+    # last_error: the strategy did its job, and routing a refusal through the
+    # error column would put a working strategy on the error-backoff path and
+    # eventually disable it. Cleared as soon as an order gets through, so a
+    # stale explanation cannot outlive the condition that caused it.
+    last_blocked_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    last_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     consecutive_errors: Mapped[int] = mapped_column(default=0)
 

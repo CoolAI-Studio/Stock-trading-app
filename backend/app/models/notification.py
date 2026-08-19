@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,7 +25,7 @@ class NotificationChannel(TimestampMixin, Base):
     config_encrypted: Mapped[dict] = mapped_column(EncryptedJSON)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     subscribed_events: Mapped[list | None] = mapped_column(JSON, default=None)
-    last_sent_at: Mapped[datetime | None] = mapped_column(default=None)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
 
 
@@ -46,4 +46,4 @@ class NotificationLog(Base):
         SAEnum(NotificationStatus, native_enum=False, length=16)
     )
     error: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

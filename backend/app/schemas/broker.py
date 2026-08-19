@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.common import UtcDatetime
 
 
 class BrokerCredentialCreate(BaseModel):
@@ -21,7 +21,7 @@ class BrokerCredentialRead(BaseModel):
     id: int
     label: str
     broker_name: str
-    created_at: datetime
+    created_at: UtcDatetime
     # Masked, populated by the router -- config_encrypted itself is never
     # part of this model. Every value is masked regardless of key name
     # (unlike notification channels, config here is free-form/unknown

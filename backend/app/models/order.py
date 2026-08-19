@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, ForeignKey, Index, Numeric, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,8 +41,8 @@ class Order(TimestampMixin, Base):
     # the position. Without it recorded, the order row overstates what changed
     # hands and anything totalling spend from order history is wrong.
     filled_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), default=None)
-    filled_at: Mapped[datetime | None] = mapped_column(default=None)
-    decided_at: Mapped[datetime | None] = mapped_column(default=None)
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     broker_ref: Mapped[str | None] = mapped_column(String(128), default=None)
 
     # Stops a retried TradingView alert (or a double-click) from creating two

@@ -1,10 +1,9 @@
-from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import OrderSide, OrderSource, OrderStatus
-from app.schemas.common import MoneyStr
+from app.schemas.common import MoneyStr, UtcDatetime
 
 
 class OrderRead(BaseModel):
@@ -22,10 +21,10 @@ class OrderRead(BaseModel):
     reject_reason: str | None
     fill_price: MoneyStr | None
     filled_quantity: MoneyStr | None
-    filled_at: datetime | None
-    decided_at: datetime | None
+    filled_at: UtcDatetime | None
+    decided_at: UtcDatetime | None
     broker_ref: str | None
-    created_at: datetime
+    created_at: UtcDatetime
 
 
 class ManualOrderCreate(BaseModel):

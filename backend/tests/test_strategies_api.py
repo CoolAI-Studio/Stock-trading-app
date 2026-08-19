@@ -201,3 +201,72 @@ def test_listing_strategies_still_omits_source_code(auth_client):
     resp = auth_client.get("/api/strategies")
     assert resp.status_code == 200
     assert "source_code" not in resp.json()[0]
+
+
+# --- the live instance has to die when the strategy stops ------------------
+#
+# StrategyRegistry caches a compiled instance per strategy id, which is the
+# whole reason an MA5 strategy works at all -- self.prices has to survive
+# between ticks. The flip side is that the accumulated state has to be thrown
+# away when the strategy stops running, and `invalidate()` existed but was
+# never called from anywhere.
+
+
+def _create(auth_client, name: str = "resume-test") -> int:
+    resp = auth_client.post(
+        "/api/strategies",
+        json={"name": name, "symbol": "AAPL", "source_code": MA5_SOURCE},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def test_pausing_a_strategy_throws_away_the_prices_it_had_accumulated(auth_client):
+    """Otherwise a strategy paused for two weeks resumes with a price series
+    that jumps straight from the old prices to today's -- the gap is invisible
+    to it, so the first crossing it reports is an artefact of the pause."""
+    from app.services.market_loop import _registry
+
+    strategy_id = _create(auth_client)
+    running = _registry.get_or_load(strategy_id, MA5_SOURCE)
+    running.instance.on_tick(100.0)
+    assert running.instance.prices == [100.0]
+
+    auth_client.post(f"/api/strategies/{strategy_id}/deactivate")
+
+    resumed = _registry.get_or_load(strategy_id, MA5_SOURCE)
+    assert resumed is not running
+    assert resumed.instance.prices == [], "resumed with a fresh price series"
+
+
+def test_deleting_a_strategy_releases_its_instance(auth_client):
+    """A cached instance whose strategy no longer exists is unreachable and
+    never evicted -- it just holds memory for the life of the process, on a
+    box where the whole app runs in one worker."""
+    from app.services.market_loop import _registry
+
+    strategy_id = _create(auth_client, name="delete-test")
+    loaded = _registry.get_or_load(strategy_id, MA5_SOURCE)
+    assert _registry.is_cached(strategy_id)
+
+    auth_client.delete(f"/api/strategies/{strategy_id}")
+
+    assert not _registry.is_cached(strategy_id)
+    assert loaded is not None  # the object itself is fine; the cache entry is gone
+
+
+def test_editing_the_symbol_restarts_the_strategy_clean(auth_client):
+    """Changing the source already recompiles, because the registry keys on a
+    content hash. Changing only the *symbol* did not -- the instance kept
+    every price it had accumulated for the previous symbol and carried them
+    straight into the new one's moving average."""
+    from app.services.market_loop import _registry
+
+    strategy_id = _create(auth_client, name="symbol-swap")
+    running = _registry.get_or_load(strategy_id, MA5_SOURCE)
+    running.instance.on_tick(100.0)
+
+    auth_client.patch(f"/api/strategies/{strategy_id}", json={"symbol": "2330.TW"})
+
+    resumed = _registry.get_or_load(strategy_id, MA5_SOURCE)
+    assert resumed.instance.prices == [], "AAPL's prices must not seed 2330.TW's average"

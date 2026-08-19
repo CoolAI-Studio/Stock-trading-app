@@ -24,6 +24,7 @@ from app.schemas.strategy import (
 from app.services import risk_resolver
 from app.services.ai_provider import get_ai_provider
 from app.services.market_data.base import bars_from_closes
+from app.services.market_loop import release_strategy
 from app.services.strategy_generator import (
     build_repair_prompt,
     build_request_prompt,
@@ -256,6 +257,12 @@ def update_strategy(
     for field, value in data.items():
         setattr(strategy, field, value)
 
+    # A source edit already recompiles -- the registry keys on a content hash.
+    # Editing the symbol does not, and the instance's accumulated prices
+    # belong to the old symbol, so they would seed the new one's average.
+    if "symbol" in data or "source_code" in data:
+        release_strategy(strategy.id)
+
     try:
         db.commit()
     except IntegrityError as exc:
@@ -293,6 +300,9 @@ def delete_strategy(
     )
     db.delete(strategy)
     db.commit()
+    # Nothing can reach this instance again, and the worker runs in a single
+    # long-lived process, so left in the cache it is simply a leak.
+    release_strategy(strategy_id)
 
 
 @router.post("/{strategy_id}/activate", response_model=StrategyRead)
@@ -316,4 +326,8 @@ def deactivate_strategy(
     strategy.is_active = False
     db.commit()
     db.refresh(strategy)
+    # Pausing has to throw the accumulated state away: on resume the price
+    # series would otherwise run straight from the prices it had before the
+    # pause into today's, with the gap invisible to the strategy.
+    release_strategy(strategy_id)
     return strategy

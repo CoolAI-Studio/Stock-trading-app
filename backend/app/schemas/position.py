@@ -1,9 +1,8 @@
-from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.common import MoneyStr
+from app.schemas.common import MoneyStr, UtcDatetime
 
 
 class PositionRead(BaseModel):
@@ -13,7 +12,7 @@ class PositionRead(BaseModel):
     quantity: MoneyStr
     avg_entry_price: MoneyStr
     realized_pnl: MoneyStr
-    opened_at: datetime | None
+    opened_at: UtcDatetime | None
     # Which strategy opened this position, and therefore whose stop-loss /
     # take-profit thresholds it is being scanned under. None means the global
     # settings apply. Surfaced so the owner can see that rather than guess it.

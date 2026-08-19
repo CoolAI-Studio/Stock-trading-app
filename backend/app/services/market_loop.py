@@ -31,6 +31,22 @@ logger = logging.getLogger("app.market_loop")
 # state) survive across ticks, not just across a single tick_once() call.
 _registry = StrategyRegistry()
 
+
+def release_strategy(strategy_id: int) -> None:
+    """Forget the running instance of a strategy.
+
+    The registry caches a compiled instance per id and that is deliberate --
+    an MA5 strategy only works because `self.prices` survives between ticks.
+    The same cache is why a strategy paused for two weeks used to resume with
+    a price series that jumped straight from the old prices to today's: the
+    gap is invisible to the strategy, so the first crossing it reported after
+    resuming was an artefact of the pause, and it was a real order.
+
+    Exposed here rather than letting routers reach into `_registry`, so the
+    worker stays the only owner of the running state."""
+    _registry.invalidate(strategy_id)
+
+
 _MAX_CONSECUTIVE_ERRORS = 5
 
 # NOTE: v1 does not skip closed-market equities -- the per-provider TTL cache
@@ -160,6 +176,17 @@ def _apply_signal(
     if result.created:
         strategy.last_signal = signal_str
         strategy.last_signal_at = utcnow()
+        strategy.last_blocked_reason = None
+        strategy.last_blocked_at = None
+    else:
+        # The refusal reason is the only difference between "this strategy is
+        # quiet today" and "this strategy has been shouting BUY every tick and
+        # being refused every tick". Two of create_pending_order's three
+        # callers already surface it -- the manual POST as a 422, the webhook
+        # in its response body -- and the loop is the one that had nobody to
+        # hand it to.
+        strategy.last_blocked_reason = result.reason
+        strategy.last_blocked_at = utcnow()
 
 
 def _emit_alert_only_signal(

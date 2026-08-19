@@ -1,10 +1,9 @@
-from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import DataSource
-from app.schemas.common import MoneyStr
+from app.schemas.common import MoneyStr, UtcDatetime
 
 
 class StrategyRiskOverrides(BaseModel):
@@ -58,8 +57,10 @@ class StrategyRead(BaseModel):
     default_quantity: MoneyStr
     warmup_bars: int
     last_signal: str | None
-    last_signal_at: datetime | None
-    last_run_at: datetime | None
+    last_signal_at: UtcDatetime | None
+    last_run_at: UtcDatetime | None
+    last_blocked_reason: str | None
+    last_blocked_at: UtcDatetime | None
     last_error: str | None
     consecutive_errors: int
 

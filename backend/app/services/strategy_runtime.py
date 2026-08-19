@@ -436,4 +436,13 @@ class StrategyRegistry:
         return loaded
 
     def invalidate(self, strategy_id: int) -> None:
+        """Drop the live instance, so the next load starts from scratch.
+
+        Call this whenever a strategy stops being the thing that is running:
+        paused, deleted, or edited in a way the content hash cannot see (the
+        symbol, for one -- the accumulated `self.prices` belong to the old
+        symbol and would seed the new one's moving average)."""
         self._cache.pop(strategy_id, None)
+
+    def is_cached(self, strategy_id: int) -> bool:
+        return strategy_id in self._cache

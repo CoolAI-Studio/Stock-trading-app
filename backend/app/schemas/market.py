@@ -1,9 +1,7 @@
-from datetime import datetime
-
 from pydantic import BaseModel
 
 from app.models.enums import DataSource
-from app.schemas.common import MoneyStr
+from app.schemas.common import MoneyStr, UtcDatetime
 
 
 class QuoteRead(BaseModel):
@@ -13,4 +11,4 @@ class QuoteRead(BaseModel):
     prev_close: MoneyStr | None = None
     change_pct: MoneyStr | None = None
     volume: MoneyStr | None = None
-    quote_time: datetime | None = None
+    quote_time: UtcDatetime | None = None

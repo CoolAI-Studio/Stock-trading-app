@@ -1,8 +1,7 @@
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import ChannelType
+from app.schemas.common import UtcDatetime
 
 
 class TelegramConfig(BaseModel):
@@ -57,7 +56,7 @@ class ChannelRead(BaseModel):
     label: str
     is_enabled: bool
     subscribed_events: list[str] | None
-    last_sent_at: datetime | None
+    last_sent_at: UtcDatetime | None
     last_error: str | None
     # Masked, populated by the router -- config_encrypted itself is never
     # part of this model, so there is no field a bug could accidentally
@@ -79,4 +78,4 @@ class NotificationLogRead(BaseModel):
     event: str
     status: str
     error: str | None
-    created_at: datetime
+    created_at: UtcDatetime

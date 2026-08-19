@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import DataSource
-from app.schemas.common import MoneyStr
+from app.schemas.common import MoneyStr, UtcDatetime
 from app.services.backtest import (
     DEFAULT_COMMISSION_RATE,
     DEFAULT_INITIAL_CAPITAL,
@@ -87,8 +87,8 @@ class BacktestRunRequest(BaseModel):
 class BacktestTradeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    opened_at: datetime
-    closed_at: datetime
+    opened_at: UtcDatetime
+    closed_at: UtcDatetime
     quantity: MoneyStr
     entry_price: MoneyStr
     exit_price: MoneyStr
@@ -99,7 +99,7 @@ class BacktestTradeRead(BaseModel):
 class EquityPointRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    timestamp: datetime
+    timestamp: UtcDatetime
     close: MoneyStr
     position_qty: MoneyStr
     cash: MoneyStr
@@ -137,8 +137,8 @@ class BacktestResultRead(BaseModel):
     timeframe: str
     entry_point: str
     warmup_bars: int
-    first_bar_at: datetime | None
-    last_bar_at: datetime | None
+    first_bar_at: UtcDatetime | None
+    last_bar_at: UtcDatetime | None
     assumptions: BacktestAssumptionsRead
     assumption_notes: list[str]
     notes: list[str]
@@ -160,9 +160,9 @@ class BacktestRunRead(BaseModel):
     symbol: str
     timeframe: str
     data_source: DataSource
-    range_start: datetime
-    range_end: datetime
-    created_at: datetime
+    range_start: UtcDatetime
+    range_end: UtcDatetime
+    created_at: UtcDatetime
     assumptions: BacktestAssumptionsRead
     summary: BacktestSummaryRead
 

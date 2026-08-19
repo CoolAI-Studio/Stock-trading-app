@@ -1,9 +1,7 @@
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict
 
 from app.models.enums import NotificationStatus, OrderSide
-from app.schemas.common import MoneyStr
+from app.schemas.common import MoneyStr, UtcDatetime
 
 
 class StrategyAlertRead(BaseModel):
@@ -19,4 +17,4 @@ class StrategyAlertRead(BaseModel):
     # a notification channel stopped working.
     status: NotificationStatus
     error: str | None
-    created_at: datetime
+    created_at: UtcDatetime
