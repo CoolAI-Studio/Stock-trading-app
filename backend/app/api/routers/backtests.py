@@ -20,6 +20,7 @@ from app.services.backtest import (
     estimated_bar_count,
     load_backtest_bars,
     run_backtest,
+    truncation_note,
 )
 from app.services.market_data.base import DEFAULT_TIMEFRAME, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
@@ -197,6 +198,15 @@ def create_backtest(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+
+    # Added here rather than inside run_backtest, which is handed bars and has
+    # no idea what range was asked for. The provider caps history by interval
+    # and returns what it has without comment, so without this the result
+    # displays the requested range and a strategy looks validated over years
+    # it was never shown.
+    shortfall = truncation_note(payload.start, payload.end, result.first_bar_at, result.last_bar_at)
+    if shortfall:
+        result.notes.insert(0, shortfall)
 
     return _persist(
         db, user, payload, strategy, source_code, symbol, timeframe, data_source, result

@@ -41,7 +41,7 @@ not because it is wrong.
 
 import math
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
@@ -226,6 +226,25 @@ class BacktestSummary:
     final_equity: Decimal
     open_quantity: Decimal
     open_avg_entry_price: Decimal
+
+    # What doing nothing would have returned over the same bars. Without it
+    # +18% reads as a good year, when the stock itself may have done +40% and
+    # the strategy destroyed value. In a bull run almost anything is
+    # profitable; this is the only line that separates "the strategy works"
+    # from "the market went up". None when there were no bars to hold.
+    buy_and_hold_return_pct: Decimal | None
+    # The strategy's return minus that. Negative means holding would have been
+    # better, which is the number worth acting on.
+    excess_return_pct: Decimal | None
+    # Gross profit divided by gross loss. Answers what win rate cannot: a 75%
+    # win rate that makes 1 and loses 5 is a losing strategy. None when
+    # nothing lost -- reporting infinity would read as brilliance rather than
+    # as too few trades to judge.
+    profit_factor: Decimal | None
+    # How much of the tested period the money was actually at risk. A 10%
+    # return earned while invested a tenth of the time is a different
+    # proposition from one fully invested throughout.
+    exposure_pct: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -551,6 +570,7 @@ def run_backtest(
         skipped_signals=skipped_buy_while_holding + skipped_sell_while_flat,
         unfilled_signals=unfilled,
         max_drawdown=max_drawdown,
+        curve=equity_curve,
     )
 
     return BacktestResult(
@@ -571,6 +591,42 @@ def run_backtest(
         trades=account.trades,
         equity_curve=equity_curve,
         summary=summary,
+    )
+
+
+# How far the first bar may fall short of the requested start before it is
+# worth saying so. Weekends, holidays and a market's own listing date mean the
+# first candle is almost never exactly the date asked for, and warning every
+# time would train the owner to ignore the warning.
+_TRUNCATION_TOLERANCE = timedelta(days=14)
+
+
+def truncation_note(
+    asked_start: datetime,
+    asked_end: datetime,
+    first_bar_at: datetime | None,
+    last_bar_at: datetime | None,
+) -> str | None:
+    """Says so when the data did not reach back as far as the owner asked.
+
+    Providers cap history by interval and return what they have without
+    comment -- five years for daily bars, 60 days for 5-minute, five for
+    1-minute. The result reported the requested range regardless, so a run
+    that never saw a bar before 2021 was displayed as covering 2015 onwards,
+    and the owner would reasonably believe the strategy had survived a period
+    it was never shown.
+    """
+    if first_bar_at is None or last_bar_at is None:
+        # Already covered by a clearer message about there being no data.
+        return None
+    missing = first_bar_at - asked_start
+    if missing <= _TRUNCATION_TOLERANCE:
+        return None
+    return (
+        f"實際測到的區間比你要求的短：你要 {asked_start:%Y/%m/%d} 起，"
+        f"但資料來源只給到 {first_bar_at:%Y/%m/%d} 為止（少了約 {missing.days} 天）。"
+        "行情供應商會依 K 棒週期限制歷史長度（日線約 5 年、小時線約 2 年、"
+        "5 分線約 60 天），下面的績效只涵蓋實際測到的那一段。"
     )
 
 
@@ -617,6 +673,41 @@ def _run_notes(
     return notes
 
 
+def _profit_factor(gross_profit: Decimal, gross_loss: Decimal) -> Decimal | None:
+    """Gross profit over gross loss, both positive.
+
+    None rather than infinity when nothing lost: a strategy with no losing
+    trade has no ratio, and a huge number would be read as a great strategy
+    instead of as too small a sample to say anything.
+    """
+    if gross_loss <= 0:
+        return None
+    return _pct(gross_profit / gross_loss)
+
+
+def _buy_and_hold_return(tested: list[Bar]) -> Decimal | None:
+    """What holding from the first tested bar to the last would have made.
+
+    Measured over the bars the strategy actually traded, not the range that
+    was requested -- comparing against a period the strategy never saw is not
+    a comparison.
+    """
+    if len(tested) < 2:
+        return None
+    first = Decimal(str(tested[0].close))
+    last = Decimal(str(tested[-1].close))
+    if first <= 0:
+        return None
+    return _pct((last - first) / first * 100)
+
+
+def _exposure(curve: list[EquityPoint]) -> Decimal | None:
+    if not curve:
+        return None
+    held = sum(1 for point in curve if point.position_qty > 0)
+    return _pct(Decimal(held) / Decimal(len(curve)) * 100)
+
+
 def _summarize(
     *,
     account: _Account,
@@ -627,6 +718,7 @@ def _summarize(
     skipped_signals: int,
     unfilled_signals: int,
     max_drawdown: Decimal,
+    curve: list[EquityPoint],
 ) -> BacktestSummary:
     wins = [trade for trade in account.trades if trade.pnl > 0]
     losses = [trade for trade in account.trades if trade.pnl < 0]
@@ -634,6 +726,12 @@ def _summarize(
 
     last_close = Decimal(str(tested[-1].close)) if tested else Decimal(0)
     final_equity = account.cash + account.quantity * last_close
+    total_return = _pct(
+        (final_equity - assumptions.initial_capital) / assumptions.initial_capital * 100
+    )
+    buy_and_hold = _buy_and_hold_return(tested)
+    gross_profit = sum((t.pnl for t in wins), Decimal(0))
+    gross_loss = abs(sum((t.pnl for t in losses), Decimal(0)))
 
     return BacktestSummary(
         bars_total=bars_total,
@@ -658,13 +756,15 @@ def _summarize(
         total_costs=_money(account.costs),
         # This one DOES include the open position, because it is the answer to
         # "what would my account be worth today", not "what did I bank".
-        total_return_pct=_pct(
-            (final_equity - assumptions.initial_capital) / assumptions.initial_capital * 100
-        ),
+        total_return_pct=total_return,
         max_drawdown_pct=_pct(max_drawdown),
         final_equity=_money(final_equity),
         open_quantity=account.quantity,
         open_avg_entry_price=account.entry_price,
+        buy_and_hold_return_pct=buy_and_hold,
+        excess_return_pct=(_pct(total_return - buy_and_hold) if buy_and_hold is not None else None),
+        profit_factor=_profit_factor(gross_profit, gross_loss),
+        exposure_pct=_exposure(curve),
     )
 
 

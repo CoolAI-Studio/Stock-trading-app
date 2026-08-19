@@ -163,6 +163,93 @@ function Headline({ summary }: { summary: BacktestSummary }) {
   )
 }
 
+/** The comparison that decides whether the strategy was worth running.
+ *
+ * +18% reads as a good year until the stock itself did +40% over the same
+ * bars. In a bull run almost anything is profitable; this is the only line
+ * that separates "the strategy works" from "the market went up". */
+function Benchmark({ summary }: { summary: BacktestSummary }) {
+  if (summary.buy_and_hold_return_pct === null || summary.excess_return_pct === null) return null
+  const beat = Number(summary.excess_return_pct) >= 0
+
+  return (
+    <section
+      aria-label="與買進持有比較"
+      className={`rounded border px-4 py-3 text-sm ${
+        beat
+          ? 'border-emerald-800 bg-emerald-950/30 text-emerald-200'
+          : 'border-amber-700 bg-amber-950/30 text-amber-200'
+      }`}
+    >
+      <p>
+        <strong>{beat ? '這支策略贏過單純買進持有' : '這支策略輸給單純買進持有'}</strong>
+        ：同一段期間，什麼都不做買著抱是 {signedPercent(summary.buy_and_hold_return_pct)}，
+        策略是 {signedPercent(summary.total_return_pct)}，差距{' '}
+        {signedPercent(summary.excess_return_pct)}。
+      </p>
+      {!beat && (
+        <p className="mt-1 text-xs">
+          輸給買進持有的策略，等於花了手續費和盯盤的時間去換更差的結果。
+        </p>
+      )}
+    </section>
+  )
+}
+
+/** Everything the backend already computed and the page never showed.
+ *
+ * Eighteen figures were being calculated, stored and returned; six reached
+ * the screen. The absent ones include the two that most often change the
+ * verdict -- what the costs ate, and how many signals never became trades. */
+function Details({ summary }: { summary: BacktestSummary }) {
+  const rows: Array<[string, string, string?]> = [
+    ['獲利因子', factor(summary.profit_factor), '總獲利 ÷ 總虧損。小於 1 就是賠錢的策略'],
+    [
+      '持倉時間比例',
+      summary.exposure_pct === null ? '—' : `${Number(summary.exposure_pct).toFixed(1)}%`,
+      '這段期間有多少時候錢真的在市場裡',
+    ],
+    ['成本總額', money(summary.total_costs), '手續費、滑價與交易稅合計吃掉的錢'],
+    ['平均獲利', summary.average_win === null ? '—' : signedMoney(summary.average_win)],
+    ['平均虧損', summary.average_loss === null ? '—' : signedMoney(summary.average_loss)],
+    ['贏 / 輸 筆數', `${summary.wins} / ${summary.losses}`],
+    ['出現訊號', String(summary.signals)],
+    [
+      '被略過的訊號',
+      String(summary.skipped_signals),
+      '已經有部位還想買、或空手還想賣，這種訊號不會成交',
+    ],
+    ['沒成交的訊號', String(summary.unfilled_signals), '缺下一根開盤價或錢不夠'],
+    ['實際測到的 K 棒', `${summary.bars_tested} / ${summary.bars_total}`, '差額是暖身用掉的'],
+  ]
+
+  return (
+    <section aria-label="細項統計" className="space-y-1">
+      <h2 className="text-sm font-semibold text-slate-300">細項統計</h2>
+      <table className="w-full text-left text-sm">
+        <tbody>
+          {rows.map(([label, value, hint]) => (
+            <tr key={label} className="border-b border-slate-800/60">
+              <td className="py-1.5 pr-4 text-slate-400">
+                {label}
+                {hint && <span className="ml-2 text-xs text-slate-600">{hint}</span>}
+              </td>
+              <td className="py-1.5 text-right tabular-nums">{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  )
+}
+
+function factor(value: string | null): string {
+  // None means nothing lost, which is not a ratio -- printing a big number
+  // would read as brilliance rather than as too few trades to judge.
+  if (value === null) return '沒有虧損的交易'
+  return Number(value).toFixed(2)
+}
+
 function TradeTable({ trades }: { trades: BacktestTrade[] }) {
   if (trades.length === 0) return null
 
@@ -227,6 +314,7 @@ function RunResult({ run }: { run: BacktestRunDetail }) {
   return (
     <div className="space-y-4">
       <Headline summary={result.summary} />
+      <Benchmark summary={result.summary} />
       <AssumptionsBox run={run} />
       <EquityCurveChart
         points={result.equity_curve}
@@ -239,6 +327,7 @@ function RunResult({ run }: { run: BacktestRunDetail }) {
           ))}
         </ul>
       )}
+      <Details summary={result.summary} />
       <TradeTable trades={result.trades} />
     </div>
   )

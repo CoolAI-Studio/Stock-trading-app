@@ -78,6 +78,10 @@ const SUMMARY: BacktestSummary = {
   final_equity: '100510.25',
   open_quantity: '0',
   open_avg_entry_price: '0',
+  buy_and_hold_return_pct: '5',
+  excess_return_pct: '7.5',
+  profit_factor: '2.4',
+  exposure_pct: '61.5',
 }
 
 const TRADES: BacktestTrade[] = [
@@ -609,5 +613,88 @@ describe('picking a broker instead of inventing cost numbers', () => {
       ),
     )
     expect(api.post).not.toHaveBeenCalledWith('/api/backtests', expect.objectContaining({ preset_id: expect.anything() }))
+  })
+})
+
+describe('is the strategy actually worth running', () => {
+  async function showResult(summary: Partial<typeof SUMMARY>) {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/broker-costs') return [] as never
+      if (path === '/api/backtests') return [HISTORY_ROW] as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue({
+      ...RUN,
+      result: { ...RUN.result, summary: { ...RUN.result.summary, ...summary } },
+    } as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('option', { name: new RegExp(STRATEGY.name) })
+    await user.selectOptions(screen.getByLabelText('策略'), String(STRATEGY.id))
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+    return screen.findByLabelText('與買進持有比較')
+  }
+
+  it('says plainly when the strategy beat simply holding', async () => {
+    const panel = await showResult({
+      total_return_pct: '18',
+      buy_and_hold_return_pct: '5',
+      excess_return_pct: '13',
+    })
+    expect(panel).toHaveTextContent('贏過單純買進持有')
+  })
+
+  it('says plainly when it lost to simply holding', async () => {
+    // The case the owner most needs told: +18% looks like a good year until
+    // the stock itself did +40%.
+    const panel = await showResult({
+      total_return_pct: '18',
+      buy_and_hold_return_pct: '40',
+      excess_return_pct: '-22',
+    })
+    expect(panel).toHaveTextContent('輸給單純買進持有')
+    expect(panel).toHaveTextContent('40')
+  })
+
+  it('shows the figures the backend computed and the page never displayed', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/broker-costs') return [] as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue(RUN as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('option', { name: new RegExp(STRATEGY.name) })
+    await user.selectOptions(screen.getByLabelText('策略'), String(STRATEGY.id))
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    const details = await screen.findByLabelText('細項統計')
+    expect(details).toHaveTextContent('獲利因子')
+    expect(details).toHaveTextContent('成本總額')
+    expect(details).toHaveTextContent('被略過的訊號')
+  })
+
+  it('does not print a profit factor when nothing lost', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/broker-costs') return [] as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue({
+      ...RUN,
+      result: { ...RUN.result, summary: { ...RUN.result.summary, profit_factor: null } },
+    } as never)
+
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('option', { name: new RegExp(STRATEGY.name) })
+    await user.selectOptions(screen.getByLabelText('策略'), String(STRATEGY.id))
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    expect(await screen.findByLabelText('細項統計')).toHaveTextContent('沒有虧損的交易')
   })
 })

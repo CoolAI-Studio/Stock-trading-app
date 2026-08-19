@@ -135,6 +135,10 @@ class BacktestSummaryRead(BaseModel):
     final_equity: MoneyStr
     open_quantity: MoneyStr
     open_avg_entry_price: MoneyStr
+    buy_and_hold_return_pct: MoneyStr | None
+    excess_return_pct: MoneyStr | None
+    profit_factor: MoneyStr | None
+    exposure_pct: MoneyStr | None
 
 
 class BacktestResultRead(BaseModel):

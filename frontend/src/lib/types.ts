@@ -288,6 +288,14 @@ export interface BacktestSummary {
   final_equity: string
   open_quantity: string
   open_avg_entry_price: string
+  /** What doing nothing would have returned over the same bars, and the
+   * strategy's return minus that. null when there were no bars to hold. */
+  buy_and_hold_return_pct: string | null
+  excess_return_pct: string | null
+  /** Gross profit over gross loss. null when nothing lost -- not a ratio. */
+  profit_factor: string | null
+  /** How much of the tested period the money was actually at risk. */
+  exposure_pct: string | null
 }
 
 export interface BacktestResult {
