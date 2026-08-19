@@ -10,6 +10,11 @@ from app.config import Settings, enforce_required_secrets, verify_required_secre
 REAL_SECRETS = {
     "JWT_SECRET": "5f2c8a1e9b7d43a6f0c1e8d2b4a67390",
     "TV_WEBHOOK_SECRET": "c41b8e07d29f4a6b83e15c9d70a2f6b8",
+    # A valid Fernet key, checked at boot since the encryption key joined the
+    # guard. Left implicit it came from the developer's own .env, and the
+    # suite passed here and failed on CI -- which is the exact hazard the
+    # comment above warns about.
+    "SECRET_ENCRYPTION_KEY": "Lt9UC1IujubchFxDwwAPx8ZqfzXUnUS9KYjkXPCSxn8=",
     "ALLOW_INSECURE_SECRETS": False,
 }
 

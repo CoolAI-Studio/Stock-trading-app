@@ -26,7 +26,7 @@
    | **TDD** | 先紅後綠。每個功能先寫會失敗的測試，確認它為**正確的原因**失敗，才動實作 | ✅ |
    | **Linter** | `ruff check` + `ruff format`（後端）、**`npm run build`**（前端，等於 `tsc -b` + vite build）+ `oxlint`。前端不要只跑 `tsc --noEmit`——它不涵蓋測試檔，漏掉的型別錯誤會等到 CI 的 build 步驟才爆。除錯先看 linter，不要用 print 猜 | ✅ |
    | **Git** | 每個邏輯單元一個 commit，訊息寫清楚「為什麼」而不只是「改了什麼」 | ✅ |
-   | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數 | ✅ CI；CD 待做（Render 自動部署 webhook 沒觸發，目前手動） |
+   | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數。要在推之前先確認，就把 `backend/.env` 和 `trading_app_dev.db` 暫時移開再跑一次——CI 沒有這兩個，而它們已經三次讓本機綠、CI 紅 | ✅ CI；CD 待做（Render 自動部署 webhook 沒觸發，目前手動） |
    | **DevSecOps** | 安全左移：相依套件漏洞掃描（Dependabot/`pip-audit`）、密鑰不進版控、CI 內做 SAST、部署前檢查設定 | ❌ 待做 |
    | **需求追蹤** | GitHub Issues 當單一事實來源；每個 commit / PR 連回一個 issue，缺口清單逐項建票 | ❌ 待做 |
    | **Docker / IaC** | 容器已有（`backend/Dockerfile`）；雲端資源（Render / Neon / Vercel）改用 Terraform 宣告，不要靠手點介面 | ⚠️ Docker ✅，Terraform ❌ |
