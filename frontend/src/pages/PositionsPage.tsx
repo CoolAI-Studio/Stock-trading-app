@@ -281,30 +281,32 @@ export function PositionsPage() {
       )}
 
       {positions.length > 0 && (
-        <table className="w-full text-left text-sm">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="pb-2 font-normal">代號</th>
-              <th className="pb-2 font-normal">數量</th>
-              <th className="pb-2 font-normal">平均成本</th>
-              <th className="pb-2 font-normal">現價</th>
-              <th className="pb-2 font-normal">未實現損益</th>
-              <th className="pb-2 font-normal">已實現損益</th>
-              <th className="pb-2 font-normal">建倉時間</th>
-              <th className="pb-2 font-normal">風險設定</th>
-              <th className="pb-2 font-normal">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {positions.map((position) => (
-              <PositionRow
-                key={position.symbol}
-                position={position}
-                riskOwner={riskOwnerLabel(position, strategies)}
-              />
-            ))}
-          </tbody>
-        </table>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <table className="w-full text-left text-sm">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-normal">代號</th>
+                <th className="pb-2 font-normal">數量</th>
+                <th className="pb-2 font-normal">平均成本</th>
+                <th className="pb-2 font-normal">現價</th>
+                <th className="pb-2 font-normal">未實現損益</th>
+                <th className="pb-2 font-normal">已實現損益</th>
+                <th className="pb-2 font-normal">建倉時間</th>
+                <th className="pb-2 font-normal">風險設定</th>
+                <th className="pb-2 font-normal">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((position) => (
+                <PositionRow
+                  key={position.symbol}
+                  position={position}
+                  riskOwner={riskOwnerLabel(position, strategies)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

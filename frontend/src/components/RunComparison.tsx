@@ -222,37 +222,39 @@ export function RunComparison({ a, b }: { a: BacktestRun; b: BacktestRun }) {
         <p className="text-sm text-slate-400">兩次的結果完全一樣，沒有差別可以看。</p>
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="pb-2 font-normal">指標</th>
-            <th className="pb-2 text-right font-normal">A</th>
-            <th className="pb-2 text-right font-normal">B</th>
-            <th className="pb-2 text-right font-normal">B − A</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ metric, left, right, delta }) => (
-            <tr key={metric.label} className="border-b border-slate-800/60">
-              <td className="py-1.5 pr-4 text-slate-400">
-                {metric.label}
-                {metric.hint && <span className="ml-2 text-xs text-slate-600">{metric.hint}</span>}
-              </td>
-              <td className="py-1.5 text-right tabular-nums">{cell(left, metric.format)}</td>
-              <td className="py-1.5 text-right tabular-nums">{cell(right, metric.format)}</td>
-              <td
-                className={`py-1.5 text-right tabular-nums ${
-                  delta === null ? 'text-slate-600' : deltaTone(delta, metric.direction)
-                }`}
-              >
-                {delta === null
-                  ? '—'
-                  : `${delta >= 0 ? '+' : ''}${metric.format(Math.abs(delta)).replace(/^[+-]/, '')}`}
-              </td>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full text-left text-sm">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="pb-2 font-normal">指標</th>
+              <th className="pb-2 text-right font-normal">A</th>
+              <th className="pb-2 text-right font-normal">B</th>
+              <th className="pb-2 text-right font-normal">B − A</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map(({ metric, left, right, delta }) => (
+              <tr key={metric.label} className="border-b border-slate-800/60">
+                <td className="py-1.5 pr-4 text-slate-400">
+                  {metric.label}
+                  {metric.hint && <span className="ml-2 text-xs text-slate-600">{metric.hint}</span>}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">{cell(left, metric.format)}</td>
+                <td className="py-1.5 text-right tabular-nums">{cell(right, metric.format)}</td>
+                <td
+                  className={`py-1.5 text-right tabular-nums ${
+                    delta === null ? 'text-slate-600' : deltaTone(delta, metric.direction)
+                  }`}
+                >
+                  {delta === null
+                    ? '—'
+                    : `${delta >= 0 ? '+' : ''}${metric.format(Math.abs(delta)).replace(/^[+-]/, '')}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

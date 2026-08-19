@@ -254,21 +254,23 @@ export function BrokerSettingsPage() {
 
       {showForm && <NewCredentialForm onDone={() => setShowForm(false)} />}
 
-      <table className="w-full text-left text-sm">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="pb-2 font-normal">名稱</th>
-            <th className="pb-2 font-normal">券商 / 交易所</th>
-            <th className="pb-2 font-normal">設定</th>
-            <th className="pb-2 font-normal">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(credentialsQuery.data ?? []).map((credential) => (
-            <CredentialRow key={credential.id} credential={credential} />
-          ))}
-        </tbody>
-      </table>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full text-left text-sm">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="pb-2 font-normal">名稱</th>
+              <th className="pb-2 font-normal">券商 / 交易所</th>
+              <th className="pb-2 font-normal">設定</th>
+              <th className="pb-2 font-normal">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(credentialsQuery.data ?? []).map((credential) => (
+              <CredentialRow key={credential.id} credential={credential} />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <AiAssistPanel />
     </div>

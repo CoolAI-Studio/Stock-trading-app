@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DeleteButton } from '../components/DeleteButton'
 import { ApiError, api } from '../lib/api'
-import { isPushSupported, subscribeToPush, unsubscribeFromPush } from '../lib/push'
+import { subscribeToPush, unsubscribeFromPush } from '../lib/push'
+import { currentPushAvailability } from '../lib/platform'
 import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
 
 const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', failed: '失敗' }
@@ -546,6 +547,10 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
 
 function NewChannelForm({ onDone }: { onDone: () => void }) {
   const [channelType, setChannelType] = useState<ChannelType>('telegram')
+  // Read once per mount: the answer only changes when the page is reopened
+  // from somewhere else (in Safari vs. from the Home Screen), which is a fresh
+  // mount anyway.
+  const [pushState] = useState(currentPushAvailability)
   const [label, setLabel] = useState('')
   const [events, setEvents] = useState<string[] | null>(null)
   const [quiet, setQuiet] = useState<[number | null, number | null]>([null, null])
@@ -771,17 +776,29 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
       )}
 
       {channelType === 'web_push' && (
-        <p className="text-sm text-slate-500">
-          {isPushSupported()
+        // Three states, not two. "不支援" used to cover the iPhone case, where
+        // push works perfectly well once the site is on the Home Screen -- and
+        // being told it is unsupported is how somebody decides their phone
+        // cannot receive alerts and gives up two taps short.
+        <p
+          className={`text-sm ${
+            pushState.kind === 'needs-install' ? 'text-amber-300' : 'text-slate-500'
+          }`}
+        >
+          {pushState.kind === 'ready'
             ? '按下方「建立」後，瀏覽器會詢問是否允許通知——請按允許。即使沒有開著這個網頁，只要瀏覽器（或手機）在背景執行，還是能收到通知。'
-            : '這個瀏覽器不支援推播通知（iOS 需先將本網站加入主畫面才能使用）。'}
+            : pushState.message}
         </p>
       )}
 
       {error && <p className="text-red-400">{error}</p>}
 
       <button
-        disabled={createMutation.isPending || !label || (channelType === 'web_push' && !isPushSupported())}
+        disabled={
+          createMutation.isPending ||
+          !label ||
+          (channelType === 'web_push' && pushState.kind !== 'ready')
+        }
         onClick={() => createMutation.mutate()}
         className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
       >
@@ -835,41 +852,43 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
         <p className="text-slate-500">目前沒有發送紀錄。</p>
       )}
       {logs.length > 0 && (
-        <table className="w-full text-left text-sm">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="pb-2 font-normal">管道</th>
-              <th className="pb-2 font-normal">事件</th>
-              <th className="pb-2 font-normal">狀態</th>
-              <th className="pb-2 font-normal">錯誤</th>
-              <th className="pb-2 font-normal">時間</th>
-              <th className="pb-2 font-normal">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {logs.map((log) => (
-              <tr key={log.id} className="border-b border-slate-800 text-slate-300">
-                <td className="py-2 pr-4 font-medium">{labelFor(log.channel_id)}</td>
-                <td className="py-2 pr-4">{EVENT_LABEL[log.event] ?? log.event}</td>
-                <td className={`py-2 pr-4 ${log.status === 'sent' ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {STATUS_LABEL[log.status]}
-                </td>
-                <td className="py-2 pr-4 text-red-400">{log.error ?? ''}</td>
-                <td className="py-2 pr-4 text-slate-500">
-                  {new Date(log.created_at).toLocaleString()}
-                </td>
-                <td className="py-2">
-                  <DeleteButton
-                    what="這筆發送紀錄"
-                    onConfirm={() => deleteLog.mutate(log.id)}
-                    pending={deleteLog.isPending && deleteLog.variables === log.id}
-                    error={deleteLog.variables === log.id ? deleteLog.error : null}
-                  />
-                </td>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <table className="w-full text-left text-sm">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-normal">管道</th>
+                <th className="pb-2 font-normal">事件</th>
+                <th className="pb-2 font-normal">狀態</th>
+                <th className="pb-2 font-normal">錯誤</th>
+                <th className="pb-2 font-normal">時間</th>
+                <th className="pb-2 font-normal">操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <tr key={log.id} className="border-b border-slate-800 text-slate-300">
+                  <td className="py-2 pr-4 font-medium">{labelFor(log.channel_id)}</td>
+                  <td className="py-2 pr-4">{EVENT_LABEL[log.event] ?? log.event}</td>
+                  <td className={`py-2 pr-4 ${log.status === 'sent' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {STATUS_LABEL[log.status]}
+                  </td>
+                  <td className="py-2 pr-4 text-red-400">{log.error ?? ''}</td>
+                  <td className="py-2 pr-4 text-slate-500">
+                    {new Date(log.created_at).toLocaleString()}
+                  </td>
+                  <td className="py-2">
+                    <DeleteButton
+                      what="這筆發送紀錄"
+                      onConfirm={() => deleteLog.mutate(log.id)}
+                      pending={deleteLog.isPending && deleteLog.variables === log.id}
+                      error={deleteLog.variables === log.id ? deleteLog.error : null}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
@@ -896,22 +915,24 @@ export function NotificationsPage() {
 
       {showForm && <NewChannelForm onDone={() => setShowForm(false)} />}
 
-      <table className="w-full text-left text-sm">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="pb-2 font-normal">名稱</th>
-            <th className="pb-2 font-normal">類型</th>
-            <th className="pb-2 font-normal">設定</th>
-            <th className="pb-2 font-normal">狀態</th>
-            <th className="pb-2 font-normal">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(channelsQuery.data ?? []).map((channel) => (
-            <ChannelRow key={channel.id} channel={channel} />
-          ))}
-        </tbody>
-      </table>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full text-left text-sm">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="pb-2 font-normal">名稱</th>
+              <th className="pb-2 font-normal">類型</th>
+              <th className="pb-2 font-normal">設定</th>
+              <th className="pb-2 font-normal">狀態</th>
+              <th className="pb-2 font-normal">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(channelsQuery.data ?? []).map((channel) => (
+              <ChannelRow key={channel.id} channel={channel} />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <NotificationLogs channels={channelsQuery.data ?? []} />
     </div>

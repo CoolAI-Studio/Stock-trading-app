@@ -269,19 +269,21 @@ function Details({ summary }: { summary: BacktestSummary }) {
   return (
     <section aria-label="細項統計" className="space-y-1">
       <h2 className="text-sm font-semibold text-slate-300">細項統計</h2>
-      <table className="w-full text-left text-sm">
-        <tbody>
-          {rows.map(([label, value, hint]) => (
-            <tr key={label} className="border-b border-slate-800/60">
-              <td className="py-1.5 pr-4 text-slate-400">
-                {label}
-                {hint && <span className="ml-2 text-xs text-slate-600">{hint}</span>}
-              </td>
-              <td className="py-1.5 text-right tabular-nums">{value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full text-left text-sm">
+          <tbody>
+            {rows.map(([label, value, hint]) => (
+              <tr key={label} className="border-b border-slate-800/60">
+                <td className="py-1.5 pr-4 text-slate-400">
+                  {label}
+                  {hint && <span className="ml-2 text-xs text-slate-600">{hint}</span>}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }
@@ -297,43 +299,45 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
   if (trades.length === 0) return null
 
   return (
-    <table aria-label="交易明細" className="w-full text-left text-sm">
-      <thead className="text-slate-500">
-        <tr>
-          <th className="pb-2 font-normal">結果</th>
-          <th className="pb-2 font-normal">進場時間</th>
-          <th className="pb-2 font-normal">出場時間</th>
-          <th className="pb-2 font-normal">數量</th>
-          <th className="pb-2 font-normal">進場價</th>
-          <th className="pb-2 font-normal">出場價</th>
-          <th className="pb-2 font-normal">損益</th>
-          <th className="pb-2 font-normal">報酬率</th>
-          <th className="pb-2 font-normal">出場原因</th>
-        </tr>
-      </thead>
-      <tbody>
-        {trades.map((t) => {
-          const tone = toneOf(t.pnl)
-          return (
-            <tr key={`${t.opened_at}-${t.closed_at}`} className="border-b border-slate-800">
-              <td className={`py-2 pr-4 ${tone}`}>{Number(t.pnl) >= 0 ? '獲利' : '虧損'}</td>
-              <td className="py-2 pr-4 text-slate-400">
-                {new Date(t.opened_at).toLocaleDateString()}
-              </td>
-              <td className="py-2 pr-4 text-slate-400">
-                {new Date(t.closed_at).toLocaleDateString()}
-              </td>
-              <td className="py-2 pr-4">{money(t.quantity)}</td>
-              <td className="py-2 pr-4">{money(t.entry_price)}</td>
-              <td className="py-2 pr-4">{money(t.exit_price)}</td>
-              <td className={`py-2 pr-4 ${tone}`}>{signedMoney(t.pnl)}</td>
-              <td className={`py-2 pr-4 ${tone}`}>{signedPercent(t.return_pct)}</td>
-              <td className="py-2 text-slate-400">{EXIT_REASON_LABEL[t.exit_reason]}</td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <table aria-label="交易明細" className="w-full text-left text-sm">
+        <thead className="text-slate-500">
+          <tr>
+            <th className="pb-2 font-normal">結果</th>
+            <th className="pb-2 font-normal">進場時間</th>
+            <th className="pb-2 font-normal">出場時間</th>
+            <th className="pb-2 font-normal">數量</th>
+            <th className="pb-2 font-normal">進場價</th>
+            <th className="pb-2 font-normal">出場價</th>
+            <th className="pb-2 font-normal">損益</th>
+            <th className="pb-2 font-normal">報酬率</th>
+            <th className="pb-2 font-normal">出場原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trades.map((t) => {
+            const tone = toneOf(t.pnl)
+            return (
+              <tr key={`${t.opened_at}-${t.closed_at}`} className="border-b border-slate-800">
+                <td className={`py-2 pr-4 ${tone}`}>{Number(t.pnl) >= 0 ? '獲利' : '虧損'}</td>
+                <td className="py-2 pr-4 text-slate-400">
+                  {new Date(t.opened_at).toLocaleDateString()}
+                </td>
+                <td className="py-2 pr-4 text-slate-400">
+                  {new Date(t.closed_at).toLocaleDateString()}
+                </td>
+                <td className="py-2 pr-4">{money(t.quantity)}</td>
+                <td className="py-2 pr-4">{money(t.entry_price)}</td>
+                <td className="py-2 pr-4">{money(t.exit_price)}</td>
+                <td className={`py-2 pr-4 ${tone}`}>{signedMoney(t.pnl)}</td>
+                <td className={`py-2 pr-4 ${tone}`}>{signedPercent(t.return_pct)}</td>
+                <td className="py-2 text-slate-400">{EXIT_REASON_LABEL[t.exit_reason]}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -779,65 +783,67 @@ export function BacktestPage() {
               error={clearMutation.error}
             />
           </div>
-          <table aria-label="過去的回測" className="w-full text-left text-sm">
-            <thead className="text-slate-500">
-              <tr>
-                <th className="pb-2 font-normal">比較</th>
-                <th className="pb-2 font-normal">策略</th>
-                <th className="pb-2 font-normal">代號</th>
-                <th className="pb-2 font-normal">週期</th>
-                <th className="pb-2 font-normal">區間</th>
-                <th className="pb-2 font-normal">總報酬率</th>
-                <th className="pb-2 font-normal">執行時間</th>
-                <th className="pb-2 font-normal">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((row) => (
-                <tr key={row.id} className="border-b border-slate-800">
-                  <td className="py-2 pr-4">
-                    <input
-                      type="checkbox"
-                      aria-label="選來比較"
-                      checked={compareIds.includes(row.id)}
-                      onChange={() => toggleCompare(row.id)}
-                      className="h-4 w-4 accent-emerald-500"
-                    />
-                  </td>
-                  <td className="py-2 pr-4 font-medium">{row.strategy_name}</td>
-                  <td className="py-2 pr-4">{row.symbol}</td>
-                  <td className="py-2 pr-4 text-slate-400">
-                    {TIMEFRAME_LABEL[row.timeframe] ?? row.timeframe}
-                  </td>
-                  <td className="py-2 pr-4 text-slate-400">
-                    {new Date(row.range_start).toLocaleDateString()} –{' '}
-                    {new Date(row.range_end).toLocaleDateString()}
-                  </td>
-                  <td className={`py-2 pr-4 ${toneOf(row.summary.total_return_pct)}`}>
-                    {signedPercent(row.summary.total_return_pct)}
-                  </td>
-                  <td className="py-2 pr-4 text-slate-500">
-                    {new Date(row.created_at).toLocaleString()}
-                  </td>
-                  <td className="flex flex-wrap items-center gap-2 py-2">
-                    <button
-                      disabled={openMutation.isPending}
-                      onClick={() => openMutation.mutate(row.id)}
-                      className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
-                    >
-                      查看
-                    </button>
-                    <DeleteButton
-                      what={`${row.strategy_name}（${row.symbol}）這筆回測`}
-                      onConfirm={() => deleteMutation.mutate(row.id)}
-                      pending={deleteMutation.isPending && deleteMutation.variables === row.id}
-                      error={deleteMutation.variables === row.id ? deleteMutation.error : null}
-                    />
-                  </td>
+          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+            <table aria-label="過去的回測" className="w-full text-left text-sm">
+              <thead className="text-slate-500">
+                <tr>
+                  <th className="pb-2 font-normal">比較</th>
+                  <th className="pb-2 font-normal">策略</th>
+                  <th className="pb-2 font-normal">代號</th>
+                  <th className="pb-2 font-normal">週期</th>
+                  <th className="pb-2 font-normal">區間</th>
+                  <th className="pb-2 font-normal">總報酬率</th>
+                  <th className="pb-2 font-normal">執行時間</th>
+                  <th className="pb-2 font-normal">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {history.map((row) => (
+                  <tr key={row.id} className="border-b border-slate-800">
+                    <td className="py-2 pr-4">
+                      <input
+                        type="checkbox"
+                        aria-label="選來比較"
+                        checked={compareIds.includes(row.id)}
+                        onChange={() => toggleCompare(row.id)}
+                        className="h-4 w-4 accent-emerald-500"
+                      />
+                    </td>
+                    <td className="py-2 pr-4 font-medium">{row.strategy_name}</td>
+                    <td className="py-2 pr-4">{row.symbol}</td>
+                    <td className="py-2 pr-4 text-slate-400">
+                      {TIMEFRAME_LABEL[row.timeframe] ?? row.timeframe}
+                    </td>
+                    <td className="py-2 pr-4 text-slate-400">
+                      {new Date(row.range_start).toLocaleDateString()} –{' '}
+                      {new Date(row.range_end).toLocaleDateString()}
+                    </td>
+                    <td className={`py-2 pr-4 ${toneOf(row.summary.total_return_pct)}`}>
+                      {signedPercent(row.summary.total_return_pct)}
+                    </td>
+                    <td className="py-2 pr-4 text-slate-500">
+                      {new Date(row.created_at).toLocaleString()}
+                    </td>
+                    <td className="flex flex-wrap items-center gap-2 py-2">
+                      <button
+                        disabled={openMutation.isPending}
+                        onClick={() => openMutation.mutate(row.id)}
+                        className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+                      >
+                        查看
+                      </button>
+                      <DeleteButton
+                        what={`${row.strategy_name}（${row.symbol}）這筆回測`}
+                        onConfirm={() => deleteMutation.mutate(row.id)}
+                        pending={deleteMutation.isPending && deleteMutation.variables === row.id}
+                        error={deleteMutation.variables === row.id ? deleteMutation.error : null}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

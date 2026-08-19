@@ -135,7 +135,9 @@ export function DashboardPage() {
         />
       )}
 
-      <div className="grid grid-cols-3 gap-4">
+      {/* Three across is 120px per card on a phone, which wraps every
+          number onto four lines. One column until there is room. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="待確認訂單" value={pendingQuery.data?.length ?? 0} />
         <StatCard label="持有部位" value={positionsQuery.data?.length ?? 0} />
         <StatCard
@@ -172,47 +174,49 @@ export function DashboardPage() {
         </button>
       </form>
 
-      <table className="w-full text-left text-sm">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="pb-2 font-normal">代號</th>
-            <th className="pb-2 font-normal">價格</th>
-            <th className="pb-2 font-normal">漲跌幅 %</th>
-            <th className="pb-2 font-normal" />
-          </tr>
-        </thead>
-        <tbody>
-          {(quotesQuery.data ?? []).map((quote) => (
-            <tr
-              key={quote.symbol}
-              onClick={() => setSelectedSymbol(quote.symbol)}
-              className="cursor-pointer border-b border-slate-800 hover:bg-slate-900"
-            >
-              <td className="py-2 pr-4 font-medium">{quote.symbol}</td>
-              <td className="py-2 pr-4">{quote.price}</td>
-              <td
-                className={`py-2 pr-4 ${Number(quote.change_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
-              >
-                {quote.change_pct ?? '—'}
-              </td>
-              <td className="py-2 text-right">
-                {watchlist.includes(quote.symbol) && (
-                  <button
-                    aria-label={`移除 ${quote.symbol}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeFromWatchlist(quote.symbol)
-                    }}
-                    className="text-slate-500 hover:text-red-400"
-                  >
-                    ×
-                  </button>
-                )}
-              </td>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full text-left text-sm">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="pb-2 font-normal">代號</th>
+              <th className="pb-2 font-normal">價格</th>
+              <th className="pb-2 font-normal">漲跌幅 %</th>
+              <th className="pb-2 font-normal" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {(quotesQuery.data ?? []).map((quote) => (
+              <tr
+                key={quote.symbol}
+                onClick={() => setSelectedSymbol(quote.symbol)}
+                className="cursor-pointer border-b border-slate-800 hover:bg-slate-900"
+              >
+                <td className="py-2 pr-4 font-medium">{quote.symbol}</td>
+                <td className="py-2 pr-4">{quote.price}</td>
+                <td
+                  className={`py-2 pr-4 ${Number(quote.change_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+                >
+                  {quote.change_pct ?? '—'}
+                </td>
+                <td className="py-2 text-right">
+                  {watchlist.includes(quote.symbol) && (
+                    <button
+                      aria-label={`移除 ${quote.symbol}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeFromWatchlist(quote.symbol)
+                      }}
+                      className="text-slate-500 hover:text-red-400"
+                    >
+                      ×
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

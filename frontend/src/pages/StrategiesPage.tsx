@@ -1031,56 +1031,58 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
         <p className="text-slate-500">目前沒有提醒紀錄。</p>
       )}
       {alerts.length > 0 && (
-        <table aria-label="提醒紀錄" className="w-full text-left text-sm">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="pb-2 font-normal">時間</th>
-              <th className="pb-2 font-normal">策略</th>
-              <th className="pb-2 font-normal">股票代號</th>
-              <th className="pb-2 font-normal">方向</th>
-              <th className="pb-2 font-normal">價格</th>
-              <th className="pb-2 font-normal">通知</th>
-              <th className="pb-2 font-normal">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {alerts.map((alert) => (
-              <tr key={alert.id} className="border-b border-slate-800 text-slate-300">
-                <td className="py-2 pr-4 text-slate-500">
-                  {new Date(alert.created_at).toLocaleString()}
-                </td>
-                <td className="py-2 pr-4 font-medium">{nameFor(alert.strategy_id)}</td>
-                <td className="py-2 pr-4">{alert.symbol}</td>
-                <td
-                  className={`py-2 pr-4 ${alert.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}
-                >
-                  {SIDE_LABEL[alert.side]}
-                </td>
-                <td className="py-2 pr-4">{alert.price}</td>
-                {/* The signal still counts when scoring the strategy, but a
-                    failed row is one the owner never saw -- unmarked it would
-                    read as a notification that arrived. */}
-                <td className="py-2 pr-4 text-slate-500">
-                  {alert.status === 'sent' ? (
-                    '已送出'
-                  ) : (
-                    <span className="text-red-400" title={alert.error ?? undefined}>
-                      未送達
-                    </span>
-                  )}
-                </td>
-                <td className="py-2">
-                  <DeleteButton
-                    what={`${alert.symbol} 這筆提醒`}
-                    onConfirm={() => deleteAlert.mutate(alert.id)}
-                    pending={deleteAlert.isPending && deleteAlert.variables === alert.id}
-                    error={deleteAlert.variables === alert.id ? deleteAlert.error : null}
-                  />
-                </td>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <table aria-label="提醒紀錄" className="w-full text-left text-sm">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-normal">時間</th>
+                <th className="pb-2 font-normal">策略</th>
+                <th className="pb-2 font-normal">股票代號</th>
+                <th className="pb-2 font-normal">方向</th>
+                <th className="pb-2 font-normal">價格</th>
+                <th className="pb-2 font-normal">通知</th>
+                <th className="pb-2 font-normal">操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {alerts.map((alert) => (
+                <tr key={alert.id} className="border-b border-slate-800 text-slate-300">
+                  <td className="py-2 pr-4 text-slate-500">
+                    {new Date(alert.created_at).toLocaleString()}
+                  </td>
+                  <td className="py-2 pr-4 font-medium">{nameFor(alert.strategy_id)}</td>
+                  <td className="py-2 pr-4">{alert.symbol}</td>
+                  <td
+                    className={`py-2 pr-4 ${alert.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}
+                  >
+                    {SIDE_LABEL[alert.side]}
+                  </td>
+                  <td className="py-2 pr-4">{alert.price}</td>
+                  {/* The signal still counts when scoring the strategy, but a
+                      failed row is one the owner never saw -- unmarked it would
+                      read as a notification that arrived. */}
+                  <td className="py-2 pr-4 text-slate-500">
+                    {alert.status === 'sent' ? (
+                      '已送出'
+                    ) : (
+                      <span className="text-red-400" title={alert.error ?? undefined}>
+                        未送達
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2">
+                    <DeleteButton
+                      what={`${alert.symbol} 這筆提醒`}
+                      onConfirm={() => deleteAlert.mutate(alert.id)}
+                      pending={deleteAlert.isPending && deleteAlert.variables === alert.id}
+                      error={deleteAlert.variables === alert.id ? deleteAlert.error : null}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {alerts.length > 0 && (
         <Pager
@@ -1123,29 +1125,31 @@ export function StrategiesPage() {
         <NewStrategyForm onDone={() => setShowForm(false)} samples={samplesQuery.data ?? []} />
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="text-slate-500">
-          <tr>
-            <th className="pb-2 font-normal">名稱</th>
-            <th className="pb-2 font-normal">股票代號</th>
-            <th className="pb-2 font-normal">狀態</th>
-            <th className="pb-2 font-normal">模式</th>
-            <th className="pb-2 font-normal">風險設定</th>
-            <th className="pb-2 font-normal">下單量</th>
-            <th className="pb-2 font-normal">最新訊號</th>
-            {/* Not just errors any more: warm-up progress and risk-gate
-                refusals land here too, because all three answer the same
-                question -- why is this strategy not doing anything. */}
-            <th className="pb-2 font-normal">狀況</th>
-            <th className="pb-2 font-normal">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {strategies.map((strategy) => (
-            <StrategyRow key={strategy.id} strategy={strategy} />
-          ))}
-        </tbody>
-      </table>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <table className="w-full text-left text-sm">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="pb-2 font-normal">名稱</th>
+              <th className="pb-2 font-normal">股票代號</th>
+              <th className="pb-2 font-normal">狀態</th>
+              <th className="pb-2 font-normal">模式</th>
+              <th className="pb-2 font-normal">風險設定</th>
+              <th className="pb-2 font-normal">下單量</th>
+              <th className="pb-2 font-normal">最新訊號</th>
+              {/* Not just errors any more: warm-up progress and risk-gate
+                  refusals land here too, because all three answer the same
+                  question -- why is this strategy not doing anything. */}
+              <th className="pb-2 font-normal">狀況</th>
+              <th className="pb-2 font-normal">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {strategies.map((strategy) => (
+              <StrategyRow key={strategy.id} strategy={strategy} />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <AlertHistory strategies={strategies} />
     </div>

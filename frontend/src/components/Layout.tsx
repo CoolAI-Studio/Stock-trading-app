@@ -27,8 +27,14 @@ export function Layout() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-800 px-6 py-3">
-        <nav className="flex gap-4">
+      <header className="flex items-start justify-between gap-4 border-b border-slate-800 px-4 py-3 sm:items-center sm:px-6">
+        {/* Wraps rather than scrolls. Ten items measure about 630px in one
+            row and a phone is 390px, so the last few links -- and the 登出
+            button after them -- were off the side of the screen with no way
+            to reach them at all. A scrolling row would fit in one line but
+            hides that there is more; wrapping costs a second line and hides
+            nothing. */}
+        <nav className="flex flex-wrap gap-x-4 gap-y-2">
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.to}
@@ -42,7 +48,12 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
-        <button onClick={logout} className="text-sm text-slate-400 hover:text-slate-200">
+        {/* shrink-0 so a wrapping nav never squeezes this to nothing -- being
+            unable to sign out is the one nav failure with a security edge. */}
+        <button
+          onClick={logout}
+          className="shrink-0 text-sm text-slate-400 hover:text-slate-200"
+        >
           登出
         </button>
       </header>
@@ -50,7 +61,7 @@ export function Layout() {
           every other page's contents untrustworthy, so it cannot live on the
           dashboard alone. */}
       <WorkerHealthBanner />
-      <main className="p-6">
+      <main className="p-4 sm:p-6">
         <Outlet />
       </main>
     </div>

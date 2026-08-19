@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationsPage } from './NotificationsPage'
 import { api } from '../lib/api'
 import * as push from '../lib/push'
+import * as platform from '../lib/platform'
 import type { NotificationChannel, NotificationLog } from '../lib/types'
 
 vi.mock('../lib/api', () => ({
@@ -15,6 +16,14 @@ vi.mock('../lib/push', () => ({
   isPushSupported: vi.fn(() => true),
   subscribeToPush: vi.fn(),
   unsubscribeFromPush: vi.fn(),
+}))
+
+// jsdom has no PushManager, so the real reader would answer "unsupported" for
+// every test in this file. Stubbed to "ready" by default; the tests that are
+// ABOUT the other answers override it.
+vi.mock('../lib/platform', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/platform')>()),
+  currentPushAvailability: vi.fn(() => ({ kind: 'ready' as const })),
 }))
 
 const CHANNEL: NotificationChannel = {
@@ -454,5 +463,49 @@ describe('not being woken at three in the morning', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     const payload = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
     expect(payload.quiet_start_hour).toBeNull()
+  })
+})
+
+
+// --- what an iPhone is told --------------------------------------------------
+
+describe('iPhone 上的推播', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [] as never
+      return [] as never
+    })
+  })
+
+  async function openPushForm() {
+    renderPage()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByRole('radio', { name: '瀏覽器推播' }))
+    return user
+  }
+
+  it('在 Safari 裡打開時給的是步驟，不是「不支援」', async () => {
+    vi.mocked(platform.currentPushAvailability).mockReturnValue({
+      kind: 'needs-install',
+      message: '在 Safari 下方按「分享」→「加入主畫面」，然後從主畫面打開這個 app。',
+    })
+
+    await openPushForm()
+
+    expect(screen.getByText(/分享/)).toBeInTheDocument()
+    expect(screen.queryByText(/瀏覽器不支援/)).not.toBeInTheDocument()
+  })
+
+  it('真的不支援時照實說', async () => {
+    vi.mocked(platform.currentPushAvailability).mockReturnValue({
+      kind: 'unsupported',
+      message: '這個瀏覽器沒有 Web 推播功能，設定了也收不到。',
+    })
+
+    await openPushForm()
+
+    expect(screen.getByText(/沒有 Web 推播功能/)).toBeInTheDocument()
   })
 })

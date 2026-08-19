@@ -2,8 +2,32 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover so the page reaches under the notch and the home
+         indicator once it is running from the Home Screen; the layout pads
+         itself back out with env(safe-area-inset-*). No maximum-scale and no
+         user-scalable=no: blocking pinch-zoom to stop iOS auto-zooming on a
+         focused input trades an accessibility feature for a cosmetic one.
+         The inputs are 16px instead, which is what actually stops it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
     <title>交易儀表板</title>
+
+    <!-- Installing this is not a nicety. On iOS, Web Push works ONLY for a
+         site added to the Home Screen and opened from there, so for an iPhone
+         owner the Home Screen icon is the difference between getting alerts
+         and not getting them. See src/lib/platform.ts. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+
+    <!-- Safari reads the apple-prefixed pair; everything else reads the
+         standard one. Both are listed rather than betting on which. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- What sits under the icon. Left to the <title> it would read
+         "交易儀表板", which does not fit and gets clipped mid-word. -->
+    <meta name="apple-mobile-web-app-title" content="交易提醒" />
   </head>
   <body>
     <div id="root"></div>

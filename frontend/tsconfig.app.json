@@ -22,5 +22,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // These read the repo off disk to check things jsdom cannot see (the
+  // manifest, the icons, whether a table can scroll). They belong to the
+  // node project, which has the fs types; leaving them here would mean
+  // adding node globals to the browser project, and then app code using
+  // `process` would typecheck and fail only in a real browser.
+  "exclude": ["src/test/*.test.ts"]
 }

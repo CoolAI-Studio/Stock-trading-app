@@ -1,1 +1,26 @@
 @import "tailwindcss";
+
+/* iOS zooms the whole page in when a focused control's text is under 16px,
+   and then leaves it zoomed. The usual "fix" is maximum-scale=1 in the
+   viewport tag, which stops it by taking pinch-zoom away from everyone
+   permanently -- an accessibility feature traded for a cosmetic one. Sizing
+   the controls instead costs nothing and only applies where the problem is. */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* index.html sets viewport-fit=cover so the page reaches under the notch and
+   the home indicator once it is running from the Home Screen. Without padding
+   back out, the nav sits under the notch and the last row of every table sits
+   under the home indicator -- both unreachable, and both invisible in any
+   desktop browser. The insets are 0 everywhere else, so this is inert off an
+   iPhone. */
+body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+}

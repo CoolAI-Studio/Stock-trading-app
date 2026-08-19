@@ -358,24 +358,26 @@ export function OrdersPage() {
       {showForm && <NewOrderForm onDone={() => setShowForm(false)} />}
 
       {tab === 'pending' && (
-        <table className="w-full text-left text-sm">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="pb-2 font-normal">代號</th>
-              <th className="pb-2 font-normal">方向</th>
-              <th className="pb-2 font-normal">委託數量</th>
-              <th className="pb-2 font-normal">來源</th>
-              <th className="pb-2 font-normal">成交價</th>
-              <th className="pb-2 font-normal">成交數量</th>
-              <th className="pb-2 font-normal">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(pendingQuery.data ?? []).map((order) => (
-              <PendingOrderRow key={order.id} order={order} />
-            ))}
-          </tbody>
-        </table>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <table className="w-full text-left text-sm">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-normal">代號</th>
+                <th className="pb-2 font-normal">方向</th>
+                <th className="pb-2 font-normal">委託數量</th>
+                <th className="pb-2 font-normal">來源</th>
+                <th className="pb-2 font-normal">成交價</th>
+                <th className="pb-2 font-normal">成交數量</th>
+                <th className="pb-2 font-normal">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(pendingQuery.data ?? []).map((order) => (
+                <PendingOrderRow key={order.id} order={order} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {tab === 'pending' && pendingQuery.data?.length === 0 && (
         <p className="text-slate-500">目前沒有待確認訂單。</p>
@@ -416,24 +418,26 @@ export function OrdersPage() {
       )}
 
       {tab === 'history' && (
-        <table className="w-full text-left text-sm">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="pb-2 font-normal">代號</th>
-              <th className="pb-2 font-normal">方向</th>
-              <th className="pb-2 font-normal">數量</th>
-              <th className="pb-2 font-normal">成交價</th>
-              <th className="pb-2 font-normal">狀態</th>
-              <th className="pb-2 font-normal">建立時間</th>
-              <th className="pb-2 font-normal">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.map((order) => (
-              <HistoryRow key={order.id} order={order} />
-            ))}
-          </tbody>
-        </table>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <table className="w-full text-left text-sm">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="pb-2 font-normal">代號</th>
+                <th className="pb-2 font-normal">方向</th>
+                <th className="pb-2 font-normal">數量</th>
+                <th className="pb-2 font-normal">成交價</th>
+                <th className="pb-2 font-normal">狀態</th>
+                <th className="pb-2 font-normal">建立時間</th>
+                <th className="pb-2 font-normal">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((order) => (
+                <HistoryRow key={order.id} order={order} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {tab === 'history' && (
         <Pager
