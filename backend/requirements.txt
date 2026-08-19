@@ -35,4 +35,4 @@ psycopg2-binary>=2.9
 # python:3.13-slim -- the deploy image -- does not ship one either, so without
 # this the container would fail at import and never start. It arrives today
 # only as somebody else's transitive dependency, which is not a guarantee.
-tzdata>=2024.1
+tzdata>=2026.3
