@@ -1,0 +1,92 @@
+name: CI
+
+# Every push and every PR. The project's rule is "green before the next step"
+# (CLAUDE.md), and until this existed nothing enforced it -- 744 backend and
+# 153 frontend tests had never once run anywhere but a laptop.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push supersedes the first; no point finishing a run for a commit
+# that is already stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check app tests
+
+      - name: Format check
+        run: ruff format --check app tests alembic
+
+      - name: Migrations apply from empty, and match the models
+        # Catches the failure the test suite structurally cannot: the suite
+        # builds its schema with create_all, so a model change with a missing
+        # or wrong migration passes every test and then breaks the deploy,
+        # which runs `alembic upgrade head` on boot.
+        env:
+          DATABASE_URL: sqlite:///./ci_migration_check.db
+        run: |
+          alembic upgrade head
+          alembic check
+
+      - name: Tests
+        run: pytest -q
+
+  frontend:
+    name: frontend (tsc + oxlint + vitest + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        # Two workers, not the default one-per-core: the runner has 4 GB and
+        # jsdom is heavy, and a pool that loses a worker reports it as an
+        # "error" rather than a failure, which is indistinguishable from a
+        # real break in the log.
+        run: npx vitest run --maxWorkers=2
+
+      - name: Build
+        run: npm run build
