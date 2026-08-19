@@ -61,12 +61,28 @@ list. Killing one of those destroys someone else's in-flight work. Filter on the
 powershell -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*Stock trading app*' -and $_.CommandLine -like '*pytest*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
 ```
 
-Also release:
-- **Docker Desktop** — holds ~700 MB across its own processes plus a WSL VM, and this
-  project does not need it running for tests (only for building the deploy image). Ask
-  before stopping it; it is the user's call whether they are mid-something.
+Also release, as a habit rather than a rescue measure — the point is to stop something
+hogging memory *before* the next thing needs it, not to scramble once a run has already
+died:
+
+- **Docker Desktop** — holds ~700 MB across its own processes plus a WSL VM even while
+  completely idle, and nothing in this project needs it running except building the deploy
+  image. Stop it when it is not in use.
+
+  **Stop, never uninstall.** Closing Docker Desktop and running `wsl --shutdown` frees the
+  memory and changes nothing else: the install, the images, the volumes and the settings
+  all survive, and the user gets it back by opening Docker Desktop from the Start menu.
+  Say "停用" when reporting this, not "刪除" — they are very different things to hear about
+  your own machine.
+
+  ```bash
+  powershell -Command "Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }"
+  wsl.exe --shutdown
+  ```
+
 - **Local dev servers** — stop the uvicorn/vite processes you started once the check that
-  needed them is done. Do not leave one running across a whole session.
+  needed them is done. Do not leave one running across a whole session on the chance it
+  might be wanted again; starting it back up costs seconds.
 - **Playwright browsers and profiles** — a persistent-context profile keeps a full browser
   alive; close the context in the script's `finally`.
 

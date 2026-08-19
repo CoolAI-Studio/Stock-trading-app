@@ -24,3 +24,6 @@
      這台機器上還有別的專案（NextERP）的 pytest 長得一模一樣，殺錯就毀掉別人正在跑的東西。
    - `Windows fatal exception: stack overflow`、`[vitest-pool] Failed to start threads worker`、
      單一測試 5000ms 逾時——這些都是記憶體不足的症狀，不是程式的 bug。**先重跑再診斷。**
+   - 閒置的重量級程式（Docker Desktop 光是開著就吃約 700 MB）用不到就**停用**，不要讓它一直
+     佔著、等別的程式要用時才爆掉。**是停用不是移除**——關掉 Docker Desktop 加 `wsl --shutdown`
+     只釋放記憶體，安裝檔、映像檔、設定全部原封不動，要用時從開始選單開起來就好。
