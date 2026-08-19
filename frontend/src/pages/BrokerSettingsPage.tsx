@@ -254,7 +254,7 @@ export function BrokerSettingsPage() {
 
       {showForm && <NewCredentialForm onDone={() => setShowForm(false)} />}
 
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>

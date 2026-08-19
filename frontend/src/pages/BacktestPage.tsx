@@ -269,7 +269,7 @@ function Details({ summary }: { summary: BacktestSummary }) {
   return (
     <section aria-label="細項統計" className="space-y-1">
       <h2 className="text-sm font-semibold text-slate-300">細項統計</h2>
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
         <table className="w-full text-left text-sm">
           <tbody>
             {rows.map(([label, value, hint]) => (
@@ -299,7 +299,7 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
   if (trades.length === 0) return null
 
   return (
-    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
       <table aria-label="交易明細" className="w-full text-left text-sm">
         <thead className="text-slate-500">
           <tr>
@@ -783,7 +783,7 @@ export function BacktestPage() {
               error={clearMutation.error}
             />
           </div>
-          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
             <table aria-label="過去的回測" className="w-full text-left text-sm">
               <thead className="text-slate-500">
                 <tr>

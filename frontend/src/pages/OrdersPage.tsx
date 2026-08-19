@@ -358,7 +358,7 @@ export function OrdersPage() {
       {showForm && <NewOrderForm onDone={() => setShowForm(false)} />}
 
       {tab === 'pending' && (
-        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
           <table className="w-full text-left text-sm">
             <thead className="text-slate-500">
               <tr>
@@ -418,7 +418,7 @@ export function OrdersPage() {
       )}
 
       {tab === 'history' && (
-        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
           <table className="w-full text-left text-sm">
             <thead className="text-slate-500">
               <tr>

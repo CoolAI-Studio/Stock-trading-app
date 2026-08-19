@@ -1031,7 +1031,7 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
         <p className="text-slate-500">目前沒有提醒紀錄。</p>
       )}
       {alerts.length > 0 && (
-        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
           <table aria-label="提醒紀錄" className="w-full text-left text-sm">
             <thead className="text-slate-500">
               <tr>
@@ -1125,7 +1125,7 @@ export function StrategiesPage() {
         <NewStrategyForm onDone={() => setShowForm(false)} samples={samplesQuery.data ?? []} />
       )}
 
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>

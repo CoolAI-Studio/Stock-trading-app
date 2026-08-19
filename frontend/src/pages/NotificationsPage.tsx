@@ -852,7 +852,7 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
         <p className="text-slate-500">目前沒有發送紀錄。</p>
       )}
       {logs.length > 0 && (
-        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
           <table className="w-full text-left text-sm">
             <thead className="text-slate-500">
               <tr>
@@ -915,7 +915,7 @@ export function NotificationsPage() {
 
       {showForm && <NewChannelForm onDone={() => setShowForm(false)} />}
 
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>

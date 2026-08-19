@@ -222,7 +222,7 @@ export function RunComparison({ a, b }: { a: BacktestRun; b: BacktestRun }) {
         <p className="text-sm text-slate-400">兩次的結果完全一樣，沒有差別可以看。</p>
       )}
 
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 [&_th]:whitespace-nowrap">
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
