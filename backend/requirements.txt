@@ -5,7 +5,7 @@ alembic>=1.13
 pydantic>=2.9
 pydantic-settings>=2.6
 email-validator>=2.2
-passlib[bcrypt]>=1.7
+passlib[bcrypt]>=1.7.4
 # passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt>=4.1 -- pin below that
 # until passlib cuts a compatible release (or we drop passlib for direct bcrypt).
 bcrypt<4.1
