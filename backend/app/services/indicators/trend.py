@@ -17,8 +17,7 @@ _TREND = IndicatorCategory.TREND
     category=_TREND,
     title="簡單移動平均 (SMA)",
     description=(
-        "最近 period 根K線收盤價的算術平均，最基本的趨勢線。"
-        "價格站上或跌破均線常被當成多空分界。"
+        "最近 period 根K線收盤價的算術平均，最基本的趨勢線。價格站上或跌破均線常被當成多空分界。"
     ),
 )
 def sma(values: list[float], period: int = 20) -> Series:
@@ -41,8 +40,7 @@ def ema(values: list[float], period: int = 20) -> Series:
     category=_TREND,
     title="加權移動平均 (WMA)",
     description=(
-        "線性加權平均：窗口內第 1 根權重 1、最後一根權重 period，"
-        "比 SMA 靈敏、比 EMA 穩定。"
+        "線性加權平均：窗口內第 1 根權重 1、最後一根權重 period，比 SMA 靈敏、比 EMA 穩定。"
     ),
 )
 def wma(values: list[float], period: int = 20) -> Series:
@@ -69,8 +67,7 @@ def dema(values: list[float], period: int = 20) -> Series:
     category=_TREND,
     title="三重指數移動平均 (TEMA)",
     description=(
-        "3*EMA - 3*EMA(EMA) + EMA(EMA(EMA))，比 DEMA 再少一層落後。"
-        "需要約 3*period 根K線才有值。"
+        "3*EMA - 3*EMA(EMA) + EMA(EMA(EMA))，比 DEMA 再少一層落後。需要約 3*period 根K線才有值。"
     ),
 )
 def tema(values: list[float], period: int = 20) -> Series:
@@ -105,8 +102,7 @@ def hma(values: list[float], period: int = 9) -> Series:
     category=_TREND,
     title="成交量加權移動平均 (VWMA)",
     description=(
-        "用成交量當權重的移動平均：放量的K線影響大、量縮的K線影響小，"
-        "比 SMA 更貼近實際成交成本。"
+        "用成交量當權重的移動平均：放量的K線影響大、量縮的K線影響小，比 SMA 更貼近實際成交成本。"
     ),
 )
 def vwma(values: list[float], volumes: list[float], period: int = 20) -> Series:

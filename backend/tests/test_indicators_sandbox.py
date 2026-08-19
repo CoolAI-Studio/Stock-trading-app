@@ -256,7 +256,7 @@ def test_the_generator_prompt_still_states_the_sandbox_rules():
 
 
 def test_indicator_misuse_inside_generated_code_is_still_a_validation_error():
-    source = _tick_strategy('        return indicators.no_such_thing(self.closes)')
+    source = _tick_strategy("        return indicators.no_such_thing(self.closes)")
 
     loaded = compile_strategy(source)
     with pytest.raises(AttributeError):

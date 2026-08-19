@@ -23,8 +23,24 @@ from tests.indicator_data import (
 # Wilder's own worked example as published by StockCharts, to 4dp -- the
 # reference every RSI implementation is measured against.
 PUBLISHED_RSI_14 = [
-    70.5328, 66.3186, 66.5522, 69.4063, 66.3556, 57.9748, 62.9296, 63.2571, 56.0596,
-    62.3773, 54.7076, 50.4227, 39.9898, 41.4604, 41.8689, 45.4632, 37.3040, 33.0795,
+    70.5328,
+    66.3186,
+    66.5522,
+    69.4063,
+    66.3556,
+    57.9748,
+    62.9296,
+    63.2571,
+    56.0596,
+    62.3773,
+    54.7076,
+    50.4227,
+    39.9898,
+    41.4604,
+    41.8689,
+    45.4632,
+    37.3040,
+    33.0795,
     37.7729,
 ]
 
@@ -206,9 +222,7 @@ def test_mfi_is_rsi_weighted_by_money_flow():
 def test_mfi_and_rsi_diverge_when_volume_disagrees_with_price():
     """If MFI ignored volume it would just be RSI on the typical price. Two
     runs over the same prices with different volumes must not agree."""
-    heavy_on_down_bars = [
-        3000.0 if CLOSES[i] < CLOSES[i - 1] else 500.0 for i in range(BAR_COUNT)
-    ]
+    heavy_on_down_bars = [3000.0 if CLOSES[i] < CLOSES[i - 1] else 500.0 for i in range(BAR_COUNT)]
     heavy_on_down_bars[0] = 500.0
 
     baseline = momentum.mfi(HIGHS, LOWS, CLOSES, VOLUMES, 14)

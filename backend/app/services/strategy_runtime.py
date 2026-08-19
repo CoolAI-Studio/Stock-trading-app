@@ -258,9 +258,7 @@ class LoadedStrategy:
         free-tier box, where an extra process per strategy costs more than the
         failure mode does."""
         timeout = (
-            self.timeout_sec
-            if self.timeout_sec is not None
-            else settings.STRATEGY_TICK_TIMEOUT_SEC
+            self.timeout_sec if self.timeout_sec is not None else settings.STRATEGY_TICK_TIMEOUT_SEC
         )
 
         if self._stuck_thread is not None and self._stuck_thread.is_alive():

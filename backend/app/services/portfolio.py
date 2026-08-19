@@ -17,11 +17,7 @@ class InsufficientPositionError(Exception):
 
 
 def get_position(db: Session, user_id: int, symbol: str) -> Position | None:
-    return (
-        db.query(Position)
-        .filter(Position.user_id == user_id, Position.symbol == symbol)
-        .first()
-    )
+    return db.query(Position).filter(Position.user_id == user_id, Position.symbol == symbol).first()
 
 
 def ensure_fill_applicable(db: Session, order: Order, fill_quantity: Decimal) -> None:

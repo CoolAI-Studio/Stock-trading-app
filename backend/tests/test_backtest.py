@@ -528,9 +528,7 @@ def test_the_equity_curve_has_one_point_per_tested_bar():
     result = run_backtest(source_code=BUY_ON_FIFTH_BAR, bars=bars, assumptions=FREE)
 
     assert len(result.equity_curve) == result.summary.bars_tested
-    assert [point.timestamp for point in result.equity_curve] == [
-        bar.timestamp for bar in bars[3:]
-    ]
+    assert [point.timestamp for point in result.equity_curve] == [bar.timestamp for bar in bars[3:]]
     assert all(point.equity > 0 for point in result.equity_curve)
 
 
@@ -556,9 +554,7 @@ def test_a_run_with_no_trades_reports_zero_rather_than_dividing_by_none():
     ],
 )
 def test_estimated_bar_count_bounds_the_request_before_any_fetch(timeframe, days, expected):
-    assert (
-        estimated_bar_count(_START, _START + timedelta(days=days), timeframe) == expected
-    )
+    assert estimated_bar_count(_START, _START + timedelta(days=days), timeframe) == expected
 
 
 class _StubBarProvider:

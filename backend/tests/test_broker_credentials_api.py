@@ -41,9 +41,7 @@ def test_update_credential(auth_client):
     )
     credential_id = create_resp.json()["id"]
 
-    resp = auth_client.patch(
-        f"/api/broker-credentials/{credential_id}", json={"label": "renamed"}
-    )
+    resp = auth_client.patch(f"/api/broker-credentials/{credential_id}", json={"label": "renamed"})
     assert resp.status_code == 200
     assert resp.json()["label"] == "renamed"
 

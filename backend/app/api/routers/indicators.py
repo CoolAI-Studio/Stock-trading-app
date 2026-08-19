@@ -46,9 +46,7 @@ def list_indicators(
     """
     return IndicatorCatalogue(
         categories=[
-            IndicatorCategoryInfo(
-                name=name, label=label, count=len(catalogue(name))
-            )
+            IndicatorCategoryInfo(name=name, label=label, count=len(catalogue(name)))
             for name, label in INDICATOR_CATEGORIES.items()
         ],
         indicators=[_to_info(spec) for spec in catalogue(category)],

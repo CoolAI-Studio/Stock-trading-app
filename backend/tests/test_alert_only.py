@@ -699,9 +699,7 @@ def test_oscillation_across_the_threshold_is_throttled_to_the_interval(
     assert db_session.query(Order).count() == 0
 
 
-def test_interval_zero_notifies_on_every_one_of_those_signals(
-    db_session, fake_clock, stub_sender
-):
+def test_interval_zero_notifies_on_every_one_of_those_signals(db_session, fake_clock, stub_sender):
     signals = _drive_oscillation(db_session, fake_clock, interval_sec=0)
 
     assert signals == 240

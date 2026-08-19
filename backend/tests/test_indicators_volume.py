@@ -11,9 +11,7 @@ def test_obv_adds_volume_on_up_closes_and_subtracts_it_on_down_closes():
 
     # 50.90 -> 51.50 up, +1350; -> 52.40 up, +1100; -> 51.80 down, -1500.
     assert result[:4] == pytest.approx([0.0, 1350.0, 2450.0, 950.0])
-    assert_series(
-        result, first_index=0, first=0.0, tail_values=[8700.0, 10050.0, 11300.0, 12450.0]
-    )
+    assert_series(result, first_index=0, first=0.0, tail_values=[8700.0, 10050.0, 11300.0, 12450.0])
 
 
 def test_obv_starts_from_zero_so_only_its_slope_carries_meaning():
@@ -116,9 +114,7 @@ def test_force_index_period_one_is_the_raw_unsmoothed_force():
 
     assert result[0] is None  # no previous close to measure a change against
     assert result[1] == pytest.approx((CLOSES[1] - CLOSES[0]) * VOLUMES[1])
-    assert_series(
-        result, first_index=1, first=810.0, tail_values=[1200.0, 1215.0, 1000.0, 805.0]
-    )
+    assert_series(result, first_index=1, first=810.0, tail_values=[1200.0, 1215.0, 1000.0, 805.0])
 
 
 def test_volume_oscillator_is_the_percentage_gap_between_two_volume_emas():

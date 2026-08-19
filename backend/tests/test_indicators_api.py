@@ -12,9 +12,7 @@ def test_the_endpoint_returns_every_registered_indicator(auth_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert [item["name"] for item in body["indicators"]] == [
-        spec.name for spec in catalogue()
-    ]
+    assert [item["name"] for item in body["indicators"]] == [spec.name for spec in catalogue()]
 
 
 def test_each_entry_carries_what_the_owner_needs_to_use_it(auth_client):

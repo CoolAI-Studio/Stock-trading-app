@@ -165,8 +165,7 @@ def williams_r(
     category=_MOMENTUM,
     title="變動率 (ROC)",
     description=(
-        "相對 period 根之前的漲跌「百分比」。"
-        "注意與 momentum 的差別：ROC 有除以舊價格，跨標的可比。"
+        "相對 period 根之前的漲跌「百分比」。注意與 momentum 的差別：ROC 有除以舊價格，跨標的可比。"
     ),
 )
 def roc(values: list[float], period: int = 12) -> Series:
@@ -184,8 +183,7 @@ def roc(values: list[float], period: int = 12) -> Series:
     category=_MOMENTUM,
     title="動量 (Momentum)",
     description=(
-        "相對 period 根之前的漲跌「絕對值」，單位就是價格單位。"
-        "門檻不能跨標的沿用（見 ROC）。"
+        "相對 period 根之前的漲跌「絕對值」，單位就是價格單位。門檻不能跨標的沿用（見 ROC）。"
     ),
 )
 def momentum(values: list[float], period: int = 10) -> Series:
@@ -209,9 +207,7 @@ def mfi(
     volumes: list[float],
     period: int = 14,
 ) -> Series:
-    high, low, close, volume = _core.aligned(
-        highs=highs, lows=lows, closes=closes, volumes=volumes
-    )
+    high, low, close, volume = _core.aligned(highs=highs, lows=lows, closes=closes, volumes=volumes)
     size = _core.period(period)
     typical = _core.typical_prices(high, low, close)
 

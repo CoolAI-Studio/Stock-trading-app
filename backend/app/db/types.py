@@ -24,7 +24,7 @@ class EncryptedJSON(TypeDecorator):
         if not key:
             raise RuntimeError(
                 "SECRET_ENCRYPTION_KEY is not set -- cannot encrypt/decrypt stored "
-                "secrets. Generate one with: python -c \"from cryptography.fernet "
+                'secrets. Generate one with: python -c "from cryptography.fernet '
                 'import Fernet; print(Fernet.generate_key().decode())"'
             )
         return Fernet(key.encode() if isinstance(key, str) else key)

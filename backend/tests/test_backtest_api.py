@@ -320,9 +320,7 @@ def test_a_run_is_persisted_and_can_be_read_back(auth_client, stub_market_data):
     assert detail.json()["result"] == created["result"]
 
 
-def test_a_run_keeps_the_code_it_scored_after_the_strategy_is_edited(
-    auth_client, stub_market_data
-):
+def test_a_run_keeps_the_code_it_scored_after_the_strategy_is_edited(auth_client, stub_market_data):
     """Otherwise last week's numbers silently start describing this week's
     code, which is the most convincing way to be wrong."""
     strategy_id = _create_strategy(auth_client)

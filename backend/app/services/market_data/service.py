@@ -60,9 +60,7 @@ class MarketDataService:
         # per-source bucket. That is what keeps one symbol's fetch schedule
         # entirely its own business -- see get_bars(). The stored tuple is
         # (fetched_at, limit_asked_for, bars).
-        self._bar_cache: dict[
-            tuple[DataSource, str, Timeframe], tuple[float, int, list[Bar]]
-        ] = {}
+        self._bar_cache: dict[tuple[DataSource, str, Timeframe], tuple[float, int, list[Bar]]] = {}
 
     def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
         if not symbols:

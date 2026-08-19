@@ -163,9 +163,7 @@ def test_position_stop_loss_creates_a_sell_signal(db_session, published_events):
     market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=85.0))
 
     order = (
-        db_session.query(Order)
-        .filter(Order.symbol == "AAPL", Order.side == OrderSide.SELL)
-        .first()
+        db_session.query(Order).filter(Order.symbol == "AAPL", Order.side == OrderSide.SELL).first()
     )
     assert order is not None
     assert order.risk_notes["trigger"] == "stop_loss"

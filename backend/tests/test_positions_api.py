@@ -60,7 +60,5 @@ def test_adjust_rejects_a_negative_avg_entry_price(auth_client):
 
 
 def test_adjust_still_accepts_zero_to_flatten(auth_client):
-    resp = auth_client.patch(
-        "/api/positions/AAPL", json={"quantity": "0", "avg_entry_price": "0"}
-    )
+    resp = auth_client.patch("/api/positions/AAPL", json={"quantity": "0", "avg_entry_price": "0"})
     assert resp.status_code == 200

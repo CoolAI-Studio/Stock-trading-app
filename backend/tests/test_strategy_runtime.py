@@ -108,7 +108,7 @@ def test_code_hash_is_stable_and_content_sensitive():
 def _wrap_on_tick(body: str) -> str:
     """Builds a minimal valid Strategy whose on_tick body is `body` (already
     indented to 8 spaces by the caller's triple-quoted string)."""
-    return f'''
+    return f"""
 class Strategy:
     def __init__(self):
         self.name = "probe"
@@ -117,7 +117,7 @@ class Strategy:
     def on_tick(self, current_price: float) -> str:
 {body}
         return "HOLD"
-'''
+"""
 
 
 def test_security_error_is_a_validation_error():

@@ -474,9 +474,7 @@ def run_backtest(
             elif signal == "SELL" and account.quantity == 0:
                 skipped_sell_while_flat += 1
             elif assumptions.fill_price_basis is FillPriceBasis.CLOSE:
-                _execute(
-                    account, signal, Decimal(str(bar.close)), bar.timestamp, assumptions
-                )
+                _execute(account, signal, Decimal(str(bar.close)), bar.timestamp, assumptions)
             else:
                 pending_side = signal
 
@@ -499,8 +497,7 @@ def run_backtest(
     if pending_side is not None:
         unfilled = 1
         notes.append(
-            "最後一根 K 棒出現訊號，但後面沒有下一根 K 棒可以成交，因此列為未成交、"
-            "不計入績效。"
+            "最後一根 K 棒出現訊號，但後面沒有下一根 K 棒可以成交，因此列為未成交、不計入績效。"
         )
 
     notes.extend(
@@ -617,9 +614,7 @@ def _summarize(
         win_rate_pct=(
             _pct(Decimal(len(wins)) / Decimal(trade_count) * 100) if trade_count else None
         ),
-        average_win=(
-            _money(sum((t.pnl for t in wins), Decimal(0)) / len(wins)) if wins else None
-        ),
+        average_win=(_money(sum((t.pnl for t in wins), Decimal(0)) / len(wins)) if wins else None),
         average_loss=(
             _money(sum((t.pnl for t in losses), Decimal(0)) / len(losses)) if losses else None
         ),

@@ -63,9 +63,7 @@ def vwap(
     volumes: list[float],
     period: int | None = None,
 ) -> Series:
-    high, low, close, volume = _core.aligned(
-        highs=highs, lows=lows, closes=closes, volumes=volumes
-    )
+    high, low, close, volume = _core.aligned(highs=highs, lows=lows, closes=closes, volumes=volumes)
     typical = _core.typical_prices(high, low, close)
     weighted = [price * size for price, size in zip(typical, volume, strict=True)]
 
@@ -98,9 +96,7 @@ def vwap(
 def accumulation_distribution(
     highs: list[float], lows: list[float], closes: list[float], volumes: list[float]
 ) -> Series:
-    high, low, close, volume = _core.aligned(
-        highs=highs, lows=lows, closes=closes, volumes=volumes
-    )
+    high, low, close, volume = _core.aligned(highs=highs, lows=lows, closes=closes, volumes=volumes)
     out: Series = []
     running = 0.0
     for flow in _money_flow_volume(high, low, close, volume):
@@ -124,9 +120,7 @@ def chaikin_money_flow(
     volumes: list[float],
     period: int = 20,
 ) -> Series:
-    high, low, close, volume = _core.aligned(
-        highs=highs, lows=lows, closes=closes, volumes=volumes
-    )
+    high, low, close, volume = _core.aligned(highs=highs, lows=lows, closes=closes, volumes=volumes)
     size = _core.period(period)
     return _core.combine(
         _core.rolling_sum(_money_flow_volume(high, low, close, volume), size),
@@ -161,9 +155,7 @@ def force_index(closes: list[float], volumes: list[float], period: int = 13) -> 
         "為正代表近期成交量高於長期水準，常用來確認突破是否有量。"
     ),
 )
-def volume_oscillator(
-    volumes: list[float], short_period: int = 5, long_period: int = 10
-) -> Series:
+def volume_oscillator(volumes: list[float], short_period: int = 5, long_period: int = 10) -> Series:
     volume = _core.numbers(volumes, "volumes")
     short = _core.ema_values(volume, _core.period(short_period, "short_period"))
     long = _core.ema_values(volume, _core.period(long_period, "long_period"))

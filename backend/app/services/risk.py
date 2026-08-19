@@ -64,9 +64,7 @@ def check_position_limit(
     return (current_position + incoming_qty) < max_position
 
 
-def check_capital_limit(
-    committed_cost: Decimal, incoming_cost: Decimal, capital: Decimal
-) -> bool:
+def check_capital_limit(committed_cost: Decimal, incoming_cost: Decimal, capital: Decimal) -> bool:
     """True = the incoming buy fits inside the allocated capital.
 
     `capital <= 0` means "not configured yet" (allow), the same convention

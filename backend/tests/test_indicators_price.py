@@ -35,9 +35,7 @@ def test_heikin_ashi_open_is_recursive_and_close_is_the_ohlc_average():
         assert result["open"][i] == pytest.approx(
             (result["open"][i - 1] + result["close"][i - 1]) / 2
         )
-        assert result["close"][i] == pytest.approx(
-            (OPENS[i] + HIGHS[i] + LOWS[i] + CLOSES[i]) / 4
-        )
+        assert result["close"][i] == pytest.approx((OPENS[i] + HIGHS[i] + LOWS[i] + CLOSES[i]) / 4)
 
     assert_series(
         result["open"],

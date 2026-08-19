@@ -41,9 +41,7 @@ def test_sma_is_the_arithmetic_mean_of_the_window():
 
     # (50.90 + 51.50 + 52.40 + 51.80 + 52.70) / 5
     assert result[4] == pytest.approx(259.30 / 5)
-    assert_series(
-        result, first_index=4, first=51.86, tail_values=[54.86, 54.46, 54.44, 54.84]
-    )
+    assert_series(result, first_index=4, first=51.86, tail_values=[54.86, 54.46, 54.44, 54.84])
 
 
 def test_wma_weights_the_window_1_to_n():
@@ -245,9 +243,7 @@ def test_aroon_reads_100_on_the_bar_that_sets_the_extreme():
     # ...and the lowest low of that same window is bar 0, 25 bars back, so
     # Aroon Down has decayed all the way to zero.
     assert LOWS[0] == min(LOWS[0:26])
-    assert_series(
-        result["down"], first_index=25, first=0.0, tail_values=[100.0, 96.0, 92.0, 88.0]
-    )
+    assert_series(result["down"], first_index=25, first=0.0, tail_values=[100.0, 96.0, 92.0, 88.0])
     assert result["oscillator"][-1] == pytest.approx(result["up"][-1] - result["down"][-1])
 
 

@@ -13,8 +13,7 @@ _PIVOT_METHODS = ("classic", "fibonacci")
     category=_PRICE,
     title="典型價格 (Typical Price)",
     description=(
-        "(最高 + 最低 + 收盤) / 3，CCI、MFI、VWAP 的計算基礎，"
-        "比單看收盤價更能代表當根的成交區間。"
+        "(最高 + 最低 + 收盤) / 3，CCI、MFI、VWAP 的計算基礎，比單看收盤價更能代表當根的成交區間。"
     ),
 )
 def typical_price(highs: list[float], lows: list[float], closes: list[float]) -> Series:
@@ -36,16 +35,11 @@ def typical_price(highs: list[float], lows: list[float], closes: list[float]) ->
 def heikin_ashi(
     opens: list[float], highs: list[float], lows: list[float], closes: list[float]
 ) -> dict[str, Series]:
-    open_, high, low, close = _core.aligned(
-        opens=opens, highs=highs, lows=lows, closes=closes
-    )
+    open_, high, low, close = _core.aligned(opens=opens, highs=highs, lows=lows, closes=closes)
     if not close:
         return {"open": [], "high": [], "low": [], "close": []}
 
-    ha_close = [
-        (o + h + lo + c) / 4
-        for o, h, lo, c in zip(open_, high, low, close, strict=True)
-    ]
+    ha_close = [(o + h + lo + c) / 4 for o, h, lo, c in zip(open_, high, low, close, strict=True)]
     # The first candle has no predecessor to average, so it seeds from the
     # real bar; every later one is built on the synthetic candle before it.
     ha_open = [(open_[0] + close[0]) / 2]

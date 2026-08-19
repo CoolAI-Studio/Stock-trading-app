@@ -79,9 +79,7 @@ def resolve(
         # test -- `override or global` would read a deliberate 0 as "unset"
         # and hand the strategy back the very global stop-loss it turned off.
         values[field] = getattr(global_settings, field) if override is None else override
-    return EffectiveRiskSettings(
-        **values, strategy_id=None if strategy is None else strategy.id
-    )
+    return EffectiveRiskSettings(**values, strategy_id=None if strategy is None else strategy.id)
 
 
 def resolve_for_user(

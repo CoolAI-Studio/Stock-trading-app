@@ -52,9 +52,7 @@ def _get_owned_credential(db: Session, user: User, credential_id: int) -> Broker
 def list_credentials(
     db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
 ) -> list[BrokerCredentialRead]:
-    credentials = (
-        db.query(BrokerCredential).filter(BrokerCredential.user_id == user.id).all()
-    )
+    credentials = db.query(BrokerCredential).filter(BrokerCredential.user_id == user.id).all()
     return [_to_read(c) for c in credentials]
 
 

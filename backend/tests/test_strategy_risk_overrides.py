@@ -590,9 +590,7 @@ def test_update_strategy_can_set_and_clear_an_override(auth_client):
     )
     assert set_resp.json()["max_position_qty"] == "12"
 
-    cleared = auth_client.patch(
-        f"/api/strategies/{created['id']}", json={"max_position_qty": None}
-    )
+    cleared = auth_client.patch(f"/api/strategies/{created['id']}", json={"max_position_qty": None})
     assert cleared.json()["max_position_qty"] is None
 
 
@@ -758,7 +756,6 @@ def test_migrated_strategy_still_runs_on_the_global_settings(db_session):
 
     assert first.created is True
     assert second.reason == "signal cooldown active"
-
 
 
 # ---- 0 means "off", and a 0 override is not an absent one ----

@@ -108,9 +108,7 @@ def _to_generate_result(
 
 def _get_owned_strategy(db: Session, user: User, strategy_id: int) -> Strategy:
     strategy = (
-        db.query(Strategy)
-        .filter(Strategy.id == strategy_id, Strategy.user_id == user.id)
-        .first()
+        db.query(Strategy).filter(Strategy.id == strategy_id, Strategy.user_id == user.id).first()
     )
     if strategy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")

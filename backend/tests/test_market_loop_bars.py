@@ -79,8 +79,7 @@ class _CandleProvider:
 
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
         return {
-            s: Quote(symbol=s, data_source=self.data_source, price=Decimal(500))
-            for s in symbols
+            s: Quote(symbol=s, data_source=self.data_source, price=Decimal(500)) for s in symbols
         }
 
     def get_bars(self, symbol: str, timeframe: Timeframe, limit: int) -> list[Bar]:

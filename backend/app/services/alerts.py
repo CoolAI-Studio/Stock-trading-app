@@ -74,9 +74,7 @@ def _is_throttled(db: Session, strategy_id: int, side: OrderSide, interval_sec: 
     return failures_since.filter(StrategyAlert.created_at >= cutoff).first() is not None
 
 
-def emit_alert(
-    db: Session, strategy: Strategy, side: OrderSide, price: Decimal
-) -> Event | None:
+def emit_alert(db: Session, strategy: Strategy, side: OrderSide, price: Decimal) -> Event | None:
     """Notify the owner about an alert-only signal and record the attempt.
 
     Returns the event to publish, or None when the alert was throttled. The
@@ -84,9 +82,7 @@ def emit_alert(
     whether the throttle clock may start; the returned event is stamped so the
     bus-subscribed dispatcher does not send a second copy.
     """
-    interval_sec = risk_resolver.resolve_for_user(
-        db, strategy.user_id, strategy
-    ).alert_interval_sec
+    interval_sec = risk_resolver.resolve_for_user(db, strategy.user_id, strategy).alert_interval_sec
     if _is_throttled(db, strategy.id, side, interval_sec):
         return None
 

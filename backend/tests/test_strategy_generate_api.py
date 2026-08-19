@@ -6,7 +6,7 @@ from app.services.market_data.base import Timeframe, bars_from_closes
 
 # .strip() throughout: the endpoint trims the whitespace it peels the code
 # out of, so untrimmed fixtures would never compare equal to a response.
-GENERATED_SOURCE = '''class Strategy:
+GENERATED_SOURCE = """class Strategy:
     def __init__(self):
         self.name = "TSMC_MA5"
         self.symbol = "2330.TW"
@@ -18,11 +18,11 @@ GENERATED_SOURCE = '''class Strategy:
             return "HOLD"
         ma5 = sum(self.prices[-5:]) / 5
         return "BUY" if current_price > ma5 else "HOLD"
-'''.strip()
+""".strip()
 
 # The exact failure the sandbox exists to catch, and the one an LLM is most
 # likely to produce: reaching for a networking library it saw in training data.
-SANDBOX_VIOLATING_SOURCE = '''import requests
+SANDBOX_VIOLATING_SOURCE = """import requests
 
 
 class Strategy:
@@ -32,7 +32,7 @@ class Strategy:
 
     def on_tick(self, current_price: float) -> str:
         return "HOLD"
-'''.strip()
+""".strip()
 
 
 class FakeProvider:
@@ -174,9 +174,7 @@ def test_system_prompt_carries_the_real_sandbox_allowlist(auth_client):
 def test_system_prompt_follows_the_allowlist_when_the_sandbox_changes(auth_client, monkeypatch):
     """The point of deriving the list: widening the sandbox later must widen
     the prompt too, or the model keeps generating code the sandbox rejects."""
-    monkeypatch.setattr(
-        strategy_runtime, "_ALLOWED_MODULES", frozenset({"math", "zoneinfo"})
-    )
+    monkeypatch.setattr(strategy_runtime, "_ALLOWED_MODULES", frozenset({"math", "zoneinfo"}))
     provider = FakeProvider(AIResult(ok=True, reply=GENERATED_SOURCE))
 
     _generate(auth_client, provider)
@@ -196,7 +194,7 @@ def test_requested_symbol_is_passed_to_the_model(auth_client):
 
 # A crossover strategy rather than the one-liner above: the end-to-end test
 # has to see BUY and SELL actually come out, not just "no exception".
-CROSSOVER_SOURCE = '''class Strategy:
+CROSSOVER_SOURCE = """class Strategy:
     def __init__(self):
         self.name = "MA5_MA20_CROSS"
         self.symbol = "2330.TW"
@@ -217,7 +215,7 @@ CROSSOVER_SOURCE = '''class Strategy:
             self.holding = False
             return "SELL"
         return "HOLD"
-'''.strip()
+""".strip()
 
 
 def test_an_apology_with_no_code_does_not_spend_the_repair_round(auth_client):
@@ -332,8 +330,7 @@ def test_generate_requires_auth(client):
 # to be able to answer -- and the one that contains an ambiguity ("沒收斂") a
 # model must not settle on its own.
 OWNER_REQUEST = (
-    "台積電周線 RSI>80 後，等待 MACD 快慢線交叉向下後的第二根K線收盤時，"
-    "快慢線沒收斂時觸發賣出警訊"
+    "台積電周線 RSI>80 後，等待 MACD 快慢線交叉向下後的第二根K線收盤時，快慢線沒收斂時觸發賣出警訊"
 )
 
 CLARIFYING_QUESTION = (
@@ -343,7 +340,7 @@ CLARIFYING_QUESTION = (
 
 # What the contract asks for once 收斂 has been pinned down: weekly candles,
 # on_bar, and the runtime's own RSI/MACD rather than a hand-rolled pair.
-WEEKLY_MACD_SOURCE = '''class Strategy:
+WEEKLY_MACD_SOURCE = """class Strategy:
     def __init__(self):
         self.name = "TSMC_WEEKLY_MACD"
         self.symbol = "2330.TW"
@@ -392,7 +389,7 @@ WEEKLY_MACD_SOURCE = '''class Strategy:
         if abs(fast[-1] - slow[-1]) > abs(fast[-2] - slow[-2]):
             return "SELL"
         return "HOLD"
-'''.strip()
+""".strip()
 
 
 def test_an_ambiguous_description_comes_back_as_a_question_instead_of_code(auth_client):

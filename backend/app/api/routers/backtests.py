@@ -36,9 +36,7 @@ MAX_RUNS_PER_USER = 30
 
 def _resolve_strategy(db: Session, user: User, strategy_id: int) -> Strategy:
     strategy = (
-        db.query(Strategy)
-        .filter(Strategy.id == strategy_id, Strategy.user_id == user.id)
-        .first()
+        db.query(Strategy).filter(Strategy.id == strategy_id, Strategy.user_id == user.id).first()
     )
     if strategy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
@@ -169,9 +167,7 @@ def create_backtest(
         ) from exc
 
     symbol = payload.symbol or (strategy.symbol if strategy else loaded.symbol)
-    data_source = payload.data_source or (
-        strategy.data_source if strategy else DataSource.YFINANCE
-    )
+    data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
     timeframe = _resolve_timeframe(payload.timeframe, loaded.entry_point, loaded.timeframe)
     _guard_range(payload, timeframe)
 

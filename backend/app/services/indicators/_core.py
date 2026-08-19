@@ -224,10 +224,7 @@ def true_ranges(highs: list[float], lows: list[float], closes: list[float]) -> S
 
 
 def typical_prices(highs: list[float], lows: list[float], closes: list[float]) -> list[float]:
-    return [
-        (high + low + close) / 3
-        for high, low, close in zip(highs, lows, closes, strict=True)
-    ]
+    return [(high + low + close) / 3 for high, low, close in zip(highs, lows, closes, strict=True)]
 
 
 def rolling_max(values: list[float], size: int) -> Series:
