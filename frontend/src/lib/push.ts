@@ -19,26 +19,70 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return output
 }
 
-/** Registers the service worker, requests Notification permission, and
- * subscribes via PushManager. Throws if permission is denied or the
- * environment doesn't support Web Push -- callers show that as an error. */
+/**
+ * Ask for notification permission. MUST BE CALLED DIRECTLY FROM A CLICK.
+ *
+ * Notification.requestPermission() requires transient user activation, and the
+ * activation a click grants is spent by an intervening `await`. The form used
+ * to fetch the VAPID public key over the network first and ask afterwards --
+ * on Safari, and therefore on every iPhone, the permission sheet then never
+ * appeared at all. The owner pressed 建立, saw nothing happen, and concluded
+ * push does not work on their phone.
+ *
+ * So this is called by the click handler as its first statement, before
+ * anything is awaited, and subscribeToPush() is not allowed to ask.
+ *
+ * Returns the resulting permission rather than throwing: 'denied' is a state
+ * the caller has to explain, not an error to swallow.
+ */
+export async function requestPushPermission(): Promise<NotificationPermission> {
+  if (!isPushSupported()) return 'denied'
+
+  // Both terminal states are final. Browsers resolve a repeat request
+  // instantly without showing anything, so asking again cannot change the
+  // answer and only makes the caller believe it tried.
+  if (Notification.permission === 'granted') return 'granted'
+  if (Notification.permission === 'denied') return 'denied'
+
+  return Notification.requestPermission()
+}
+
+/**
+ * Register the service worker and subscribe. Permission must ALREADY be
+ * granted -- see requestPushPermission() for why this cannot ask.
+ */
 export async function subscribeToPush(vapidPublicKey: string): Promise<PushSubscriptionConfig> {
   if (!isPushSupported()) {
     throw new Error('這個瀏覽器不支援推播通知')
   }
 
-  const permission = await Notification.requestPermission()
-  if (permission !== 'granted') {
+  if (Notification.permission === 'denied') {
+    // No amount of retrying reopens this; the browser will not ask again.
+    // Naming the only place it can be changed is the difference between an
+    // error and a dead end.
+    throw new Error(
+      '通知權限已被封鎖，瀏覽器不會再詢問。請到裝置的「設定」→ 通知（或瀏覽器的網站設定）' +
+        '把這個網站的通知打開，再回來重新建立一次。',
+    )
+  }
+  if (Notification.permission !== 'granted') {
     throw new Error('未取得通知權限')
   }
 
   const registration = await navigator.serviceWorker.register(SW_URL)
   await navigator.serviceWorker.ready
 
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
-  })
+  // Reuse whatever this device already has. Subscribing blind returns the same
+  // endpoint when the key matches, so a second channel created from one device
+  // would carry a duplicate endpoint -- and every alert would then arrive
+  // twice, which is how somebody starts ignoring them.
+  const existing = await registration.pushManager.getSubscription()
+  const subscription =
+    existing ??
+    (await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
+    }))
 
   const json = subscription.toJSON()
   return {

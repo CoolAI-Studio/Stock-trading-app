@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DeleteButton } from '../components/DeleteButton'
 import { ApiError, api } from '../lib/api'
-import { subscribeToPush, unsubscribeFromPush } from '../lib/push'
+import { requestPushPermission, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import { currentPushAvailability } from '../lib/platform'
 import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
 
@@ -605,6 +605,36 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
     onError: (err) => setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : '建立失敗'),
   })
 
+  /**
+   * Permission is asked for HERE, by the click, before anything is awaited.
+   *
+   * Notification.requestPermission() needs transient user activation and an
+   * intervening await spends it. This used to happen inside the mutation,
+   * after a network round-trip for the VAPID key -- so on Safari, and
+   * therefore on every iPhone, the permission sheet never appeared. Press
+   * 建立, nothing visible happens, conclude that push does not work on this
+   * phone. The single most damaging bug this app has had, because the whole
+   * product is notifications.
+   */
+  async function startCreate() {
+    setError(null)
+
+    if (channelType === 'web_push') {
+      const permission = await requestPushPermission()
+      if (permission !== 'granted') {
+        setError(
+          permission === 'denied'
+            ? '通知權限被封鎖了，瀏覽器不會再問一次。請到裝置的「設定」→ 通知（或瀏覽器的網站設定）' +
+              '把這個網站的通知打開，再回來按一次建立。'
+            : '沒有取得通知權限，所以沒有建立這個管道 —— 建立了也永遠收不到東西。請再按一次並選擇「允許」。',
+        )
+        return
+      }
+    }
+
+    createMutation.mutate()
+  }
+
   return (
     <div className="space-y-3 rounded border border-slate-800 p-4">
       <div className="flex gap-4">
@@ -799,7 +829,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           !label ||
           (channelType === 'web_push' && pushState.kind !== 'ready')
         }
-        onClick={() => createMutation.mutate()}
+        onClick={startCreate}
         className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
       >
         建立

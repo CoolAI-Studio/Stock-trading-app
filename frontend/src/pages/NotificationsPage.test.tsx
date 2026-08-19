@@ -14,6 +14,7 @@ vi.mock('../lib/api', () => ({
 
 vi.mock('../lib/push', () => ({
   isPushSupported: vi.fn(() => true),
+  requestPushPermission: vi.fn(async () => 'granted' as NotificationPermission),
   subscribeToPush: vi.fn(),
   unsubscribeFromPush: vi.fn(),
 }))
@@ -507,5 +508,95 @@ describe('iPhone 上的推播', () => {
     await openPushForm()
 
     expect(screen.getByText(/沒有 Web 推播功能/)).toBeInTheDocument()
+  })
+})
+
+
+// --- permission has to be asked for by the click itself ----------------------
+//
+// Notification.requestPermission() needs transient user activation, and an
+// intervening await spends it. The mutation used to fetch the VAPID key over
+// the network and ask afterwards, so on Safari -- every iPhone -- the sheet
+// never appeared: press 建立, nothing happens, conclude push does not work on
+// this phone. These pin the ordering that fixes it.
+
+describe('推播權限的取得時機', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // clearAllMocks resets call history, NOT implementations -- so the
+    // 'unsupported' verdict the previous describe installs survives into this
+    // one and leaves the 建立 button disabled. Put it back explicitly rather
+    // than depending on file order.
+    vi.mocked(platform.currentPushAvailability).mockReturnValue({ kind: 'ready' })
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [] as never
+      if (path === '/api/notifications/logs') return [] as never
+      if (path === '/api/notifications/push/vapid-public-key')
+        return { public_key: 'vapid-key' } as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue(WEB_PUSH_CHANNEL as never)
+    vi.mocked(push.subscribeToPush).mockResolvedValue({
+      endpoint: 'https://push.example.com/x',
+      p256dh: 'p',
+      auth: 'a',
+    })
+    vi.mocked(push.requestPushPermission).mockResolvedValue('granted')
+  })
+
+  async function pressCreate() {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByRole('radio', { name: '瀏覽器推播' }))
+    await user.type(screen.getByLabelText('名稱'), 'my-iphone')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+  }
+
+  it('先要權限，才去拿 VAPID 金鑰', async () => {
+    const order: string[] = []
+    vi.mocked(push.requestPushPermission).mockImplementation(async () => {
+      order.push('permission')
+      return 'granted'
+    })
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/push/vapid-public-key') {
+        order.push('vapid')
+        return { public_key: 'vapid-key' } as never
+      }
+      if (path === '/api/notifications/channels') return [] as never
+      return [] as never
+    })
+
+    await pressCreate()
+
+    await waitFor(() => expect(order).toContain('vapid'))
+    expect(order[0]).toBe('permission')
+  })
+
+  it('被拒絕就不要建立一個永遠收不到東西的管道', async () => {
+    vi.mocked(push.requestPushPermission).mockResolvedValue('denied')
+
+    await pressCreate()
+
+    await waitFor(() => expect(screen.getByText(/通知權限/)).toBeInTheDocument())
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('被拒絕時要說去哪裡改，不是只說失敗', async () => {
+    vi.mocked(push.requestPushPermission).mockResolvedValue('denied')
+
+    await pressCreate()
+
+    // Specific enough not to match the unrelated 「設定靜音時段」 heading: the
+    // point is that the message names the place the owner has to go.
+    await waitFor(() => expect(screen.getByText(/裝置的「設定」/)).toBeInTheDocument())
+  })
+
+  it('拿到權限就照原本的流程建立', async () => {
+    await pressCreate()
+
+    await waitFor(() => expect(push.subscribeToPush).toHaveBeenCalledWith('vapid-key'))
+    expect(api.post).toHaveBeenCalled()
   })
 })
