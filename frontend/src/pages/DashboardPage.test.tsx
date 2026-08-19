@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DashboardPage } from './DashboardPage'
 import { api } from '../lib/api'
 import type { Order, Position, Quote, Strategy } from '../lib/types'
 
-vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
+vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }))
 vi.mock('../lib/useWebSocket', () => ({ useWebSocket: vi.fn() }))
 
 // Inherits every risk knob from the global settings, like every strategy
@@ -96,7 +96,11 @@ function renderPage() {
 describe('DashboardPage', () => {
   beforeEach(() => {
     localStorage.clear()
+    vi.clearAllMocks()
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
     vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/watchlist') return [] as never
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/positions') return [POSITION] as never
       if (path.startsWith('/api/orders')) return [PENDING_ORDER] as never
@@ -119,7 +123,9 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('150.25')).toBeInTheDocument()
   })
 
-  it('adds a searched symbol to the watchlist and queries its quote', async () => {
+  it('saves a searched symbol to the account, not the browser', async () => {
+    // It used to live in localStorage, so the list was empty on the phone and
+    // gone after clearing browsing data.
     const user = userEvent.setup()
     renderPage()
 
@@ -127,19 +133,40 @@ describe('DashboardPage', () => {
     await user.type(screen.getByLabelText('查詢代號'), 'tsla')
     await user.click(screen.getByRole('button', { name: '加入自選' }))
 
-    expect(api.get).toHaveBeenCalledWith(expect.stringContaining('TSLA'))
-    expect(JSON.parse(localStorage.getItem('trading_app_watchlist')!)).toEqual(['TSLA'])
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/watchlist', { symbol: 'TSLA' }),
+    )
   })
 
-  it('removes a watchlist symbol', async () => {
-    localStorage.setItem('trading_app_watchlist', JSON.stringify(['AAPL']))
+  it('removes a watched symbol through the API', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/watchlist')
+        return [
+          { id: 1, symbol: 'AAPL', data_source: 'yfinance', created_at: '2026-08-19T00:00:00Z' },
+        ] as never
+      if (path === '/api/strategies') return [] as never
+      if (path === '/api/positions') return [] as never
+      if (path.startsWith('/api/orders')) return [] as never
+      return [QUOTE] as never
+    })
     const user = userEvent.setup()
     renderPage()
 
-    await screen.findByText('150.25')
-    await user.click(screen.getByRole('button', { name: '移除 AAPL' }))
+    await user.click(await screen.findByRole('button', { name: '移除 AAPL' }))
 
-    expect(JSON.parse(localStorage.getItem('trading_app_watchlist')!)).toEqual([])
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/watchlist/AAPL'))
+  })
+
+  it('moves a list left over in the browser into the account, once', async () => {
+    // Without this the owner's existing watch list simply vanishes on the
+    // deploy that moves it into the database.
+    localStorage.setItem('trading_app_watchlist', JSON.stringify(['2330.TW']))
+    renderPage()
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/watchlist', { symbol: '2330.TW' }),
+    )
+    expect(localStorage.getItem('trading_app_watchlist')).toBeNull()
   })
 
 

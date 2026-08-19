@@ -13,6 +13,7 @@ from app.api.routers import (
     positions,
     risk,
     strategies,
+    watchlist,
     webhooks,
     ws_ticket,
 )
@@ -28,6 +29,7 @@ api_router.include_router(orders.router)
 api_router.include_router(positions.router)
 api_router.include_router(risk.router)
 api_router.include_router(webhooks.router)
+api_router.include_router(watchlist.router)
 api_router.include_router(ws_ticket.router)
 api_router.include_router(notifications.router)
 api_router.include_router(broker_credentials.router)

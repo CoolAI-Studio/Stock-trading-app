@@ -361,3 +361,15 @@ export interface BrokerCostPreset {
   sell_tax_rate: string
   note: string
 }
+
+/** One symbol on the dashboard's quote table.
+ *
+ * In the database rather than the browser: it used to live in localStorage,
+ * so it was empty on the phone, empty on a second computer, and gone after
+ * clearing browsing data. */
+export interface WatchlistItem {
+  id: number
+  symbol: string
+  data_source: DataSource
+  created_at: string
+}

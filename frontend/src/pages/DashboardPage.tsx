@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { TradingViewWidget } from '../components/TradingViewWidget'
 import { QueryError } from '../components/QueryError'
-import type { Order, Position, Quote, Strategy } from '../lib/types'
+import type { Order, Position, Quote, Strategy, WatchlistItem } from '../lib/types'
 
-const WATCHLIST_KEY = 'trading_app_watchlist'
+/** The old browser-local list. Read once, uploaded, then removed -- without
+ * this the owner's existing watch list simply vanishes on the deploy that
+ * moves it into the database, which is a bad way to learn it used to be
+ * local. */
+const LEGACY_WATCHLIST_KEY = 'trading_app_watchlist'
 
-function loadWatchlist(): string[] {
+function readLegacyWatchlist(): string[] {
   try {
-    const raw = localStorage.getItem(WATCHLIST_KEY)
+    const raw = localStorage.getItem(LEGACY_WATCHLIST_KEY)
     return raw ? (JSON.parse(raw) as string[]) : []
   } catch {
     return []
@@ -39,12 +43,43 @@ export function DashboardPage() {
     queryFn: () => api.get<Order[]>('/api/orders?status=pending'),
   })
 
-  const [watchlist, setWatchlist] = useState<string[]>(loadWatchlist)
   const [searchInput, setSearchInput] = useState('')
+  const queryClient = useQueryClient()
 
+  const watchlistQuery = useQuery({
+    queryKey: ['watchlist'],
+    queryFn: () => api.get<WatchlistItem[]>('/api/watchlist'),
+  })
+  const watchlist = useMemo(
+    () => (watchlistQuery.data ?? []).map((item) => item.symbol),
+    [watchlistQuery.data],
+  )
+
+  const addMutation = useMutation({
+    mutationFn: (symbol: string) => api.post('/api/watchlist', { symbol }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
+  })
+  const removeMutation = useMutation({
+    mutationFn: (symbol: string) => api.delete(`/api/watchlist/${symbol}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
+  })
+
+  // One-time move of whatever the browser was holding. Runs after the server
+  // list has loaded so it cannot race it, and clears the key afterwards so a
+  // symbol the owner later removes does not come back on the next visit.
   useEffect(() => {
-    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(watchlist))
-  }, [watchlist])
+    if (!watchlistQuery.isSuccess) return
+    const legacy = readLegacyWatchlist()
+    if (legacy.length === 0) return
+    const known = new Set((watchlistQuery.data ?? []).map((item) => item.symbol))
+    for (const symbol of legacy) {
+      if (!known.has(symbol)) addMutation.mutate(symbol)
+    }
+    localStorage.removeItem(LEGACY_WATCHLIST_KEY)
+    // addMutation is stable for this purpose and including it would re-run
+    // the move on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlistQuery.isSuccess, watchlistQuery.data])
 
   const symbols = useMemo(() => {
     const set = new Set<string>()
@@ -65,13 +100,13 @@ export function DashboardPage() {
   function addToWatchlist(rawSymbol: string) {
     const symbol = rawSymbol.trim().toUpperCase()
     if (!symbol) return
-    setWatchlist((prev) => (prev.includes(symbol) ? prev : [...prev, symbol]))
+    addMutation.mutate(symbol)
     setSelectedSymbol(symbol)
     setSearchInput('')
   }
 
   function removeFromWatchlist(symbol: string) {
-    setWatchlist((prev) => prev.filter((s) => s !== symbol))
+    removeMutation.mutate(symbol)
   }
 
   const failed = [strategiesQuery, positionsQuery, pendingQuery].find((q) => q.isError)

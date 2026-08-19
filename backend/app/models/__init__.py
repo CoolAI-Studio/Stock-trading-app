@@ -12,4 +12,5 @@ from app.models.position import Position  # noqa: F401
 from app.models.risk import RiskSettings  # noqa: F401
 from app.models.strategy import Strategy, StrategyAlert  # noqa: F401
 from app.models.user import User  # noqa: F401
+from app.models.watchlist import WatchlistItem  # noqa: F401,E402
 from app.models.webhook import TradingViewWebhookLog  # noqa: F401
