@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from datetime import UTC
 
 from sqlalchemy.orm import Session
 
@@ -8,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
+from app.models.user import User
 from app.services.events import Event
 from app.services.notification.email import EmailSender
 from app.services.notification.line import LineSender
@@ -42,6 +44,10 @@ class DispatchResult:
 
     delivered: int = 0
     failed: int = 0
+    # Held for a quiet window and queued for when it ends. Counted apart from
+    # `failed` because nothing went wrong -- and apart from `delivered`
+    # because the owner has not seen it yet.
+    deferred: int = 0
     error: str | None = None
 
     @property
@@ -92,7 +98,7 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
 
     # Imported here rather than at module scope: retry.py reads SENDERS from
     # this module, so a top-level import in both directions is a cycle.
-    from app.services.notification import retry
+    from app.services.notification import quiet_hours, retry
 
     result = DispatchResult()
     owns_session = db is None
@@ -110,6 +116,8 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
 
         message = _format_message(event)
         order_id = event.data.get("order_id")
+        owner = session.get(User, user_id)
+        owner_timezone = owner.timezone if owner else quiet_hours.DEFAULT_TIMEZONE
 
         for channel in channels:
             if channel.subscribed_events and event.type not in channel.subscribed_events:
@@ -117,6 +125,34 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
 
             sender = SENDERS.get(channel.channel_type)
             if sender is None:
+                continue
+
+            # Held, not dropped. The event that fires at 3am is often the one
+            # that mattered most, and the owner's alternative -- switching the
+            # channel off so it stops waking them -- is how the warnings stop
+            # arriving at all. Reuses the retry queue: the sweep delivers it
+            # once the window ends.
+            if quiet_hours.is_quiet(
+                channel.quiet_start_hour, channel.quiet_end_hour, owner_timezone
+            ):
+                due = quiet_hours.window_ends_at(
+                    channel.quiet_start_hour, channel.quiet_end_hour, owner_timezone
+                )
+                session.add(
+                    NotificationLog(
+                        user_id=user_id,
+                        channel_id=channel.id,
+                        order_id=order_id,
+                        event=event.type,
+                        status=NotificationStatus.FAILED,
+                        error=f"靜音時段，將在 {due.astimezone(UTC):%H:%M} UTC 之後送出",
+                        message=message,
+                        attempts=0,
+                        next_retry_at=due,
+                    )
+                )
+                session.commit()
+                result.deferred += 1
                 continue
 
             try:

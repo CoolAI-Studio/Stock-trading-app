@@ -39,6 +39,11 @@ class ChannelCreate(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     config: dict
     subscribed_events: list[str] | None = None
+    # Hours in the owner's own timezone during which this channel stays quiet.
+    # Both None means always on; a notification raised inside the window is
+    # held and delivered when it ends, never dropped.
+    quiet_start_hour: int | None = Field(default=None, ge=0, le=23)
+    quiet_end_hour: int | None = Field(default=None, ge=0, le=23)
 
 
 class ChannelUpdate(BaseModel):
@@ -46,6 +51,11 @@ class ChannelUpdate(BaseModel):
     config: dict | None = None
     is_enabled: bool | None = None
     subscribed_events: list[str] | None = None
+    # Hours in the owner's own timezone during which this channel stays quiet.
+    # Both None means always on; a notification raised inside the window is
+    # held and delivered when it ends, never dropped.
+    quiet_start_hour: int | None = Field(default=None, ge=0, le=23)
+    quiet_end_hour: int | None = Field(default=None, ge=0, le=23)
 
 
 class ChannelRead(BaseModel):
@@ -56,6 +66,8 @@ class ChannelRead(BaseModel):
     label: str
     is_enabled: bool
     subscribed_events: list[str] | None
+    quiet_start_hour: int | None
+    quiet_end_hour: int | None
     last_sent_at: UtcDatetime | None
     last_error: str | None
     # Masked, populated by the router -- config_encrypted itself is never

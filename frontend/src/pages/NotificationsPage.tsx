@@ -85,6 +85,84 @@ function EventPicker({
   )
 }
 
+/** A window in which this channel stays silent.
+ *
+ * US market hours are the middle of the night in Taipei, so a strategy firing
+ * at 03:00 makes the phone ring. Before this the only control was disabling
+ * the whole channel -- which takes the stop-loss alerts with it, and is how
+ * the warnings stop arriving altogether.
+ *
+ * Says out loud that nothing is thrown away, because "quiet hours" reads like
+ * "you will not be told" and here it means "you will be told at seven". */
+function QuietHours({
+  idPrefix,
+  startHour,
+  endHour,
+  onChange,
+}: {
+  idPrefix: string
+  startHour: number | null
+  endHour: number | null
+  onChange: (start: number | null, end: number | null) => void
+}) {
+  const on = startHour !== null && endHour !== null
+
+  return (
+    <div className="space-y-1">
+      <label className="flex items-center gap-2 text-sm text-slate-400">
+        <input
+          type="checkbox"
+          aria-label="設定靜音時段"
+          checked={on}
+          onChange={(e) => (e.target.checked ? onChange(23, 7) : onChange(null, null))}
+        />
+        設定靜音時段
+      </label>
+      {on && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label htmlFor={`${idPrefix}-quiet-start`} className="text-slate-400">
+            從
+          </label>
+          <select
+            id={`${idPrefix}-quiet-start`}
+            value={String(startHour)}
+            onChange={(e) => onChange(Number(e.target.value), endHour)}
+            className="rounded border border-slate-700 bg-slate-950 px-2 py-1"
+          >
+            {HOURS.map((h) => (
+              <option key={h} value={String(h)}>
+                {String(h).padStart(2, '0')}:00
+              </option>
+            ))}
+          </select>
+          <label htmlFor={`${idPrefix}-quiet-end`} className="text-slate-400">
+            到
+          </label>
+          <select
+            id={`${idPrefix}-quiet-end`}
+            value={String(endHour)}
+            onChange={(e) => onChange(startHour, Number(e.target.value))}
+            className="rounded border border-slate-700 bg-slate-950 px-2 py-1"
+          >
+            {HOURS.map((h) => (
+              <option key={h} value={String(h)}>
+                {String(h).padStart(2, '0')}:00
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <p className="text-xs text-slate-500">
+        {on
+          ? '這段時間這個管道不會響，但通知不會消失——時段一結束就補送。美股盤中是台灣的半夜，所以美股策略的訊號會延到早上才收到。'
+          : '不設就是隨時都會通知。'}
+      </p>
+    </div>
+  )
+}
+
+const HOURS = Array.from({ length: 24 }, (_, i) => i)
+
 const CHANNEL_LABEL: Record<ChannelType, string> = {
   line: 'LINE',
   telegram: 'Telegram',
@@ -163,6 +241,10 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
   const [label, setLabel] = useState(channel.label)
   const [isEnabled, setIsEnabled] = useState(channel.is_enabled)
   const [events, setEvents] = useState<string[] | null>(channel.subscribed_events)
+  const [quiet, setQuiet] = useState<[number | null, number | null]>([
+    channel.quiet_start_hour,
+    channel.quiet_end_hour,
+  ])
   const [botToken, setBotToken] = useState('')
   const [chatId, setChatId] = useState('')
   const [accessToken, setAccessToken] = useState('')
@@ -182,6 +264,8 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
         label,
         is_enabled: isEnabled,
         subscribed_events: events,
+        quiet_start_hour: quiet[0],
+        quiet_end_hour: quiet[1],
       }
       const config =
         channel.channel_type === 'telegram'
@@ -223,6 +307,12 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
         idPrefix={`edit-channel-${channel.id}`}
         selected={events}
         onChange={setEvents}
+      />
+      <QuietHours
+        idPrefix={`edit-channel-${channel.id}`}
+        startHour={quiet[0]}
+        endHour={quiet[1]}
+        onChange={(start, end) => setQuiet([start, end])}
       />
 
       <label className="flex items-center gap-2 text-sm">
@@ -458,6 +548,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
   const [channelType, setChannelType] = useState<ChannelType>('telegram')
   const [label, setLabel] = useState('')
   const [events, setEvents] = useState<string[] | null>(null)
+  const [quiet, setQuiet] = useState<[number | null, number | null]>([null, null])
   const [botToken, setBotToken] = useState('')
   const [chatId, setChatId] = useState('')
   const [accessToken, setAccessToken] = useState('')
@@ -483,6 +574,8 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           label,
           config,
           subscribed_events: events,
+          quiet_start_hour: quiet[0],
+          quiet_end_hour: quiet[1],
         })
       }
       const config =
@@ -496,6 +589,8 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         label,
         config,
         subscribed_events: events,
+        quiet_start_hour: quiet[0],
+        quiet_end_hour: quiet[1],
       })
     },
     onSuccess: () => {
@@ -534,6 +629,12 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
       </div>
 
       <EventPicker idPrefix="new-channel" selected={events} onChange={setEvents} />
+      <QuietHours
+        idPrefix="new-channel"
+        startHour={quiet[0]}
+        endHour={quiet[1]}
+        onChange={(start, end) => setQuiet([start, end])}
+      />
 
       {channelType === 'telegram' && (
         <>

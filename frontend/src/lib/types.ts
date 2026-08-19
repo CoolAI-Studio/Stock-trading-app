@@ -193,6 +193,11 @@ export interface NotificationChannel {
   label: string
   is_enabled: boolean
   subscribed_events: string[] | null
+  /** Hours in the owner's own timezone during which this channel stays
+   * silent. Both null means always on. A notification raised inside the
+   * window is held and delivered when it ends, never dropped. */
+  quiet_start_hour: number | null
+  quiet_end_hour: number | null
   last_sent_at: string | null
   last_error: string | null
   config_preview: string

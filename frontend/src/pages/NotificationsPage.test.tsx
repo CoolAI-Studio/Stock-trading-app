@@ -23,6 +23,8 @@ const CHANNEL: NotificationChannel = {
   label: 'phone',
   is_enabled: true,
   subscribed_events: null,
+  quiet_start_hour: null,
+  quiet_end_hour: null,
   last_sent_at: null,
   last_error: null,
   config_preview: 'telegram: bot_token=****abcd, chat_id=999',
@@ -34,6 +36,8 @@ const WEB_PUSH_CHANNEL: NotificationChannel = {
   label: 'my-laptop',
   is_enabled: true,
   subscribed_events: null,
+  quiet_start_hour: null,
+  quiet_end_hour: null,
   last_sent_at: null,
   last_error: null,
   config_preview: 'web_push: endpoint=https://push.example.com/x',
@@ -104,6 +108,8 @@ describe('NotificationsPage', () => {
         label: 'my-phone',
         config: { bot_token: 't123', chat_id: '555' },
         subscribed_events: null,
+        quiet_start_hour: null,
+        quiet_end_hour: null,
       }),
     )
   })
@@ -126,6 +132,8 @@ describe('NotificationsPage', () => {
         label: 'renamed',
         is_enabled: true,
         subscribed_events: null,
+        quiet_start_hour: null,
+        quiet_end_hour: null,
       }),
     )
   })
@@ -145,6 +153,8 @@ describe('NotificationsPage', () => {
         label: 'phone',
         is_enabled: true,
         subscribed_events: null,
+        quiet_start_hour: null,
+        quiet_end_hour: null,
         config: { bot_token: 'newtoken', chat_id: '' },
       }),
     )
@@ -185,6 +195,8 @@ describe('NotificationsPage', () => {
         label: 'my-laptop',
         config: { endpoint: 'https://push.example.com/x', p256dh: 'p', auth: 'a' },
         subscribed_events: null,
+        quiet_start_hour: null,
+        quiet_end_hour: null,
       }),
     )
   })
@@ -380,3 +392,67 @@ async function user_open_edit() {
   const user = userEvent.setup()
   await user.click(await screen.findByRole('button', { name: '編輯' }))
 }
+
+describe('not being woken at three in the morning', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('sends the window when one is set', async () => {
+    // The alternative the owner had was switching the channel off, which
+    // takes the stop-loss alerts with it.
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.type(screen.getByLabelText('名稱'), 'phone')
+    await user.type(screen.getByLabelText(/機器人權杖/), 't')
+    await user.type(screen.getByLabelText(/聊天室代號/), '1')
+    await user.click(screen.getByLabelText('設定靜音時段'))
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const payload = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
+    expect(payload.quiet_start_hour).toBe(23)
+    expect(payload.quiet_end_hour).toBe(7)
+  })
+
+  it('promises the notification is only delayed, not lost', async () => {
+    // "Quiet hours" reads as "you will not be told"; here it means "you will
+    // be told at seven", and that difference is the whole point.
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByLabelText('設定靜音時段'))
+
+    expect(screen.getByText(/時段一結束就補送/)).toBeInTheDocument()
+  })
+
+  it('warns that US market hours are the middle of the night here', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByLabelText('設定靜音時段'))
+
+    expect(screen.getByText(/美股盤中是台灣的半夜/)).toBeInTheDocument()
+  })
+
+  it('sends nulls when the window is switched back off', async () => {
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.type(screen.getByLabelText('名稱'), 'always-on')
+    await user.type(screen.getByLabelText(/機器人權杖/), 't')
+    await user.type(screen.getByLabelText(/聊天室代號/), '1')
+    await user.click(screen.getByLabelText('設定靜音時段'))
+    await user.click(screen.getByLabelText('設定靜音時段'))
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const payload = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
+    expect(payload.quiet_start_hour).toBeNull()
+  })
+})

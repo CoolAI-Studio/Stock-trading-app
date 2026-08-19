@@ -100,6 +100,8 @@ def create_channel(
         label=payload.label,
         config_encrypted=validated_config,
         subscribed_events=payload.subscribed_events,
+        quiet_start_hour=payload.quiet_start_hour,
+        quiet_end_hour=payload.quiet_end_hour,
     )
     db.add(channel)
     db.commit()
@@ -122,6 +124,10 @@ def update_channel(
         channel.is_enabled = payload.is_enabled
     if payload.subscribed_events is not None:
         channel.subscribed_events = payload.subscribed_events
+    # Sent explicitly on every save, so clearing the window is possible --
+    # `is not None` would make it one-way.
+    channel.quiet_start_hour = payload.quiet_start_hour
+    channel.quiet_end_hour = payload.quiet_end_hour
     if payload.config is not None:
         channel.config_encrypted = _validate_config(channel.channel_type, payload.config)
 

@@ -25,6 +25,11 @@ class NotificationChannel(TimestampMixin, Base):
     config_encrypted: Mapped[dict] = mapped_column(EncryptedJSON)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     subscribed_events: Mapped[list | None] = mapped_column(JSON, default=None)
+    # Hours in the owner's own timezone during which this channel stays
+    # silent. Both None means always on. Per channel rather than per account,
+    # because the point is to let email keep arriving while the phone sleeps.
+    quiet_start_hour: Mapped[int | None] = mapped_column(default=None)
+    quiet_end_hour: Mapped[int | None] = mapped_column(default=None)
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
 
