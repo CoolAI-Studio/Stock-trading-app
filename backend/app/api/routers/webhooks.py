@@ -4,11 +4,12 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_active_user
 from app.config import settings
 from app.db.session import get_db
 from app.models.enums import OrderSide, OrderSource
@@ -16,7 +17,11 @@ from app.models.mixins import utcnow
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.models.webhook import TradingViewWebhookLog
-from app.schemas.webhook import TradingViewAlert
+from app.schemas.webhook import (
+    TradingViewAlert,
+    TradingViewSetup,
+    TradingViewWebhookLogRead,
+)
 from app.services.signals import SignalIn, create_pending_order
 
 logger = logging.getLogger("app.webhooks")
@@ -222,3 +227,69 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
     _persist_audit(db, log)
 
     return {"ok": True, "created": result.created, "reason": result.reason}
+
+
+@router.get("/tradingview/logs", response_model=list[TradingViewWebhookLogRead])
+def list_webhook_logs(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_active_user),
+) -> list[TradingViewWebhookLog]:
+    """What TradingView actually sent.
+
+    These rows have been written on every authenticated call since the webhook
+    existed, and pruned on a schedule -- created and then deleted without
+    anybody ever having been able to read them. When an alert did not become
+    an order, the owner had no way to tell whether it arrived at all, whether
+    the secret was wrong, whether the JSON was malformed, or whether a risk
+    gate refused it.
+
+    Not filtered by user: a call that failed the secret or failed to parse has
+    no user attached, and those are exactly the rows somebody is looking for.
+    This deployment has one owner (see CLAUDE.md), so there is nobody else's
+    traffic to leak; the day that changes, this needs revisiting along with
+    the webhook's own single-tenant user resolution.
+    """
+    return (
+        db.query(TradingViewWebhookLog)
+        .order_by(TradingViewWebhookLog.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+@router.get("/tradingview/setup", response_model=TradingViewSetup)
+def tradingview_setup(_user: User = Depends(get_current_active_user)) -> TradingViewSetup:
+    """What to paste into TradingView.
+
+    Nothing told the owner the URL, the field names, or that the message needs
+    an `id` -- which is the only thing standing between this endpoint and a
+    replay of a captured alert. Served rather than documented, because a URL
+    in a docs page is a URL nobody finds.
+
+    The example is a template. Printing the real shared secret into a response
+    would put it in every browser cache and every screenshot of this page.
+    """
+    return TradingViewSetup(
+        url=f"{settings.PUBLIC_BASE_URL.rstrip('/')}/api/webhooks/tradingview",
+        example_message=(
+            "{\n"
+            '  "secret": "<你的 TV_WEBHOOK_SECRET>",\n'
+            '  "symbol": "{{ticker}}",\n'
+            '  "action": "buy",\n'
+            '  "quantity": 1000,\n'
+            '  "price": {{close}},\n'
+            '  "id": "{{timenow}}"\n'
+            "}"
+        ),
+        notes=[
+            "把上面那段貼進 TradingView 警報的「訊息」欄，網址貼進 Webhook URL。",
+            "secret 要換成部署時設定的 TV_WEBHOOK_SECRET，不是這裡顯示的字樣。",
+            "id 一定要填。同一個 id 只會建立一次訂單——沒有它，任何人只要重送一次"
+            "抄到的訊息就能重複下單。用 {{timenow}} 最省事。",
+            "symbol 用 {{ticker}} 會自動帶入該張圖的代號；台股要確認是 2330.TW 這種格式。",
+            "送出後可以在下面的收件紀錄看到它有沒有進來、以及被擋在哪一關。",
+        ],
+    )

@@ -555,7 +555,7 @@ describe('StrategiesPage', () => {
   it('lists the alert history newest first', async () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
-      if (path === '/api/alerts') {
+      if (path.startsWith('/api/alerts')) {
         return [
           { ...ALERT, id: 8, side: 'sell', price: '190', created_at: '2026-08-18T02:00:00Z' },
           ALERT,
@@ -577,7 +577,7 @@ describe('StrategiesPage', () => {
   it('marks an alert the owner never actually received', async () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
-      if (path === '/api/alerts') return [{ ...ALERT, status: 'failed', error: 'timeout' }] as never
+      if (path.startsWith('/api/alerts')) return [{ ...ALERT, status: 'failed', error: 'timeout' }] as never
       return [] as never
     })
     renderPage()

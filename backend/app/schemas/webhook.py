@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from app.schemas.common import UtcDatetime
 
 
 class TradingViewAlert(BaseModel):
@@ -19,3 +21,28 @@ class TradingViewAlert(BaseModel):
         if normalized not in ("buy", "sell"):
             raise ValueError("action must be 'buy' or 'sell'")
         return normalized
+
+
+class TradingViewWebhookLogRead(BaseModel):
+    """One recorded call. Failures are included deliberately -- a wrong secret
+    or malformed JSON is precisely the row the owner is looking for."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    received_at: UtcDatetime
+    remote_ip: str | None
+    signature_valid: bool
+    parsed_ok: bool
+    raw_body: str
+    order_id: int | None
+    error: str | None
+
+
+class TradingViewSetup(BaseModel):
+    """What to paste into TradingView. Served rather than documented, because
+    a URL in a docs page is a URL nobody finds."""
+
+    url: str
+    example_message: str
+    notes: list[str]

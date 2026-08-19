@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: '/orders', label: '訂單' },
   { to: '/positions', label: '部位' },
   { to: '/notifications', label: '通知' },
+  { to: '/webhooks', label: 'TradingView' },
   { to: '/risk-settings', label: '風險設定' },
   { to: '/broker-settings', label: '券商設定' },
 ]

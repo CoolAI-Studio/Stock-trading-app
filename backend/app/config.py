@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     # whenever the owner next notices no orders have appeared.
     HEALTH_MAX_EMPTY_POLLS: int = 20
 
+    # This deployment's own public address, used to tell the owner what URL to
+    # paste into TradingView. Not derivable from a request: the app sits
+    # behind a proxy, so the Host header is whatever that proxy forwards.
+    # Wrong here just means the setup panel shows a URL they have to correct,
+    # never a broken request.
+    PUBLIC_BASE_URL: str = "http://localhost:8000"
+
     # A manual-confirm pending order older than this is stale and gets
     # auto-expired by the worker loop rather than sitting there forever.
     PENDING_ORDER_EXPIRY_MINUTES: int = 180

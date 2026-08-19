@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
+import { Pager } from '../components/Pager'
 import { ExportButton } from '../components/ExportButton'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
@@ -239,6 +240,8 @@ const RISK_OVERRIDE_HELP =
  * directions -- a strategy meant to run without a stop-loss silently falling
  * back on the global one, or vice versa -- so neither may be left to be
  * inferred. */
+const ALERT_PAGE_SIZE = 50
+
 const RISK_THREE_STATES = [
   '留空＝沿用全域設定',
   '勾開關＝這個策略關掉它（不限制／不設停損）',
@@ -943,9 +946,21 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
 function AlertHistory({ strategies }: { strategies: Strategy[] }) {
   // Already newest-first from the API; rendered in that order so the last
   // thing a strategy said is the first thing on screen.
+  // The whole point of 只提醒 mode is watching one strategy to see whether it
+  // is any good, and every strategy's alerts were mixed into one table that
+  // stopped at fifty. Two strategies in and they drown each other out.
+  const [alertStrategyId, setAlertStrategyId] = useState('')
+  const [alertOffset, setAlertOffset] = useState(0)
   const alertsQuery = useQuery({
-    queryKey: ['strategy-alerts'],
-    queryFn: () => api.get<StrategyAlert[]>('/api/alerts'),
+    queryKey: ['strategy-alerts', alertStrategyId, alertOffset],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        limit: String(ALERT_PAGE_SIZE),
+        offset: String(alertOffset),
+      })
+      if (alertStrategyId) params.set('strategy_id', alertStrategyId)
+      return api.get<StrategyAlert[]>(`/api/alerts?${params.toString()}`)
+    },
   })
   const alerts = alertsQuery.data ?? []
   const alertQueryClient = useQueryClient()
@@ -966,7 +981,33 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-300">提醒紀錄</h2>
-        {alerts.length > 0 && <ExportButton resource="alerts" label="匯出 CSV" />}
+        <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="alert-strategy-filter" className="text-sm text-slate-400">
+            只看
+          </label>
+          <select
+            id="alert-strategy-filter"
+            value={alertStrategyId}
+            onChange={(e) => {
+              setAlertStrategyId(e.target.value)
+              // Keeping the page would show an empty page 2 of a one-page
+              // result.
+              setAlertOffset(0)
+            }}
+            className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+          >
+            <option value="">全部策略</option>
+            {/* The symbol is on the option too: two strategies can share a
+                name prefix, and this is the only place they appear side by
+                side with nothing else to tell them apart. */}
+            {strategies.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {s.name}（{s.symbol}）
+              </option>
+            ))}
+          </select>
+          {alerts.length > 0 && <ExportButton resource="alerts" label="匯出 CSV" />}
+        </div>
         {alerts.length > 0 && (
           <DeleteButton
             what="全部的提醒紀錄"
@@ -1035,6 +1076,14 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
             ))}
           </tbody>
         </table>
+      )}
+      {alerts.length > 0 && (
+        <Pager
+          offset={alertOffset}
+          pageSize={ALERT_PAGE_SIZE}
+          shown={alerts.length}
+          onChange={setAlertOffset}
+        />
       )}
     </div>
   )

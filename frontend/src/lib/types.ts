@@ -373,3 +373,24 @@ export interface WatchlistItem {
   data_source: DataSource
   created_at: string
 }
+
+/** One recorded TradingView call. Failures are included on purpose -- a wrong
+ * secret or malformed JSON is precisely the row somebody is looking for. */
+export interface WebhookLog {
+  id: number
+  received_at: string
+  remote_ip: string | null
+  signature_valid: boolean
+  parsed_ok: boolean
+  raw_body: string
+  order_id: number | null
+  error: string | null
+}
+
+/** What to paste into TradingView. Served rather than documented, because a
+ * URL in a docs page is a URL nobody finds. */
+export interface WebhookSetup {
+  url: string
+  example_message: string
+  notes: string[]
+}
