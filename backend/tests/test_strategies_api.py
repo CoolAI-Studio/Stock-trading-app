@@ -168,11 +168,19 @@ def test_cannot_access_another_users_strategy(auth_client, client, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_list_samples_returns_ma5_sample(auth_client):
+def test_list_samples_serves_something_loadable(auth_client):
+    """Deliberately not pinned to a filename. What the samples are is a
+    product decision that has already changed once; what matters here is that
+    the 從範例載入 button has something to load and that each entry carries
+    the source it claims to. tests/test_sample_strategies.py is where the
+    samples themselves are held to a standard."""
     resp = auth_client.get("/api/strategies/samples")
     assert resp.status_code == 200
-    names = [s["filename"] for s in resp.json()]
-    assert "ma5_cross.py" in names
+    samples = resp.json()
+    assert samples
+    for sample in samples:
+        assert sample["filename"].endswith(".py")
+        assert "class Strategy" in sample["source_code"]
 
 
 def test_get_one_strategy_returns_its_source_code(auth_client):

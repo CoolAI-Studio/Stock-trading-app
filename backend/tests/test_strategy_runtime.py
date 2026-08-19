@@ -204,12 +204,12 @@ class Strategy:
     assert loaded.on_tick(100.0) == "HOLD"
 
 
-@pytest.mark.parametrize("sample", ["ma5_cross.py", "rsi_threshold.py"])
-def test_shipped_samples_still_compile_and_run_unchanged(sample):
-    loaded = compile_strategy((_SAMPLES_DIR / sample).read_text())
-    signals = [loaded.on_tick(100.0 + (i % 7) - 3) for i in range(40)]
-    assert signals  # ran to completion under the sandbox
-    assert set(signals) <= {"BUY", "SELL", "HOLD"}
+# The shipped samples used to be asserted here, pinned to on_tick and to two
+# filenames. They run on candles now -- on purpose, because a "5-day moving
+# average" written against on_tick is really the average of five quotes -- and
+# tests/test_sample_strategies.py holds every sample to a stronger standard:
+# it compiles, it uses on_bar, it calls only indicators that exist, it declares
+# its warm-up, and at least one of them actually fires.
 
 
 # --- on_tick timeout --------------------------------------------------------

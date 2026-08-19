@@ -187,7 +187,14 @@ def generate_strategy(
 def list_samples(user: User = Depends(get_current_active_user)) -> list[SampleStrategyInfo]:
     samples = []
     for path in sorted(_SAMPLES_DIR.glob("*.py")):
-        samples.append(SampleStrategyInfo(filename=path.name, source_code=path.read_text()))
+        # encoding pinned, not left to the platform default: the samples
+        # carry Traditional Chinese comments, and read_text() on a Windows
+        # machine defaults to cp950 and raises. It happens to work on the
+        # Linux container, so this would have been a bug only the owner's own
+        # laptop ever saw.
+        samples.append(
+            SampleStrategyInfo(filename=path.name, source_code=path.read_text(encoding="utf-8"))
+        )
     return samples
 
 

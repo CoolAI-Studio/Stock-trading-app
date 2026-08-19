@@ -8,7 +8,6 @@ were closed before are re-checked here THROUGH the new object.
 
 import pytest
 
-from app.api.routers.strategies import _SAMPLES_DIR
 from app.services.indicators import catalogue, momentum
 from app.services.market_data.base import Timeframe, bars_from_closes
 from app.services.strategy_generator import build_system_prompt
@@ -218,16 +217,25 @@ def test_a_strategy_cannot_replace_an_indicator_for_everyone_else():
         loaded.on_tick(100.0)
 
 
-def test_existing_tick_strategies_still_compile_untouched():
-    """on_tick is not going away and the shipped samples must keep working
-    exactly as they did before indicators existed."""
-    sources = [path.read_text() for path in sorted(_SAMPLES_DIR.glob("*.py"))]
-    assert sources
+def test_a_tick_strategy_still_compiles_without_touching_indicators():
+    """on_tick is not going away -- plenty of strategies are written against a
+    live quote, and adding the indicator namespace must not have changed how
+    they load. Written inline rather than read from the samples directory,
+    which now ships on_bar strategies on purpose."""
+    source = """
+class Strategy:
+    def __init__(self):
+        self.name = "plain_tick"
+        self.symbol = "AAPL"
+        self.prices = []
 
-    for source in sources:
-        loaded = compile_strategy(source)
-        assert loaded.entry_point == "on_tick"
-        assert [loaded.on_tick(price) for price in CLOSES]
+    def on_tick(self, current_price: float) -> str:
+        self.prices.append(current_price)
+        return "BUY" if len(self.prices) > 3 else "HOLD"
+"""
+    loaded = compile_strategy(source)
+    assert loaded.entry_point == "on_tick"
+    assert [loaded.on_tick(price) for price in CLOSES]
 
 
 # --- the AI has to be told the library exists --------------------------------

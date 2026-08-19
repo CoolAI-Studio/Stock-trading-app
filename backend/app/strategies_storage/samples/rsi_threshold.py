@@ -1,47 +1,37 @@
 class Strategy:
+    """RSI 超賣買進、超買賣出。
+
+    RSI 用 indicators.rsi，它跟看盤軟體一樣用 Wilder 平滑法。自己用簡單平均
+    寫一版是最常見的錯誤——數字會很接近但不相等，於是你的策略、回測和
+    TradingView 三邊各說各話。
+    """
+
     def __init__(self):
-        self.name = "RSI_14_Threshold"
-        self.symbol = "AAPL"
+        self.name = "RSI 超買超賣"
+        self.symbol = "2330.TW"
         self.period = 14
         self.oversold = 30
         self.overbought = 70
-        self.prices = []
+        self.closes = []
 
-    def _rsi(self) -> float | None:
-        if len(self.prices) <= self.period:
-            return None
+        # Wilder 平滑要暖身，14 根只夠算出第一個值，給它兩倍比較穩。
+        self.warmup_bars = 30
+        self.timeframe = "1d"
 
-        window = self.prices[-(self.period + 1) :]
-        gains = []
-        losses = []
-        # window and window[1:] are intentionally different lengths (the
-        # classic pairwise-zip idiom) -- strict=True would raise every call.
-        for prev, curr in zip(window, window[1:], strict=False):
-            change = curr - prev
-            if change >= 0:
-                gains.append(change)
-            else:
-                losses.append(-change)
+    def on_bar(self, bar) -> str:
+        self.closes.append(bar.close)
+        if len(self.closes) > self.period * 6:
+            self.closes.pop(0)
 
-        avg_gain = sum(gains) / self.period
-        avg_loss = sum(losses) / self.period
-        if avg_loss == 0:
-            return 100.0
-
-        rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
-
-    def on_tick(self, current_price: float) -> str:
-        self.prices.append(current_price)
-        if len(self.prices) > self.period * 3:
-            self.prices.pop(0)
-
-        rsi = self._rsi()
-        if rsi is None:
+        if len(self.closes) <= self.period:
             return "HOLD"
 
-        if rsi < self.oversold:
+        latest = indicators.rsi(self.closes, self.period)[-1]  # noqa: F821
+        if latest is None:
+            return "HOLD"
+
+        if latest < self.oversold:
             return "BUY"
-        if rsi > self.overbought:
+        if latest > self.overbought:
             return "SELL"
         return "HOLD"
