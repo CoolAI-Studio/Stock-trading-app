@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { DeleteButton } from '../components/DeleteButton'
 import { ApiError, api } from '../lib/api'
 import { isPushSupported, subscribeToPush, unsubscribeFromPush } from '../lib/push'
 import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
@@ -591,12 +592,40 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
     queryFn: () => api.get<NotificationLog[]>('/api/notifications/logs'),
   })
   const logs = logsQuery.data ?? []
+  const logQueryClient = useQueryClient()
+
+  const deleteLog = useMutation({
+    mutationFn: (id: number) => api.delete(`/api/notifications/logs/${id}`),
+    onSuccess: () => logQueryClient.invalidateQueries({ queryKey: ['notification-logs'] }),
+  })
+
+  const clearLogs = useMutation({
+    mutationFn: () => api.delete<{ deleted: number }>('/api/notifications/logs'),
+    onSuccess: () => logQueryClient.invalidateQueries({ queryKey: ['notification-logs'] }),
+  })
   const labelFor = (channelId: number) =>
     channels.find((c) => c.id === channelId)?.label ?? `#${channelId}`
 
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-semibold text-slate-300">發送紀錄</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-300">發送紀錄</h2>
+        {logs.length > 0 && (
+          // Nothing else prunes this table, so "clear" is the only thing
+          // standing between a few channels running for a year and tens of
+          // thousands of rows on a free-tier database. Anything still queued
+          // for retry survives -- that is a delivery the owner has not had
+          // yet, not history.
+          <DeleteButton
+            what="全部的發送紀錄（還在重送的不會被刪）"
+            label="清空全部"
+            tone="loud"
+            onConfirm={() => clearLogs.mutate()}
+            pending={clearLogs.isPending}
+            error={clearLogs.error}
+          />
+        )}
+      </div>
       {logs.length === 0 && logsQuery.isSuccess && (
         <p className="text-slate-500">目前沒有發送紀錄。</p>
       )}
@@ -609,6 +638,7 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
               <th className="pb-2 font-normal">狀態</th>
               <th className="pb-2 font-normal">錯誤</th>
               <th className="pb-2 font-normal">時間</th>
+              <th className="pb-2 font-normal">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -620,7 +650,17 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
                   {STATUS_LABEL[log.status]}
                 </td>
                 <td className="py-2 pr-4 text-red-400">{log.error ?? ''}</td>
-                <td className="py-2 text-slate-500">{new Date(log.created_at).toLocaleString()}</td>
+                <td className="py-2 pr-4 text-slate-500">
+                  {new Date(log.created_at).toLocaleString()}
+                </td>
+                <td className="py-2">
+                  <DeleteButton
+                    what="這筆發送紀錄"
+                    onConfirm={() => deleteLog.mutate(log.id)}
+                    pending={deleteLog.isPending && deleteLog.variables === log.id}
+                    error={deleteLog.variables === log.id ? deleteLog.error : null}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

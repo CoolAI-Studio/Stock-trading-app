@@ -156,3 +156,53 @@ def reject_order(
 
     _publish_order_updated(order)
     return order
+
+
+# The two statuses that must never be deleted, and why. Kept as data rather
+# than an if-chain so the message the owner reads lives next to the rule.
+_UNDELETABLE = {
+    OrderStatus.PENDING: (
+        "這筆訂單還在等你決定，不能直接刪除。請按「拒絕」——拒絕會留下紀錄，"
+        "刪掉則會讓這個訊號從此查不到。"
+    ),
+    OrderStatus.CONFIRMED: (
+        "這筆訂單已經成交、動到了持倉，也算進策略的本金額度裡，刪掉會讓帳目對不起來。"
+        "如果數量或成本記錯了，請到「部位」頁調整。"
+    ),
+}
+
+
+@router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_order(
+    order_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> None:
+    """Remove a decided, inert order from the history.
+
+    Rejected, expired and failed rows are clutter -- they moved nothing and
+    nothing reads them. Confirmed and pending rows are refused: a confirmed
+    order moved a position and is counted by the per-strategy capital gate
+    (services/signals.py::_strategy_committed_cost), so deleting it silently
+    frees capital still being held and leaves the position disagreeing with
+    the order history, neither of which is visible from this page.
+    """
+    order = _get_owned_order(db, user, order_id)
+    refusal = _UNDELETABLE.get(order.status)
+    if refusal:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refusal)
+    db.delete(order)
+    db.commit()
+
+
+@router.delete("")
+def clear_order_history(
+    db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> dict[str, int]:
+    """Clear the inert history in one go, leaving confirmed and pending alone
+    for the same reasons."""
+    deleted = (
+        db.query(Order)
+        .filter(Order.user_id == user.id, Order.status.notin_(list(_UNDELETABLE)))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": deleted}

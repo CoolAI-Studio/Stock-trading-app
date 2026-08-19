@@ -229,3 +229,40 @@ def get_backtest(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backtest run not found")
     return run
+
+
+@router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_backtest(
+    run_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> None:
+    """Throw one run away.
+
+    The list keeps only the most recent thirty and evicts silently, so without
+    this the run worth keeping as a baseline is the one that disappears while
+    thirty parameter experiments stay. Nothing depends on a run -- it is a
+    snapshot, and it already survives its strategy being deleted -- so this is
+    a plain delete.
+    """
+    run = (
+        db.query(BacktestRun)
+        .filter(BacktestRun.id == run_id, BacktestRun.user_id == user.id)
+        .first()
+    )
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backtest run not found")
+    db.delete(run)
+    db.commit()
+
+
+@router.delete("")
+def clear_backtests(
+    strategy_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> dict[str, int]:
+    query = db.query(BacktestRun).filter(BacktestRun.user_id == user.id)
+    if strategy_id is not None:
+        query = query.filter(BacktestRun.strategy_id == strategy_id)
+    deleted = query.delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}

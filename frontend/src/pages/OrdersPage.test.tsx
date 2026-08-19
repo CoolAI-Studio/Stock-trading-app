@@ -10,7 +10,7 @@ import type { Order } from '../lib/types'
 // real class -- a stub would never match `instanceof`.
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
 }))
 
 const PENDING_ORDER: Order = {
@@ -238,5 +238,48 @@ describe('when confirming or rejecting fails', () => {
     await user.click(await screen.findByRole('button', { name: '拒絕' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('already confirmed')
+  })
+})
+
+describe('deleting from the order history', () => {
+  function historyOf(status: Order['status']) {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [] as never
+      return [{ ...PENDING_ORDER, id: 9, status }] as never
+    })
+  }
+
+  async function openHistory() {
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /歷史/ }))
+    return user
+  }
+
+  it('offers delete on a rejected order', async () => {
+    historyOf('rejected')
+    await openHistory()
+    expect(await screen.findByRole('button', { name: '刪除' })).toBeInTheDocument()
+  })
+
+  it('does not offer delete on a confirmed order', async () => {
+    // The backend refuses it: a confirmed order moved a position and is
+    // counted by the per-strategy capital gate. Better not to offer a button
+    // whose only outcome is an error.
+    historyOf('confirmed')
+    await openHistory()
+    await screen.findByText('AAPL')
+    expect(screen.queryByRole('button', { name: '刪除' })).not.toBeInTheDocument()
+  })
+
+  it('deletes after confirming', async () => {
+    historyOf('expired')
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const user = await openHistory()
+    await user.click(await screen.findByRole('button', { name: '刪除' }))
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/orders/9'))
   })
 })

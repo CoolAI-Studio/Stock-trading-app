@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { ActionError } from '../components/ActionError'
+import { DeleteButton } from '../components/DeleteButton'
 import { QueryError } from '../components/QueryError'
 import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
 
@@ -219,6 +220,18 @@ function filledLabel(order: Order): string {
 }
 
 function HistoryRow({ order }: { order: Order }) {
+  const queryClient = useQueryClient()
+  const deleteMutation = useMutation({
+    mutationFn: () => api.delete(`/api/orders/${order.id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+  })
+
+  // Confirmed and pending rows are refused by the backend on purpose -- a
+  // confirmed order moved a position and is counted by the capital gate --
+  // so the button is not offered for them rather than being offered and
+  // failing.
+  const deletable = order.status !== 'confirmed' && order.status !== 'pending'
+
   return (
     <tr className="border-b border-slate-800 text-slate-300">
       <td className="py-2 pr-4 font-medium">{order.symbol}</td>
@@ -228,7 +241,23 @@ function HistoryRow({ order }: { order: Order }) {
       </td>
       <td className="py-2 pr-4">{order.fill_price ?? '—'}</td>
       <td className="py-2 pr-4">{STATUS_LABEL[order.status]}</td>
-      <td className="py-2 text-slate-500">{new Date(order.created_at).toLocaleString()}</td>
+      <td className="py-2 pr-4 text-slate-500">
+        {new Date(order.created_at).toLocaleString()}
+      </td>
+      <td className="py-2">
+        {deletable ? (
+          <DeleteButton
+            what={`${order.symbol} 這筆${STATUS_LABEL[order.status]}訂單`}
+            onConfirm={() => deleteMutation.mutate()}
+            pending={deleteMutation.isPending}
+            error={deleteMutation.error}
+          />
+        ) : (
+          <span className="text-xs text-slate-600" title="已成交的訂單動到持倉，刪掉帳目會對不起來">
+            —
+          </span>
+        )}
+      </td>
     </tr>
   )
 }
@@ -308,6 +337,7 @@ export function OrdersPage() {
               <th className="pb-2 font-normal">成交價</th>
               <th className="pb-2 font-normal">狀態</th>
               <th className="pb-2 font-normal">建立時間</th>
+              <th className="pb-2 font-normal">操作</th>
             </tr>
           </thead>
           <tbody>

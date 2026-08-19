@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
@@ -25,3 +25,39 @@ def list_alerts(
     if strategy_id is not None:
         query = query.filter(StrategyAlert.strategy_id == strategy_id)
     return query.order_by(StrategyAlert.id.desc()).offset(offset).limit(limit).all()
+
+
+@router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_alert(
+    alert_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> None:
+    """Deleting an alert row is safe but not free of meaning: the throttle in
+    services/alerts.py measures from the last *delivered* alert, so removing
+    the newest delivered row lets the same signal notify again sooner. That is
+    the reasonable reading of "I cleared this" -- it is history the owner is
+    discarding, not a promise the system made."""
+    alert = (
+        db.query(StrategyAlert)
+        .filter(StrategyAlert.id == alert_id, StrategyAlert.user_id == user.id)
+        .first()
+    )
+    if alert is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+    db.delete(alert)
+    db.commit()
+
+
+@router.delete("")
+def clear_alerts(
+    strategy_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> dict[str, int]:
+    """Row by row is unusable here -- a watch-only strategy left running for a
+    week produces hundreds."""
+    query = db.query(StrategyAlert).filter(StrategyAlert.user_id == user.id)
+    if strategy_id is not None:
+        query = query.filter(StrategyAlert.strategy_id == strategy_id)
+    deleted = query.delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": deleted}

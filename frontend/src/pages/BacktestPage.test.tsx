@@ -471,3 +471,52 @@ describe('BacktestPage', () => {
     expect(api.get).toHaveBeenCalledWith('/api/backtests/11')
   })
 })
+
+describe('deleting a backtest run', () => {
+  beforeEach(() => {
+    // Call history only -- implementations set below survive.
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/backtests') return [HISTORY_ROW] as never
+      if (path === '/api/strategies') return [STRATEGY] as never
+      return [] as never
+    })
+  })
+
+  it('deletes one run after confirming', async () => {
+    // The list keeps only the most recent thirty and evicts silently, so
+    // without this the baseline run is the one that disappears while thirty
+    // parameter experiments stay.
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+
+    const row = (await screen.findByText(HISTORY_ROW.strategy_name)).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '刪除' }))
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith(`/api/backtests/${HISTORY_ROW.id}`))
+  })
+
+  it('keeps the run when the prompt is dismissed', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    renderPage()
+
+    const row = (await screen.findByText(HISTORY_ROW.strategy_name)).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '刪除' }))
+
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+
+  it('can clear the whole history at once', async () => {
+    vi.mocked(api.delete).mockResolvedValue({ deleted: 12 } as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '清空全部' }))
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/backtests'))
+  })
+})

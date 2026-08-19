@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { DeleteButton } from '../components/DeleteButton'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
   DataSource,
@@ -946,12 +947,35 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
     queryFn: () => api.get<StrategyAlert[]>('/api/alerts'),
   })
   const alerts = alertsQuery.data ?? []
+  const alertQueryClient = useQueryClient()
+
+  const deleteAlert = useMutation({
+    mutationFn: (id: number) => api.delete(`/api/alerts/${id}`),
+    onSuccess: () => alertQueryClient.invalidateQueries({ queryKey: ['alerts'] }),
+  })
+
+  const clearAlerts = useMutation({
+    mutationFn: () => api.delete<{ deleted: number }>('/api/alerts'),
+    onSuccess: () => alertQueryClient.invalidateQueries({ queryKey: ['alerts'] }),
+  })
   const nameFor = (strategyId: number) =>
     strategies.find((s) => s.id === strategyId)?.name ?? `#${strategyId}`
 
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-semibold text-slate-300">提醒紀錄</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-300">提醒紀錄</h2>
+        {alerts.length > 0 && (
+          <DeleteButton
+            what="全部的提醒紀錄"
+            label="清空全部"
+            tone="loud"
+            onConfirm={() => clearAlerts.mutate()}
+            pending={clearAlerts.isPending}
+            error={clearAlerts.error}
+          />
+        )}
+      </div>
       <p className="text-xs text-slate-500">
         只提醒策略發出過的訊號都記在這裡。這些都沒有下單，可以拿來回頭檢視這個策略準不準，再決定要不要讓它真的下單。
       </p>
@@ -968,6 +992,7 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
               <th className="pb-2 font-normal">方向</th>
               <th className="pb-2 font-normal">價格</th>
               <th className="pb-2 font-normal">通知</th>
+              <th className="pb-2 font-normal">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -987,7 +1012,7 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
                 {/* The signal still counts when scoring the strategy, but a
                     failed row is one the owner never saw -- unmarked it would
                     read as a notification that arrived. */}
-                <td className="py-2 text-slate-500">
+                <td className="py-2 pr-4 text-slate-500">
                   {alert.status === 'sent' ? (
                     '已送出'
                   ) : (
@@ -995,6 +1020,14 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
                       未送達
                     </span>
                   )}
+                </td>
+                <td className="py-2">
+                  <DeleteButton
+                    what={`${alert.symbol} 這筆提醒`}
+                    onConfirm={() => deleteAlert.mutate(alert.id)}
+                    pending={deleteAlert.isPending && deleteAlert.variables === alert.id}
+                    error={deleteAlert.variables === alert.id ? deleteAlert.error : null}
+                  />
                 </td>
               </tr>
             ))}

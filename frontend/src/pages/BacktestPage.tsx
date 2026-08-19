@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { DeleteButton } from '../components/DeleteButton'
 import { EquityCurveChart } from '../components/EquityCurveChart'
 import type {
   BacktestRun,
@@ -282,6 +283,24 @@ export function BacktestPage() {
     },
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.delete(`/api/backtests/${id}`),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['backtests'] })
+      // The open run is the one being looked at; leaving it on screen after
+      // its row is gone reads as the delete having failed.
+      setRun((current) => (current?.id === id ? null : current))
+    },
+  })
+
+  const clearMutation = useMutation({
+    mutationFn: () => api.delete<{ deleted: number }>('/api/backtests'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['backtests'] })
+      setRun(null)
+    },
+  })
+
   const openMutation = useMutation({
     mutationFn: (id: number) => api.get<BacktestRunDetail>(`/api/backtests/${id}`),
     onSuccess: (result) => {
@@ -421,7 +440,21 @@ export function BacktestPage() {
 
       {(historyQuery.data ?? []).length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-sm font-semibold text-slate-300">過去的回測</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-300">過去的回測</h2>
+            {/* Row by row is not enough here: the list keeps only the most
+                recent thirty and evicts silently, so clearing out a batch of
+                parameter experiments is the normal way to protect a baseline
+                run from being pushed off the end. */}
+            <DeleteButton
+              what="全部的回測紀錄"
+              label="清空全部"
+              tone="loud"
+              onConfirm={() => clearMutation.mutate()}
+              pending={clearMutation.isPending}
+              error={clearMutation.error}
+            />
+          </div>
           <table aria-label="過去的回測" className="w-full text-left text-sm">
             <thead className="text-slate-500">
               <tr>
@@ -450,7 +483,7 @@ export function BacktestPage() {
                   <td className="py-2 pr-4 text-slate-500">
                     {new Date(row.created_at).toLocaleString()}
                   </td>
-                  <td className="py-2">
+                  <td className="flex flex-wrap items-center gap-2 py-2">
                     <button
                       disabled={openMutation.isPending}
                       onClick={() => openMutation.mutate(row.id)}
@@ -458,6 +491,12 @@ export function BacktestPage() {
                     >
                       查看
                     </button>
+                    <DeleteButton
+                      what={`${row.strategy_name}（${row.symbol}）這筆回測`}
+                      onConfirm={() => deleteMutation.mutate(row.id)}
+                      pending={deleteMutation.isPending && deleteMutation.variables === row.id}
+                      error={deleteMutation.variables === row.id ? deleteMutation.error : null}
+                    />
                   </td>
                 </tr>
               ))}

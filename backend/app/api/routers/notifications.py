@@ -186,3 +186,41 @@ def get_vapid_public_key(user: User = Depends(get_current_active_user)) -> dict:
     user (auth is only required here to avoid an unauthenticated GET, not
     because the key itself is sensitive)."""
     return {"public_key": settings.VAPID_PUBLIC_KEY}
+
+
+@router.delete("/logs/{log_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_notification_log(
+    log_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> None:
+    log = (
+        db.query(NotificationLog)
+        .filter(NotificationLog.id == log_id, NotificationLog.user_id == user.id)
+        .first()
+    )
+    if log is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log entry not found")
+    db.delete(log)
+    db.commit()
+
+
+@router.delete("/logs")
+def clear_notification_logs(
+    db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> dict[str, int]:
+    """Clear the send history.
+
+    Every other log-like table here has a retention sweep; this one never had
+    one, so a few channels running for a year put tens of thousands of rows on
+    a free-tier database with no way to remove them.
+
+    Rows with a retry still due are kept: those are not history, they are
+    notifications the owner has not received yet, and dropping one drops the
+    delivery.
+    """
+    deleted = (
+        db.query(NotificationLog)
+        .filter(NotificationLog.user_id == user.id, NotificationLog.next_retry_at.is_(None))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": deleted}
