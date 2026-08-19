@@ -110,6 +110,13 @@ const ALERT: StrategyAlert = {
   created_at: '2026-08-18T01:00:00Z',
 }
 
+/** The number box, its off-switch and its state badge are one row, and every
+ * row says 沿用全域 or 已關閉 in the same words -- so asking which state a
+ * given knob is in means asking inside that knob's row. */
+function riskFieldRow(label: string): HTMLElement {
+  return screen.getByLabelText(label).closest('[data-risk-field]') as HTMLElement
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -786,20 +793,24 @@ describe('StrategiesPage', () => {
     )
     expect(screen.getByLabelText('停損百分比')).toHaveAttribute('placeholder', '沿用全域：0.05')
     expect(screen.getByLabelText('提醒間隔（秒）')).toHaveAttribute('placeholder', '沿用全域：900')
-    expect(screen.getByText(/留空＝沿用全域設定（目前 100000）/)).toBeInTheDocument()
+    // "this one is inheriting" used to be repeated in every field's help text.
+    // It now lives in the row's state badge, alongside 已關閉 and 自訂 -- the
+    // three states are only distinguishable if one place names all of them.
+    expect(within(riskFieldRow('本金')).getByText('沿用全域')).toBeInTheDocument()
   })
 
-  it('spells out that a blank box inherits while 0 means unlimited', async () => {
-    // For 本金 and 單筆最大金額 the two readings are expensive in opposite
-    // directions, so neither may be left to be inferred.
+  it('spells out the three states a per-strategy field can be in', async () => {
+    // Inherit and switched-off are expensive in opposite directions, so
+    // neither may be left to be inferred from an empty-looking box.
     const user = userEvent.setup()
     renderPage()
 
     await user.click(screen.getByRole('button', { name: '新增策略' }))
     await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
 
-    expect(screen.getByText(/空白的欄位＝繼續沿用全域設定，不是 0/)).toBeInTheDocument()
-    expect(screen.getByText(/填 0 的意思是「不限制」/)).toBeInTheDocument()
+    expect(screen.getByText(/留空＝沿用全域/)).toBeInTheDocument()
+    expect(screen.getByText(/勾開關＝這個策略關掉它/)).toBeInTheDocument()
+    expect(screen.getByText(/填數字＝只有這個策略用這個數字/)).toBeInTheDocument()
   })
 
   it('sends null for the override fields left blank so they keep inheriting', async () => {
@@ -905,5 +916,99 @@ describe('StrategiesPage', () => {
 
     const overriding = screen.getByText('own-risk').closest('tr')
     expect(within(overriding as HTMLElement).getByText('自訂')).toBeInTheDocument()
+  })
+  it('switches one knob off for this strategy alone and sends 0, not a blank', async () => {
+    // Blank means inherit here, so "off" cannot be expressed by emptying the
+    // box -- the strategy would silently go back on the global stop-loss.
+    vi.mocked(api.post).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'no-stop')
+    await user.type(screen.getByLabelText('股票代號'), 'TSLA')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+    await user.click(screen.getByLabelText('停損百分比：不設停損'))
+
+    expect(screen.getByLabelText('停損百分比')).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/strategies', {
+        name: 'no-stop',
+        symbol: 'TSLA',
+        source_code: 'class Strategy: pass',
+        alert_only: false,
+        capital: null,
+        stop_loss_pct: '0',
+        take_profit_pct: null,
+        max_position_qty: null,
+        max_order_notional: null,
+        max_pending_orders_per_symbol: null,
+        signal_cooldown_sec: null,
+        alert_interval_sec: null,
+      }),
+    )
+  })
+
+  it('keeps 沿用全域, 已關閉 and a number of its own visibly apart', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+    await user.type(screen.getByLabelText('本金'), '50000')
+    await user.click(screen.getByLabelText('停損百分比：不設停損'))
+
+    expect(within(riskFieldRow('本金')).getByText('自訂：50000')).toBeInTheDocument()
+    expect(within(riskFieldRow('停損百分比')).getByText('已關閉')).toBeInTheDocument()
+    expect(within(riskFieldRow('停利百分比')).getByText('沿用全域')).toBeInTheDocument()
+    // The ones still inheriting keep naming the number they inherit.
+    await waitFor(() =>
+      expect(screen.getByLabelText('停利百分比')).toHaveAttribute('placeholder', '沿用全域：0.1'),
+    )
+  })
+
+  it('opens a strategy whose stored override is 0 with the switch already on', async () => {
+    const SWITCHED_OFF: Strategy = { ...STRATEGY, stop_loss_pct: '0' }
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [SWITCHED_OFF] as never
+      if (path === '/api/strategies/1') {
+        return { ...SWITCHED_OFF, source_code: SAVED_SOURCE } as never
+      }
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByText('ma5-cross')
+    await user.click(screen.getByRole('button', { name: '編輯' }))
+
+    expect(screen.getByLabelText(RISK_OVERRIDE_LABEL)).toBeChecked()
+    expect(screen.getByLabelText('停損百分比：不設停損')).toBeChecked()
+    expect(screen.getByLabelText('停損百分比')).toBeDisabled()
+    expect(screen.getByLabelText('停損百分比')).toHaveValue('')
+    expect(within(riskFieldRow('停損百分比')).getByText('已關閉')).toBeInTheDocument()
+    // The other seven never opted in, so they are inheriting, not off.
+    expect(screen.getByLabelText('停利百分比')).toBeEnabled()
+    expect(within(riskFieldRow('停利百分比')).getByText('沿用全域')).toBeInTheDocument()
+  })
+
+  it('does not word a switched-off protection the way it words a cap', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
+
+    expect(screen.getByLabelText('停損百分比：不設停損')).toBeInTheDocument()
+    expect(screen.getByLabelText('停利百分比：不設停利')).toBeInTheDocument()
+    expect(screen.queryByLabelText('停損百分比：不限制')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('本金：不限制')).toBeInTheDocument()
+    expect(screen.getByLabelText('下單訊號冷卻時間（秒）：不冷卻')).toBeInTheDocument()
+    expect(screen.getByLabelText('提醒間隔（秒）：每次都通知')).toBeInTheDocument()
   })
 })

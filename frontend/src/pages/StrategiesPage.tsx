@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
-import { RISK_FIELDS, riskFieldHelp } from '../lib/riskFields'
+import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
   IndicatorCatalogue,
   OrderSide,
@@ -156,8 +156,16 @@ function AlertOnlyField({
 const RISK_OVERRIDE_LABEL = '使用個別風險設定'
 const RISK_OVERRIDE_HELP =
   '不打開的話，這個策略沿用「風險設定」頁的全域數字，跟現在完全一樣。打開之後，只填你真的要改的欄位就好。'
-const RISK_BLANK_MEANS_INHERIT =
-  '空白的欄位＝繼續沿用全域設定，不是 0。本金、最大持倉數量、單筆最大金額填 0 的意思是「不限制」，跟空白剛好相反，不要填錯。'
+/** Three states, and two of them look like an empty box unless the form says
+ * otherwise. Inheriting and switched-off are expensive in opposite
+ * directions -- a strategy meant to run without a stop-loss silently falling
+ * back on the global one, or vice versa -- so neither may be left to be
+ * inferred. */
+const RISK_THREE_STATES = [
+  '留空＝沿用全域設定',
+  '勾開關＝這個策略關掉它（不限制／不設停損）',
+  '填數字＝只有這個策略用這個數字',
+]
 
 /** One override box per knob, as raw text: what the owner typed, before it is
  * read as a number or as "leave this one alone". */
@@ -229,32 +237,69 @@ function RiskOverrideFields({
 
       {enabled && (
         <div className="space-y-3 rounded border border-slate-800 p-3">
-          <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
-            {RISK_BLANK_MEANS_INHERIT}
-          </p>
+          <ul className="list-inside list-disc rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+            {RISK_THREE_STATES.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
           {RISK_FIELDS.map((field) => {
             // Until the globals land there is no number to name; the box still
             // works and still means "inherit", it just cannot say what from.
             const inherited = globals ? String(globals[field.key]) : null
-            const help = riskFieldHelp(field)
+            const raw = values[field.key]
+            const off = isSwitchedOff(raw)
+            const protection = field.kind === 'protection'
+            const badge = off ? '已關閉' : raw.trim() === '' ? '沿用全域' : `自訂：${raw.trim()}`
             return (
-              <div key={field.key}>
-                <label htmlFor={`${idPrefix}-${field.key}`} className="text-sm text-slate-400">
-                  {field.label}
-                </label>
+              <div key={field.key} data-risk-field={field.key}>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor={`${idPrefix}-${field.key}`} className="text-sm text-slate-400">
+                    {field.label}
+                  </label>
+                  <span
+                    className={`rounded border px-2 py-0.5 text-xs ${
+                      off
+                        ? 'border-amber-700 bg-amber-950/40 text-amber-300'
+                        : raw.trim() === ''
+                          ? 'border-slate-700 text-slate-500'
+                          : 'border-sky-700 bg-sky-950/40 text-sky-300'
+                    }`}
+                  >
+                    {badge}
+                  </span>
+                </div>
                 <input
                   id={`${idPrefix}-${field.key}`}
-                  value={values[field.key]}
+                  // Switched off shows an empty disabled box, not a literal 0 --
+                  // the same reason the global page does it, so the two forms
+                  // cannot teach opposite readings of the same number.
+                  value={off ? '' : raw}
+                  disabled={off}
                   onChange={(e) => onChange({ ...values, [field.key]: e.target.value })}
                   placeholder={inherited === null ? '沿用全域' : `沿用全域：${inherited}`}
-                  className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+                  className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 disabled:opacity-50"
                 />
-                <p className="mt-1 text-xs text-slate-500">
-                  {inherited === null
-                    ? '留空＝沿用全域設定。'
-                    : `留空＝沿用全域設定（目前 ${inherited}）。`}
-                  {help}
-                </p>
+                <label
+                  className={`mt-1 flex items-center gap-2 text-xs ${
+                    protection ? 'text-amber-300' : 'text-slate-400'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={offSwitchLabel(field)}
+                    checked={off}
+                    onChange={(e) =>
+                      onChange({ ...values, [field.key]: e.target.checked ? '0' : '' })
+                    }
+                  />
+                  {field.offLabel}
+                </label>
+                {off && field.offWarning && (
+                  <p className="mt-1 rounded border border-amber-700 bg-amber-950/40 px-2 py-1 text-xs text-amber-200">
+                    {field.offWarning}
+                  </p>
+                )}
+                {field.help && <p className="mt-1 text-xs text-slate-500">{field.help}</p>}
               </div>
             )
           })}
