@@ -13,6 +13,7 @@ from app.services.backtest import (
     DEFAULT_SELL_TAX_RATE,
     DEFAULT_SLIPPAGE_RATE,
     BacktestAssumptions,
+    ExitReason,
     FillPriceBasis,
 )
 from app.services.market_data.base import Timeframe
@@ -31,6 +32,11 @@ class BacktestAssumptionsRead(BaseModel):
     sell_tax_rate: MoneyStr
     quantity: MoneyStr
     initial_capital: MoneyStr
+    # Echoed like every other assumption: a run that applied a 5% stop and one
+    # that applied none are different experiments, and telling them apart
+    # afterwards is only possible if the run says which it was.
+    stop_loss_pct: MoneyStr
+    take_profit_pct: MoneyStr
 
 
 class BacktestRunRequest(BaseModel):
@@ -60,6 +66,15 @@ class BacktestRunRequest(BaseModel):
     quantity: Decimal = Field(default=DEFAULT_QUANTITY, gt=0)
     initial_capital: Decimal = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
 
+    # None, not 0, and the difference carries meaning -- the same three-state
+    # rule risk_resolver enforces. None means "whatever this strategy would
+    # actually run under", which the router resolves; 0 means the owner
+    # deliberately asked for a run with no stop at all. Collapsing them would
+    # make it impossible to ask "how would this have done WITHOUT my stop",
+    # which is one of the more useful questions a backtest can answer.
+    stop_loss_pct: Decimal | None = Field(default=None, ge=0, le=1)
+    take_profit_pct: Decimal | None = Field(default=None, ge=0)
+
     @field_validator("start", "end")
     @classmethod
     def _as_utc(cls, value: datetime) -> datetime:
@@ -80,7 +95,13 @@ class BacktestRunRequest(BaseModel):
             raise ValueError("回測的結束時間必須晚於開始時間。")
         return self
 
-    def to_assumptions(self) -> BacktestAssumptions:
+    def to_assumptions(
+        self, *, stop_loss_pct: Decimal, take_profit_pct: Decimal
+    ) -> BacktestAssumptions:
+        """The thresholds are passed in rather than read off `self` because
+        only the router can answer what the strategy would actually run
+        under -- that needs the database. An explicit request value still
+        wins; see the router."""
         return BacktestAssumptions(
             fill_price_basis=self.fill_price_basis,
             commission_rate=self.commission_rate,
@@ -89,6 +110,8 @@ class BacktestRunRequest(BaseModel):
             sell_tax_rate=self.sell_tax_rate,
             quantity=self.quantity,
             initial_capital=self.initial_capital,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
         )
 
 
@@ -102,6 +125,7 @@ class BacktestTradeRead(BaseModel):
     exit_price: MoneyStr
     pnl: MoneyStr
     return_pct: MoneyStr
+    exit_reason: ExitReason
 
 
 class EquityPointRead(BaseModel):
@@ -125,6 +149,9 @@ class BacktestSummaryRead(BaseModel):
     trade_count: int
     wins: int
     losses: int
+    stop_loss_exits: int
+    take_profit_exits: int
+    ambiguous_exit_bars: int
     win_rate_pct: MoneyStr | None
     average_win: MoneyStr | None
     average_loss: MoneyStr | None

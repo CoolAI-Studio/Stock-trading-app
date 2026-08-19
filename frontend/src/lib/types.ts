@@ -249,7 +249,16 @@ export interface BacktestAssumptions {
   sell_tax_rate: string
   quantity: string
   initial_capital: string
+  /** The thresholds the replay enforced, as decimal fractions -- 0.05 is 5%.
+   * '0' means it was not simulated. Echoed like any other assumption because
+   * a run with a 5% stop and one without are different experiments. */
+  stop_loss_pct: string
+  take_profit_pct: string
 }
+
+/** Why a round trip ended. `signal` is the strategy's own SELL; the other two
+ * are the position-level thresholds the live loop also enforces. */
+export type ExitReason = 'signal' | 'stop_loss' | 'take_profit'
 
 /** One realized round trip. The prices are the simulated fills, so they
  * already carry slippage, commission and tax -- pnl is net. */
@@ -261,6 +270,7 @@ export interface BacktestTrade {
   exit_price: string
   pnl: string
   return_pct: string
+  exit_reason: ExitReason
 }
 
 /** One point of the equity chart: the account marked to that candle's close. */
@@ -281,6 +291,14 @@ export interface BacktestSummary {
   trade_count: number
   wins: number
   losses: number
+  /** How many exits were forced by a threshold rather than chosen by the
+   * strategy. A strategy whose every exit is the stop has been managed, not
+   * tested. */
+  stop_loss_exits: number
+  take_profit_exits: number
+  /** Candles that crossed BOTH thresholds, where nothing in the data says
+   * which came first. The stop is assumed; these results are estimates. */
+  ambiguous_exit_bars: number
   /** null, not 0, when nothing ever traded -- "0% 勝率" reads as a strategy
    * that lost every time rather than one that never opened a position. */
   win_rate_pct: string | null

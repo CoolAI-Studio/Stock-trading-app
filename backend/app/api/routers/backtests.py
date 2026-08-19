@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,7 @@ from app.services.backtest import (
 )
 from app.services.market_data.base import DEFAULT_TIMEFRAME, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
+from app.services.risk_resolver import get_or_create_global, resolve
 from app.services.strategy_runtime import StrategyValidationError, code_hash, compile_strategy
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -70,6 +73,30 @@ def _resolve_timeframe(
             )
         return declared
     return requested or DEFAULT_TIMEFRAME
+
+
+def _resolve_exit_thresholds(
+    db: Session, user: User, payload: BacktestRunRequest, strategy: Strategy | None
+) -> tuple[Decimal, Decimal]:
+    """The stop-loss and take-profit the replay will actually enforce.
+
+    Defaulting to the strategy's own resolved settings rather than to zero is
+    the whole point. Live, market_loop._check_position_exit files a SELL the
+    moment either threshold is crossed, using exactly these numbers -- so a
+    replay that quietly used zero was scoring a strategy that rides every loss
+    to the bottom, and calling the result evidence about the one the owner
+    runs.
+
+    An explicit value in the request still wins, INCLUDING an explicit 0:
+    "what would this have done without my stop" is a question worth being able
+    to ask, and it is unaskable if 0 and "unspecified" mean the same thing.
+    That is the same three-state rule risk_resolver enforces everywhere else.
+    """
+    limits = resolve(get_or_create_global(db, user.id), strategy)
+    return (
+        limits.stop_loss_pct if payload.stop_loss_pct is None else payload.stop_loss_pct,
+        limits.take_profit_pct if payload.take_profit_pct is None else payload.take_profit_pct,
+    )
 
 
 def _guard_range(payload: BacktestRunRequest, timeframe: Timeframe) -> None:
@@ -170,6 +197,7 @@ def create_backtest(
     symbol = payload.symbol or (strategy.symbol if strategy else loaded.symbol)
     data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
     timeframe = _resolve_timeframe(payload.timeframe, loaded.entry_point, loaded.timeframe)
+    stop_loss_pct, take_profit_pct = _resolve_exit_thresholds(db, user, payload, strategy)
     _guard_range(payload, timeframe)
 
     bars = load_backtest_bars(
@@ -191,7 +219,9 @@ def create_backtest(
             bars=bars,
             symbol=symbol,
             timeframe=timeframe,
-            assumptions=payload.to_assumptions(),
+            assumptions=payload.to_assumptions(
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct
+            ),
             stored_warmup_bars=stored_warmup,
         )
     except BacktestError as exc:

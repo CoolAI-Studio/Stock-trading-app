@@ -9,6 +9,7 @@ import type {
   BacktestSummary,
   BacktestTrade,
   BrokerCostPreset,
+  ExitReason,
   FillPriceBasis,
   Strategy,
 } from '../lib/types'
@@ -31,6 +32,16 @@ const TIMEFRAME_LABEL: Record<string, string> = {
   '1d': '日線',
   '1wk': '週線',
   '1mo': '月線',
+}
+
+/** Which exits the strategy chose and which were forced. Kept distinct
+ * because "my rules make money but the stop keeps cutting them" is the most
+ * actionable thing this table can say, and it is invisible when every row
+ * just reads "sold". */
+const EXIT_REASON_LABEL: Record<ExitReason, string> = {
+  signal: '策略訊號',
+  stop_loss: '停損出場',
+  take_profit: '停利出場',
 }
 
 const DEFAULTS = {
@@ -61,6 +72,14 @@ function asPercent(rate: string): string {
   const value = Number(rate)
   if (!Number.isFinite(value)) return '—'
   return `${Number((value * 100).toFixed(6))}%`
+}
+
+/** A threshold that may be switched off. '0' is not 0% -- it means the
+ * simulation did not apply one at all, and the two read completely
+ * differently to someone deciding whether to trust the result. */
+function threshold(rate: string | undefined): string {
+  if (rate === undefined || Number(rate) === 0) return '沒有模擬'
+  return asPercent(rate)
 }
 
 function money(value: string): string {
@@ -114,6 +133,12 @@ function AssumptionsBox({ run }: { run: BacktestRunDetail }) {
     ['賣出交易稅率', asPercent(a.sell_tax_rate)],
     ['每次下單數量', money(a.quantity)],
     ['起始本金', money(a.initial_capital)],
+    // Shown even when off, and shown as the words rather than as "0%". The
+    // live loop always has a stop; silence here would be read as "it was
+    // applied" by anyone who knows that, and they would take a number about a
+    // strategy that rides every loss to the bottom as evidence about theirs.
+    ['停損比例', threshold(a.stop_loss_pct)],
+    ['停利比例', threshold(a.take_profit_pct)],
   ]
 
   return (
@@ -224,6 +249,12 @@ function Details({ summary }: { summary: BacktestSummary }) {
     ['平均獲利', summary.average_win === null ? '—' : signedMoney(summary.average_win)],
     ['平均虧損', summary.average_loss === null ? '—' : signedMoney(summary.average_loss)],
     ['贏 / 輸 筆數', `${summary.wins} / ${summary.losses}`],
+    [
+      '停損出場次數',
+      String(summary.stop_loss_exits),
+      '被停損強制出場，不是策略自己決定賣的',
+    ],
+    ['停利出場次數', String(summary.take_profit_exits), '碰到停利價自動出場'],
     ['出現訊號', String(summary.signals)],
     [
       '被略過的訊號',
@@ -276,6 +307,7 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
           <th className="pb-2 font-normal">出場價</th>
           <th className="pb-2 font-normal">損益</th>
           <th className="pb-2 font-normal">報酬率</th>
+          <th className="pb-2 font-normal">出場原因</th>
         </tr>
       </thead>
       <tbody>
@@ -294,7 +326,8 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
               <td className="py-2 pr-4">{money(t.entry_price)}</td>
               <td className="py-2 pr-4">{money(t.exit_price)}</td>
               <td className={`py-2 pr-4 ${tone}`}>{signedMoney(t.pnl)}</td>
-              <td className={`py-2 ${tone}`}>{signedPercent(t.return_pct)}</td>
+              <td className={`py-2 pr-4 ${tone}`}>{signedPercent(t.return_pct)}</td>
+              <td className="py-2 text-slate-400">{EXIT_REASON_LABEL[t.exit_reason]}</td>
             </tr>
           )
         })}
@@ -359,6 +392,13 @@ export function BacktestPage() {
   // trying an idea on another stock meant editing the saved strategy first.
   const [symbolOverride, setSymbolOverride] = useState('')
   const [timeframeOverride, setTimeframeOverride] = useState('')
+  // Also blank by default, and blank has to keep meaning "whatever this
+  // strategy would actually run under" -- the backend resolves that from the
+  // strategy's own risk settings. Pre-filling them with the global 5%/10%
+  // would look helpful and quietly detach the run from the strategy the
+  // moment the owner changed one and forgot they had.
+  const [stopLossOverride, setStopLossOverride] = useState('')
+  const [takeProfitOverride, setTakeProfitOverride] = useState('')
 
   const presetsQuery = useQuery({
     queryKey: ['broker-costs'],
@@ -406,6 +446,12 @@ export function BacktestPage() {
         // validation error.
         ...(symbolOverride.trim() ? { symbol: symbolOverride.trim().toUpperCase() } : {}),
         ...(timeframeOverride ? { timeframe: timeframeOverride } : {}),
+        // trim() rather than truthiness: '0' is a real answer ("run this
+        // without a stop") and truthiness would throw it away, which is
+        // exactly the question the backend went to the trouble of keeping
+        // askable.
+        ...(stopLossOverride.trim() ? { stop_loss_pct: stopLossOverride.trim() } : {}),
+        ...(takeProfitOverride.trim() ? { take_profit_pct: takeProfitOverride.trim() } : {}),
         ...costs,
       }),
     onSuccess: (result) => {
@@ -462,6 +508,33 @@ export function BacktestPage() {
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
         {hint && <p className="text-xs text-slate-500">{hint}</p>}
+      </div>
+    )
+  }
+
+  /** Separate from costField because these three-state boxes are not part of
+   * DEFAULTS: blank means "inherit", and a preset must not touch them. */
+  function thresholdField(
+    key: string,
+    label: string,
+    value: string,
+    setValue: (next: string) => void,
+  ) {
+    return (
+      <div>
+        <label htmlFor={`bt-${key}`} className="text-sm text-slate-400">
+          {label}
+        </label>
+        <input
+          id={`bt-${key}`}
+          value={value}
+          placeholder="留白＝用策略的設定"
+          onChange={(e) => setValue(e.target.value)}
+          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+        <p className="text-xs text-slate-500">
+          {value.trim() === '' ? '沿用策略設定' : threshold(value.trim())}
+        </p>
       </div>
     )
   }
@@ -619,7 +692,23 @@ export function BacktestPage() {
           {costField('sell_tax_rate', '賣出交易稅率', `＝ ${asPercent(costs.sell_tax_rate)}`)}
           {costField('quantity', '每次下單數量')}
           {costField('initial_capital', '起始本金')}
+          {thresholdField(
+            'stop_loss_pct',
+            '停損比例',
+            stopLossOverride,
+            setStopLossOverride,
+          )}
+          {thresholdField(
+            'take_profit_pct',
+            '停利比例',
+            takeProfitOverride,
+            setTakeProfitOverride,
+          )}
         </div>
+        <p className="text-xs text-slate-500">
+          停損／停利留白，就用這支策略實際執行時的設定跑 —— 回測與盯盤是同一套規則。
+          想看「沒有停損會怎樣」就填 0；想試別的數字直接填（0.08 ＝ 8%），不用去改策略。
+        </p>
 
         {strategiesQuery.isSuccess && strategies.length === 0 && (
           <p className="text-sm text-amber-300">

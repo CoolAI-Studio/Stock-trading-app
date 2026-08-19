@@ -57,6 +57,8 @@ const ASSUMPTIONS: BacktestAssumptions = {
   sell_tax_rate: '0.003',
   quantity: '100',
   initial_capital: '100000',
+  stop_loss_pct: '0',
+  take_profit_pct: '0',
 }
 
 const SUMMARY: BacktestSummary = {
@@ -68,6 +70,9 @@ const SUMMARY: BacktestSummary = {
   trade_count: 2,
   wins: 1,
   losses: 1,
+  stop_loss_exits: 0,
+  take_profit_exits: 0,
+  ambiguous_exit_bars: 0,
   win_rate_pct: '50',
   average_win: '820.5',
   average_loss: '-310.25',
@@ -93,6 +98,7 @@ const TRADES: BacktestTrade[] = [
     exit_price: '111.655',
     pnl: '820.5',
     return_pct: '7.9313',
+    exit_reason: 'signal',
   },
   {
     opened_at: '2026-01-20T00:00:00Z',
@@ -102,6 +108,7 @@ const TRADES: BacktestTrade[] = [
     exit_price: '112.0975',
     pnl: '-310.25',
     return_pct: '-2.6931',
+    exit_reason: 'signal',
   },
 ]
 
@@ -769,5 +776,133 @@ describe('testing a strategy somewhere other than where it lives', () => {
         expect.objectContaining({ symbol: '2330.TW' }),
       ),
     )
+  })
+})
+
+// --- the stop and the target ------------------------------------------------
+//
+// The replay now enforces the same position-level thresholds the live loop
+// does, so the page has to (a) let the owner change them without editing the
+// strategy, (b) say which exits were forced rather than chosen, and (c) admit
+// when an exit was guessed because one candle crossed both.
+
+describe('停損停利', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/broker-costs') return [] as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue(RUN as never)
+  })
+
+  /** Waits for the strategy list to arrive: the run button exists from the
+   * first paint but is disabled until there is something to run. */
+  async function ready() {
+    renderPage()
+    await screen.findByRole('option', { name: new RegExp(STRATEGY.name) })
+  }
+
+  it('把停損停利留白時完全不送，讓後端沿用策略自己的設定', async () => {
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const body = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
+    expect(body).not.toHaveProperty('stop_loss_pct')
+    expect(body).not.toHaveProperty('take_profit_pct')
+  })
+
+  it('填了就送出去，這樣不用改策略也能試別的停損', async () => {
+    await ready()
+
+    fireEvent.change(screen.getByLabelText('停損比例'), { target: { value: '0.08' } })
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const body = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
+    expect(body.stop_loss_pct).toBe('0.08')
+    expect(body).not.toHaveProperty('take_profit_pct')
+  })
+
+  it('填 0 也要送出去 —— 那是「這次不要停損」，不是「沒填」', async () => {
+    await ready()
+
+    fireEvent.change(screen.getByLabelText('停損比例'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const body = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
+    expect(body.stop_loss_pct).toBe('0')
+  })
+
+  it('假設區把這次用的停損停利寫出來', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ...RUN,
+      result: {
+        ...RESULT,
+        assumptions: { ...ASSUMPTIONS, stop_loss_pct: '0.05', take_profit_pct: '0.1' },
+      },
+    } as never)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    const box = await screen.findByLabelText('這次回測的假設')
+    expect(within(box).getByText('停損比例')).toBeInTheDocument()
+    expect(within(box).getByText('5%')).toBeInTheDocument()
+    expect(within(box).getByText('10%')).toBeInTheDocument()
+  })
+
+  it('沒有模擬停損時說清楚，而不是留白讓人以為有', async () => {
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    const box = await screen.findByLabelText('這次回測的假設')
+    expect(within(box).getAllByText('沒有模擬').length).toBe(2)
+  })
+
+  it('每一筆交易都標出是誰讓它出場的', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ...RUN,
+      result: {
+        ...RESULT,
+        trades: [
+          { ...TRADES[0], exit_reason: 'take_profit' as const },
+          { ...TRADES[1], exit_reason: 'stop_loss' as const },
+        ],
+      },
+    } as never)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    const table = await screen.findByLabelText('交易明細')
+    expect(within(table).getByText('停利出場')).toBeInTheDocument()
+    expect(within(table).getByText('停損出場')).toBeInTheDocument()
+  })
+
+  it('策略自己賣的就標成策略訊號，不要跟停損混在一起', async () => {
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    const table = await screen.findByLabelText('交易明細')
+    expect(within(table).getAllByText('策略訊號').length).toBe(2)
+  })
+
+  it('細項統計把被停損和被停利的次數分開算', async () => {
+    vi.mocked(api.post).mockResolvedValue({
+      ...RUN,
+      result: {
+        ...RESULT,
+        summary: { ...SUMMARY, stop_loss_exits: 3, take_profit_exits: 1 },
+      },
+    } as never)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '開始回測' }))
+
+    const details = await screen.findByLabelText('細項統計')
+    expect(within(details).getByText('停損出場次數')).toBeInTheDocument()
+    expect(within(details).getByText('3')).toBeInTheDocument()
   })
 })

@@ -150,6 +150,7 @@ def test_the_response_carries_a_chart_worth_of_data(auth_client, stub_market_dat
         "exit_price",
         "pnl",
         "return_pct",
+        "exit_reason",
     }
     # Money comes back as a plain fixed-point string, never "0E-8".
     assert "E" not in trade["pnl"]
@@ -392,3 +393,95 @@ def test_old_runs_are_pruned_so_the_history_cannot_grow_without_bound(
 def test_the_endpoints_require_auth(client):
     assert client.get("/api/backtests").status_code == 401
     assert client.post("/api/backtests", json=_request()).status_code == 401
+
+
+# --- the stop and the target come from the strategy, not from nowhere -------
+#
+# The replay is only worth reading if it describes the system that actually
+# runs, and live that system includes market_loop._check_position_exit
+# watching every position against the thresholds risk_resolver produces for
+# the strategy that opened it. A run that ignored them scored a strategy that
+# rides every loss to the bottom -- which is not the one the owner has
+# configured.
+
+
+def test_a_run_inherits_the_thresholds_the_strategy_would_actually_run_under(
+    auth_client, stub_market_data
+):
+    """Nothing in the request mentions a stop; the strategy's own override
+    decides, exactly as it does live."""
+    strategy_id = _create_strategy(auth_client)
+    auth_client.patch(f"/api/strategies/{strategy_id}", json={"take_profit_pct": "0.02"})
+
+    body = auth_client.post(
+        "/api/backtests",
+        json={"strategy_id": strategy_id, "start": _START.isoformat(), "end": _END.isoformat()},
+    ).json()
+
+    assert body["result"]["assumptions"]["take_profit_pct"] == "0.02"
+    assert body["result"]["summary"]["take_profit_exits"] == 1
+
+
+def test_the_request_can_override_what_the_strategy_says(auth_client, stub_market_data):
+    """Trying a different stop without editing the strategy is the whole point
+    of being able to ask twice."""
+    strategy_id = _create_strategy(auth_client)
+    auth_client.patch(f"/api/strategies/{strategy_id}", json={"take_profit_pct": "0.02"})
+
+    body = auth_client.post(
+        "/api/backtests",
+        json={
+            "strategy_id": strategy_id,
+            "start": _START.isoformat(),
+            "end": _END.isoformat(),
+            "take_profit_pct": "0.50",
+        },
+    ).json()
+
+    assert body["result"]["assumptions"]["take_profit_pct"] == "0.5"
+    assert body["result"]["summary"]["take_profit_exits"] == 0
+
+
+def test_an_explicit_zero_switches_it_off_rather_than_meaning_unset(auth_client, stub_market_data):
+    """0 has to stay distinguishable from "not supplied" here for the same
+    reason risk_resolver keeps them distinct: 0 is a deliberate answer."""
+    strategy_id = _create_strategy(auth_client)
+    auth_client.patch(f"/api/strategies/{strategy_id}", json={"take_profit_pct": "0.02"})
+
+    body = auth_client.post(
+        "/api/backtests",
+        json={
+            "strategy_id": strategy_id,
+            "start": _START.isoformat(),
+            "end": _END.isoformat(),
+            "take_profit_pct": "0",
+        },
+    ).json()
+
+    assert body["result"]["assumptions"]["take_profit_pct"] == "0"
+    assert body["result"]["summary"]["take_profit_exits"] == 0
+
+
+def test_a_draft_falls_back_to_the_global_settings_it_would_run_under_if_saved(
+    auth_client, stub_market_data
+):
+    """A draft has no overrides of its own, so the global row is what it would
+    inherit the moment it was saved -- which is what makes the draft's numbers
+    comparable with the saved strategy's."""
+    auth_client.put("/api/risk-settings", json={"take_profit_pct": "0.02"})
+
+    body = auth_client.post("/api/backtests", json=_request()).json()
+
+    assert body["result"]["assumptions"]["take_profit_pct"] == "0.02"
+
+
+def test_every_trade_says_why_it_ended(auth_client, stub_market_data):
+    strategy_id = _create_strategy(auth_client)
+    auth_client.patch(f"/api/strategies/{strategy_id}", json={"take_profit_pct": "0.02"})
+
+    body = auth_client.post(
+        "/api/backtests",
+        json={"strategy_id": strategy_id, "start": _START.isoformat(), "end": _END.isoformat()},
+    ).json()
+
+    assert body["result"]["trades"][0]["exit_reason"] == "take_profit"

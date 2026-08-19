@@ -18,25 +18,37 @@ been filled at, and what that fill costs. See BacktestAssumptions.
 RISK GATES -- A DELIBERATE CHOICE: the live order-admission gates
 (services/risk.py's position limit and capital limit, plus the dedupe,
 cooldown and pending-order caps in services/signals.py) do NOT run during a
-backtest, and neither do the position-level stop-loss / take-profit checks in
-market_loop._check_position_exit.
+backtest.
 
 The reason is that every one of those gates is evaluated against state that
 does not exist in a replay of 2021: the owner's *current* positions table,
-their orders still pending right now, the wall clock the cooldown measures
-against, and -- for stop-loss -- the live quote stream, which history does not
-have at candle resolution. Feeding them a hypothetical ledger would blend two
-different questions into one number, so that "this strategy loses money" and
-"my capital cap was set too low last Tuesday" become indistinguishable. This
-module therefore answers exactly one question: what would this strategy's
-signals have earned on this symbol over this range, at these costs? The
-sizing rule it does impose -- one fixed-size position at a time -- is stated
-in the assumptions rather than inherited from the risk settings, so it cannot
+their orders still pending right now, and the wall clock the cooldown measures
+against. Feeding them a hypothetical ledger would blend two different
+questions into one number, so that "this strategy loses money" and "my capital
+cap was set too low last Tuesday" become indistinguishable. The sizing rule
+this module does impose -- one fixed-size position at a time -- is stated in
+the assumptions rather than inherited from the risk settings, so it cannot
 drift when the owner edits those settings.
 
 The defensible opposite (run the gates, and report the strategy as the owner's
 whole configured system would have traded it) was rejected for that blending,
 not because it is wrong.
+
+STOP-LOSS AND TAKE-PROFIT ARE THE EXCEPTION, and the exception is principled
+rather than convenient. market_loop._check_position_exit reads exactly two
+things: the entry price of the position it is watching, and the price now.
+Both exist inside a replay -- unlike a positions table or a wall clock -- so
+omitting them scored a system the owner does not run, which is the very
+failure this module's first paragraph exists to prevent. They are off by
+default (0, the same "switched off" convention services/risk.py uses) and the
+router fills them from the strategy's own resolved risk settings, so a run
+describes the strategy as configured.
+
+What a candle cannot supply is the PATH within it. When one candle's low
+crosses the stop and its high crosses the target, nothing in the data says
+which came first; the stop is assumed to have fired, because that is the only
+choice that cannot flatter the result, and every candle it was applied to is
+counted into summary.ambiguous_exit_bars and reported.
 """
 
 import math
@@ -76,6 +88,20 @@ class FillPriceBasis(StrEnum):
     CLOSE = "close"
 
 
+class ExitReason(StrEnum):
+    """Why a round trip ended.
+
+    Recorded per trade because "my rules make money but the stop keeps cutting
+    them before they get there" is the single most actionable thing a backtest
+    can tell someone, and it is invisible when every exit is just 'sold'.
+    """
+
+    # The strategy's own SELL.
+    SIGNAL = "signal"
+    STOP_LOSS = "stop_loss"
+    TAKE_PROFIT = "take_profit"
+
+
 # 0.1425% per side is the standard Taiwan brokerage commission, which is the
 # market the owner trades. It is the default rather than zero because a
 # backtest quoting costless fills as if they were real is a lie of omission --
@@ -97,6 +123,15 @@ DEFAULT_SELL_TAX_RATE = Decimal(0)
 DEFAULT_MINIMUM_FEE = Decimal(0)
 DEFAULT_QUANTITY = Decimal(1)
 DEFAULT_INITIAL_CAPITAL = Decimal(100_000)
+
+# Zero means "not simulated", which is the same convention services/risk.py's
+# check_stop_loss and check_take_profit already use for the live thresholds --
+# they have to agree, or the number the owner types into one box would mean
+# opposite things in the two places it is read. The API layer fills these from
+# the strategy's resolved risk settings, so the default here only decides what
+# a direct call to run_backtest() does.
+DEFAULT_STOP_LOSS_PCT = Decimal(0)
+DEFAULT_TAKE_PROFIT_PCT = Decimal(0)
 
 # One backtest may TEST at most this many candles. The equity curve, the trade
 # list and the persisted row all grow with it, and this shares a free-tier box
@@ -160,6 +195,11 @@ class BacktestAssumptions:
     sell_tax_rate: Decimal = DEFAULT_SELL_TAX_RATE
     quantity: Decimal = DEFAULT_QUANTITY
     initial_capital: Decimal = DEFAULT_INITIAL_CAPITAL
+    # Measured from the position's own fill price, the way
+    # market_loop._check_position_exit measures from position.avg_entry_price.
+    # 0 = not simulated.
+    stop_loss_pct: Decimal = DEFAULT_STOP_LOSS_PCT
+    take_profit_pct: Decimal = DEFAULT_TAKE_PROFIT_PCT
 
     def __post_init__(self) -> None:
         # Stated as a contract rather than defended at every use site: a zero
@@ -174,6 +214,11 @@ class BacktestAssumptions:
             ("手續費率", self.commission_rate),
             ("滑價率", self.slippage_rate),
             ("交易稅率", self.sell_tax_rate),
+            # Negative rather than zero is the dangerous one: read literally, a
+            # negative stop-loss puts the threshold ABOVE the entry price, so
+            # every position is "already stopped out" on the candle it opened.
+            ("停損比例", self.stop_loss_pct),
+            ("停利比例", self.take_profit_pct),
         ):
             if rate < 0:
                 raise ValueError(f"{name}不可以是負數。")
@@ -191,6 +236,7 @@ class BacktestTrade:
     exit_price: Decimal
     pnl: Decimal
     return_pct: Decimal
+    exit_reason: ExitReason = ExitReason.SIGNAL
 
 
 @dataclass(frozen=True)
@@ -214,6 +260,16 @@ class BacktestSummary:
     trade_count: int
     wins: int
     losses: int
+    # How many round trips ended because a threshold was crossed rather than
+    # because the strategy said so. Separated because they answer different
+    # questions: a strategy whose every exit is the stop has not really been
+    # tested, it has been managed.
+    stop_loss_exits: int
+    take_profit_exits: int
+    # Candles that crossed BOTH thresholds, where which one came first is not
+    # in the data. Reported because a result resting on twenty of these is a
+    # guess wearing a percentage sign.
+    ambiguous_exit_bars: int
     # None rather than 0 when there were no trades: "0% win rate" reads as a
     # strategy that lost every time, not as one that never traded.
     win_rate_pct: Decimal | None
@@ -371,12 +427,57 @@ def _minimum_fee_shortfall(
     return max(Decimal(0), assumptions.minimum_fee - proportional)
 
 
+def _exit_trigger(
+    entry_price: Decimal, bar: Bar, assumptions: BacktestAssumptions
+) -> tuple[Decimal, ExitReason, bool] | None:
+    """Where a held position would have been forced out on this candle.
+
+    Returns the price the exit is assumed to have happened at, why, and
+    whether the candle also crossed the other threshold -- i.e. whether the
+    answer had to be guessed. None means the candle never reached either.
+
+    THE FILL PRICE IS NOT THE HIGH OR THE LOW. The threshold is where the
+    order fires, so the threshold is what it fires at; using the candle's
+    extreme would report an exit at the best (or worst) price of the day,
+    which nobody gets. The one exception is a gap: if the candle OPENED past
+    the threshold, no trade ever happened at the threshold, so the fill is the
+    open. That cuts both ways and is left to cut both ways -- a gap down fills
+    below the stop (worse), a gap up fills above the target (better) -- because
+    that is what actually happens, and shading either one would be a thumb on
+    the scale.
+    """
+    if entry_price <= 0:
+        return None
+
+    stop: Decimal | None = None
+    if assumptions.stop_loss_pct > 0:
+        threshold = entry_price * (Decimal(1) - assumptions.stop_loss_pct)
+        if Decimal(str(bar.low)) <= threshold:
+            stop = min(Decimal(str(bar.open)), threshold)
+
+    target: Decimal | None = None
+    if assumptions.take_profit_pct > 0:
+        threshold = entry_price * (Decimal(1) + assumptions.take_profit_pct)
+        if Decimal(str(bar.high)) >= threshold:
+            target = max(Decimal(str(bar.open)), threshold)
+
+    if stop is not None:
+        # Stop first when both were touched: a candle records four prices, not
+        # a path, and this is the only reading that cannot make the result
+        # look better than the evidence supports.
+        return stop, ExitReason.STOP_LOSS, target is not None
+    if target is not None:
+        return target, ExitReason.TAKE_PROFIT, False
+    return None
+
+
 def _execute(
     account: _Account,
     side: str,
     reference: Decimal,
     at: datetime,
     assumptions: BacktestAssumptions,
+    exit_reason: ExitReason = ExitReason.SIGNAL,
 ) -> None:
     quantity = assumptions.quantity
     price = _fill_price(reference, side, assumptions)
@@ -416,6 +517,7 @@ def _execute(
                 if account.entry_price
                 else Decimal(0)
             ),
+            exit_reason=exit_reason,
         )
     )
     account.quantity = Decimal(0)
@@ -495,6 +597,9 @@ def run_backtest(
     skipped_buy_while_holding = 0
     skipped_sell_while_flat = 0
     unfilled = 0
+    stop_loss_exits = 0
+    take_profit_exits = 0
+    ambiguous_exit_bars = 0
     peak_equity = assumptions.initial_capital
     max_drawdown = Decimal(0)
 
@@ -506,7 +611,26 @@ def run_backtest(
             _execute(account, pending_side, Decimal(str(bar.open)), bar.timestamp, assumptions)
             pending_side = None
 
-        # 2) The strategy sees exactly one candle: this one. It has never been
+        # 2) The stop-loss / take-profit check, in the same place the live
+        #    loop makes it: against an open position, on price alone, with no
+        #    reference to what the strategy is about to say. It runs BEFORE
+        #    the dispatch below because the strategy decides at the close and
+        #    a threshold triggers wherever in the candle the price reached it
+        #    -- never later than the close. Reversed, a strategy could sell at
+        #    a price it had already been stopped out of.
+        if account.quantity > 0:
+            triggered = _exit_trigger(account.entry_price, bar, assumptions)
+            if triggered is not None:
+                reference, reason, was_ambiguous = triggered
+                if was_ambiguous:
+                    ambiguous_exit_bars += 1
+                if reason is ExitReason.STOP_LOSS:
+                    stop_loss_exits += 1
+                else:
+                    take_profit_exits += 1
+                _execute(account, "SELL", reference, bar.timestamp, assumptions, reason)
+
+        # 3) The strategy sees exactly one candle: this one. It has never been
         #    handed the series, so there is no future for it to read.
         try:
             signal = _dispatch(loaded, bar)
@@ -515,7 +639,7 @@ def run_backtest(
                 f"策略在 {bar.timestamp:%Y-%m-%d %H:%M} 這根 K 棒發生錯誤：{exc}"
             ) from exc
 
-        # 3) Act on the signal. Nothing can still be in flight here -- step 1
+        # 4) Act on the signal. Nothing can still be in flight here -- step 1
         #    executes and clears any order from the previous candle before the
         #    strategy is asked for a new one -- so the book is either flat or
         #    holding, never mid-order.
@@ -530,7 +654,7 @@ def run_backtest(
             else:
                 pending_side = signal
 
-        # 4) Mark to market on this candle's close, after any fill it carried.
+        # 5) Mark to market on this candle's close, after any fill it carried.
         close = Decimal(str(bar.close))
         equity = account.cash + account.quantity * close
         equity_curve.append(
@@ -558,6 +682,7 @@ def run_backtest(
             tested=tested,
             skipped_buy_while_holding=skipped_buy_while_holding,
             skipped_sell_while_flat=skipped_sell_while_flat,
+            ambiguous_exit_bars=ambiguous_exit_bars,
         )
     )
 
@@ -569,6 +694,9 @@ def run_backtest(
         signals=signals,
         skipped_signals=skipped_buy_while_holding + skipped_sell_while_flat,
         unfilled_signals=unfilled,
+        stop_loss_exits=stop_loss_exits,
+        take_profit_exits=take_profit_exits,
+        ambiguous_exit_bars=ambiguous_exit_bars,
         max_drawdown=max_drawdown,
         curve=equity_curve,
     )
@@ -650,8 +778,16 @@ def _run_notes(
     tested: list[Bar],
     skipped_buy_while_holding: int,
     skipped_sell_while_flat: int,
+    ambiguous_exit_bars: int = 0,
 ) -> list[str]:
     notes: list[str] = []
+    if ambiguous_exit_bars:
+        notes.append(
+            f"有 {ambiguous_exit_bars} 根 K 棒同時碰到停損價和停利價。K 棒只留下開、高、低、"
+            "收四個價格，無法確定哪一邊先到，這裡一律當成停損先觸發 —— "
+            "那是唯一不會讓結果變好看的選法。這幾筆的結果是估的，不是測出來的；"
+            "如果它們佔的比例不低，換成更小的 K 棒週期再測一次會準得多。"
+        )
     if skipped_buy_while_holding:
         notes.append(
             f"有 {skipped_buy_while_holding} 次買進訊號因為已有部位而略過"
@@ -717,6 +853,9 @@ def _summarize(
     signals: int,
     skipped_signals: int,
     unfilled_signals: int,
+    stop_loss_exits: int,
+    take_profit_exits: int,
+    ambiguous_exit_bars: int,
     max_drawdown: Decimal,
     curve: list[EquityPoint],
 ) -> BacktestSummary:
@@ -742,6 +881,9 @@ def _summarize(
         trade_count=trade_count,
         wins=len(wins),
         losses=len(losses),
+        stop_loss_exits=stop_loss_exits,
+        take_profit_exits=take_profit_exits,
+        ambiguous_exit_bars=ambiguous_exit_bars,
         win_rate_pct=(
             _pct(Decimal(len(wins)) / Decimal(trade_count) * 100) if trade_count else None
         ),
@@ -766,6 +908,39 @@ def _summarize(
         profit_factor=_profit_factor(gross_profit, gross_loss),
         exposure_pct=_exposure(curve),
     )
+
+
+def _exit_note(assumptions: BacktestAssumptions) -> str:
+    """Whether the stop and the target were simulated, and on what rules.
+
+    Says so in both directions on purpose. Silence about a switched-off stop
+    would be read as "it was applied" by anyone who knows the live loop has
+    one -- and that reader would then take a number describing a strategy that
+    rides every loss to the bottom as evidence about the strategy they run.
+    """
+    stop_on = assumptions.stop_loss_pct > 0
+    target_on = assumptions.take_profit_pct > 0
+
+    if not stop_on and not target_on:
+        return (
+            "這次沒有模擬停損／停利（兩個都設成 0）。實際執行時，market_loop 會盯著每一個"
+            "持倉的成本價，一碰到就發出賣出提醒；這份回測沒有套用，所以它描述的是"
+            "「訊號進、訊號出」的結果，跟你設了停損的實際狀況不一樣。"
+        )
+
+    bits = [
+        f"停損 {_rate_text(assumptions.stop_loss_pct)}" if stop_on else "停損沒有設",
+        f"停利 {_rate_text(assumptions.take_profit_pct)}" if target_on else "停利沒有設",
+    ]
+    note = (
+        "、".join(bits) + "，與實際執行同一套規則：從這個部位自己的成交成本價往外算，"
+        "K 棒的最低價／最高價碰到就出場。成交價就用觸發價本身；"
+        "但如果 K 棒一開盤就已經跳空穿過去，改用開盤價 —— 跳空的那一段沒有人在那裡成交過，"
+        "用觸發價會算出一個當時根本買不到、賣不掉的價格。"
+    )
+    if stop_on and target_on:
+        note += "同一根 K 棒同時碰到兩邊時，一律當成停損先觸發（那一邊比較不好看）。"
+    return note
 
 
 def _assumption_notes(
@@ -800,8 +975,9 @@ def _assumption_notes(
         f"起始本金 {format(assumptions.initial_capital.normalize(), 'f')}，"
         "只用來換算報酬率與最大回撤，不會擋下任何一筆買進。",
         "風控閘門：回測「不」套用實際下單的風控（部位上限、單筆金額上限、本金上限、"
-        "訊號冷卻、待確認單數上限），也不模擬停損／停利。那些規則都是對照你「現在」的"
-        "持倉與時鐘判斷的，套進過去只會讓「策略不賺錢」和「當時上限設太低」混在一起。",
+        "訊號冷卻、待確認單數上限）。那些規則都是對照你「現在」的持倉與時鐘判斷的，"
+        "套進過去只會讓「策略不賺錢」和「當時上限設太低」混在一起。",
+        _exit_note(assumptions),
     ]
 
     if entry_point == "on_tick":
