@@ -385,6 +385,10 @@ export interface WebhookLog {
   raw_body: string
   order_id: number | null
   error: string | null
+  /** The alert carried no `id`, so only the identical-body window protects
+   * it. Shown so the owner learns it from the page rather than by being
+   * replayed. */
+  missing_id: boolean
 }
 
 /** What to paste into TradingView. Served rather than documented, because a

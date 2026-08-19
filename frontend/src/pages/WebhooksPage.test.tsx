@@ -25,6 +25,7 @@ const LOG: WebhookLog = {
   raw_body: '{"symbol": "2330.TW", "action": "buy"}',
   order_id: 42,
   error: null,
+  missing_id: false,
 }
 
 function renderPage() {
@@ -93,5 +94,31 @@ describe('WebhooksPage', () => {
     serve([])
     renderPage()
     expect(await screen.findByText(/還沒收到任何 TradingView 訊號/)).toBeInTheDocument()
+  })
+})
+
+describe('alerts that cannot be fully protected', () => {
+  it('flags an alert that arrived without an id, even though it worked', async () => {
+    // Better learnt here than by being replayed: anyone who got hold of the
+    // body can post it again, and only a short identical-body window stops
+    // them.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('/setup')) return SETUP as never
+      return [{ ...LOG, missing_id: true }] as never
+    })
+    renderPage()
+
+    expect(await screen.findByText(/無法完全防止重放/)).toBeInTheDocument()
+  })
+
+  it('says nothing extra when the alert carried an id', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('/setup')) return SETUP as never
+      return [LOG] as never
+    })
+    renderPage()
+
+    await screen.findByText(/已建立訂單/)
+    expect(screen.queryByText(/無法完全防止重放/)).not.toBeInTheDocument()
   })
 })

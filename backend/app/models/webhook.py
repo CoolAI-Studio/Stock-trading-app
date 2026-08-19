@@ -29,3 +29,7 @@ class TradingViewWebhookLog(Base):
         ForeignKey("orders.id", ondelete="SET NULL"), default=None
     )
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # This alert carried no `id`, so it is only protected by the
+    # identical-body window rather than being properly idempotent. Recorded so
+    # the owner learns it from the page instead of from being replayed.
+    missing_id: Mapped[bool] = mapped_column(Boolean, default=False)

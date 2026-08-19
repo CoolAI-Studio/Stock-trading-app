@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # never a broken request.
     PUBLIC_BASE_URL: str = "http://localhost:8000"
 
+    # How long an identical TradingView body is treated as a replay rather
+    # than a second decision. Only applies to alerts with no `id`; one with an
+    # id is exactly idempotent and needs no window. Ten minutes is longer than
+    # any duplicate a chart would legitimately send and short enough that a
+    # genuinely repeated setup later in the session still gets through.
+    TV_WEBHOOK_REPLAY_WINDOW_SEC: int = 600
+
     # A manual-confirm pending order older than this is stale and gets
     # auto-expired by the worker loop rather than sitting there forever.
     PENDING_ORDER_EXPIRY_MINUTES: int = 180

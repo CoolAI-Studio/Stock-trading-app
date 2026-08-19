@@ -119,6 +119,28 @@ def _prune_audit_log(db: Session) -> None:
     db.commit()
 
 
+def _seen_recently(db: Session, raw_body: str) -> bool:
+    """Whether this exact body already arrived inside the replay window.
+
+    Compared on the stored, secret-stripped body, so it is the alert's content
+    that is matched rather than the credential wrapping it. A price that moved
+    makes a different body and gets through, which is what keeps this from
+    swallowing real signals.
+    """
+    cutoff = utcnow() - timedelta(seconds=settings.TV_WEBHOOK_REPLAY_WINDOW_SEC)
+    return (
+        db.query(TradingViewWebhookLog)
+        .filter(
+            TradingViewWebhookLog.raw_body == raw_body,
+            TradingViewWebhookLog.signature_valid.is_(True),
+            TradingViewWebhookLog.received_at >= cutoff,
+            TradingViewWebhookLog.id != None,  # noqa: E711 -- exclude the unsaved row
+        )
+        .first()
+        is not None
+    )
+
+
 def _persist_audit(db: Session, log: TradingViewWebhookLog) -> None:
     db.add(log)
     db.commit()
@@ -201,6 +223,21 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
         return _reject_with_log(db, log, f"invalid payload: {exc}")
 
     log.parsed_ok = True
+    log.missing_id = not alert.id
+
+    # An alert with an `id` is exactly idempotent -- create_pending_order's
+    # unique key sees to that. One without has no such promise, so the same
+    # body arriving twice in a short window is treated as a replay rather than
+    # as two decisions. That covers the alerts already configured out there
+    # without anybody having to change them.
+    #
+    # Honest about its limit: a patient attacker replaying an hour apart is
+    # not stopped by this, which is why the setup panel pushes `id`.
+    if not alert.id and _seen_recently(db, log.raw_body):
+        return _reject_with_log(
+            db, log, "重複的警報內容（短時間內收到一模一樣的訊息），已當成重放略過"
+        )
+
     symbol = alert.symbol.upper()
     user = _resolve_user(db, symbol, alert.strategy)
     if user is None:

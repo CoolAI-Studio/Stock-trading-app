@@ -37,6 +37,10 @@ class TradingViewWebhookLogRead(BaseModel):
     raw_body: str
     order_id: int | None
     error: str | None
+    # No `id` on the alert, so it is only covered by the identical-body window
+    # rather than being properly idempotent. Surfaced so the owner learns it
+    # from the page rather than from being replayed.
+    missing_id: bool
 
 
 class TradingViewSetup(BaseModel):

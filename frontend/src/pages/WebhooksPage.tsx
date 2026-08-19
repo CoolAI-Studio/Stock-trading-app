@@ -112,7 +112,20 @@ function Outcome({ log }: { log: WebhookLog }) {
       </div>
     )
   }
-  return <Badge tone="good">已建立訂單 #{log.order_id}</Badge>
+  return (
+    <div className="space-y-1">
+      <Badge tone="good">已建立訂單 #{log.order_id}</Badge>
+      {/* Works, but only partly protected. Better learnt here than by being
+          replayed -- an alert without an id can be posted again by anyone who
+          got hold of the body, and the only thing stopping that is a short
+          identical-body window. */}
+      {log.missing_id && (
+        <p className="max-w-xs text-xs text-amber-300">
+          這則沒有 id，無法完全防止重放。請照上面的設定說明加上 <code>&quot;id&quot;</code>。
+        </p>
+      )}
+    </div>
+  )
 }
 
 function Badge({ tone, children }: { tone: 'good' | 'warn' | 'bad'; children: React.ReactNode }) {
