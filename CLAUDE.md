@@ -24,7 +24,7 @@
    | --- | --- | --- |
    | **IEEE 12207** | 需求→設計→實作→驗證→維運全程有跡可循；決策寫進 commit message 和 `CLAUDE.md`，不留在對話裡 | 進行中 |
    | **TDD** | 先紅後綠。每個功能先寫會失敗的測試，確認它為**正確的原因**失敗，才動實作 | ✅ |
-   | **Linter** | `ruff check` + `ruff format`（後端）、`tsc --noEmit` + `oxlint`（前端）。除錯先看 linter，不要用 print 猜 | ✅ |
+   | **Linter** | `ruff check` + `ruff format`（後端）、**`npm run build`**（前端，等於 `tsc -b` + vite build）+ `oxlint`。前端不要只跑 `tsc --noEmit`——它不涵蓋測試檔，漏掉的型別錯誤會等到 CI 的 build 步驟才爆。除錯先看 linter，不要用 print 猜 | ✅ |
    | **Git** | 每個邏輯單元一個 commit，訊息寫清楚「為什麼」而不只是「改了什麼」 | ✅ |
    | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數 | ✅ CI；CD 待做（Render 自動部署 webhook 沒觸發，目前手動） |
    | **DevSecOps** | 安全左移：相依套件漏洞掃描（Dependabot/`pip-audit`）、密鑰不進版控、CI 內做 SAST、部署前檢查設定 | ❌ 待做 |
