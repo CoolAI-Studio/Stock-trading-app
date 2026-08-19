@@ -101,6 +101,17 @@ const CATALOGUE = {
   ],
 }
 
+const PERFORMANCE = {
+  total_orders: 0,
+  filled_orders: 0,
+  realized_pnl: null,
+  open_quantity: '0',
+  open_cost: '0',
+  bought_value: '0',
+  sold_value: '0',
+  notes: [],
+}
+
 const ALERT: StrategyAlert = {
   id: 7,
   strategy_id: 1,
@@ -134,6 +145,7 @@ describe('StrategiesPage', () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/strategies/samples') return [] as never
+      if (path.endsWith('/performance')) return PERFORMANCE as never
       if (path === '/api/strategies/1') return { ...STRATEGY, source_code: SAVED_SOURCE } as never
       if (path === '/api/risk-settings') return GLOBAL_RISK as never
       return [] as never
@@ -1034,6 +1046,7 @@ describe('order size and data feed', () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/strategies/samples') return [] as never
+      if (path.endsWith('/performance')) return PERFORMANCE as never
       if (path === '/api/risk-settings') return GLOBAL_RISK as never
       return [] as never
     })
@@ -1096,6 +1109,7 @@ describe('why a strategy is quiet', () => {
   it('shows the risk gate that refused the last signal', async () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies/samples') return [] as never
+      if (path.endsWith('/performance')) return PERFORMANCE as never
       if (path === '/api/strategies')
         return [
           {
@@ -1118,6 +1132,7 @@ describe('why a strategy is quiet', () => {
     // hid it behind `consecutive_errors > 0` -- so it never once appeared.
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies/samples') return [] as never
+      if (path.endsWith('/performance')) return PERFORMANCE as never
       if (path === '/api/strategies')
         return [
           { ...STRATEGY, last_error: '暖身中：已累積 12/30 根 K 棒', consecutive_errors: 0 },

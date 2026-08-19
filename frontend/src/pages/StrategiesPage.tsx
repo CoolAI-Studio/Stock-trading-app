@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
 import { Pager } from '../components/Pager'
+import { StrategyScorecard } from '../components/StrategyScorecard'
 import { ExportButton } from '../components/ExportButton'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
@@ -492,6 +493,10 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
         dataSource={dataSource}
         onDataSource={setDataSource}
       />
+      {/* In the edit panel rather than the row: it is the screen the owner
+          opens when asking whether to keep this strategy, and a scorecard on
+          every row of a list is noise. */}
+      <StrategyScorecard strategyId={strategy.id} />
       <AlertOnlyField
         id={`edit-strategy-alert-only-${strategy.id}`}
         checked={alertOnly}

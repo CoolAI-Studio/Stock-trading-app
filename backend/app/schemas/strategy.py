@@ -137,3 +137,19 @@ class StrategyGenerateResult(StrategyValidateResult):
 class SampleStrategyInfo(BaseModel):
     filename: str
     source_code: str
+
+
+class StrategyPerformanceRead(BaseModel):
+    """A live scorecard, on a different basis from the backtest's -- which is
+    exactly why `notes` travels with it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    total_orders: int
+    filled_orders: int
+    realized_pnl: MoneyStr | None
+    open_quantity: MoneyStr
+    open_cost: MoneyStr
+    bought_value: MoneyStr
+    sold_value: MoneyStr
+    notes: list[str]

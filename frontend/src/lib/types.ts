@@ -394,3 +394,20 @@ export interface WebhookSetup {
   example_message: string
   notes: string[]
 }
+
+/** A strategy's live scorecard.
+ *
+ * Deliberately on a different basis from the backtest's -- live fills charge
+ * no commission or tax yet -- which is why `notes` travels with it. */
+export interface StrategyPerformance {
+  total_orders: number
+  filled_orders: number
+  /** null, not 0, when nothing has filled: "0 元" reads as "traded and broke
+   * even", which is a different statement from "has not traded". */
+  realized_pnl: string | null
+  open_quantity: string
+  open_cost: string
+  bought_value: string
+  sold_value: string
+  notes: string[]
+}

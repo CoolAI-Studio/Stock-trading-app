@@ -16,12 +16,13 @@ from app.schemas.strategy import (
     StrategyDetail,
     StrategyGenerateRequest,
     StrategyGenerateResult,
+    StrategyPerformanceRead,
     StrategyRead,
     StrategyUpdate,
     StrategyValidateRequest,
     StrategyValidateResult,
 )
-from app.services import risk_resolver
+from app.services import risk_resolver, strategy_performance
 from app.services.ai_provider import get_ai_provider
 from app.services.market_data.base import bars_from_closes
 from app.services.market_loop import release_strategy
@@ -338,3 +339,19 @@ def deactivate_strategy(
     # pause into today's, with the gap invisible to the strategy.
     release_strategy(strategy_id)
     return strategy
+
+
+@router.get("/{strategy_id}/performance", response_model=StrategyPerformanceRead)
+def strategy_performance_report(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+):
+    """What this strategy has actually done since going live.
+
+    The backtest produces a full report and a month of real running produced
+    nothing -- the orders page says 策略訊號 without saying which strategy, so
+    two running at once were indistinguishable.
+    """
+    strategy = _get_owned_strategy(db, user, strategy_id)
+    return strategy_performance.summarise(db, strategy)
