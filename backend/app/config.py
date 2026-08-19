@@ -142,6 +142,41 @@ def verify_required_secrets(s: Settings) -> None:
                 'python -c "import secrets; print(secrets.token_urlsafe(48))"'
             )
 
+    _verify_encryption_key(s)
+
+
+def _verify_encryption_key(s: Settings) -> None:
+    """Checked at boot rather than on first use.
+
+    EncryptedJSON reads this key when a secret is actually written, so a
+    deploy that forgot it came up green, passed its health check, and then
+    threw an unexplained 500 the first time the owner tried to save a Telegram
+    token or a broker key -- days later, on the one screen that matters. A
+    malformed key does the same: present enough for a truthiness check, wrong
+    enough to fail at the moment of use.
+    """
+    from cryptography.fernet import Fernet
+
+    key = (s.SECRET_ENCRYPTION_KEY or "").strip()
+    hint = (
+        "Generate one with: "
+        'python -c "from cryptography.fernet import Fernet; '
+        'print(Fernet.generate_key().decode())"'
+    )
+    if not key:
+        raise RuntimeError(
+            "SECRET_ENCRYPTION_KEY is unset -- refusing to start, because broker "
+            f"credentials and notification tokens cannot be stored without it. {hint}"
+        )
+    try:
+        Fernet(key.encode())
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(
+            "SECRET_ENCRYPTION_KEY is not a valid Fernet key -- refusing to start, "
+            "because it would fail the first time a secret is saved rather than now. "
+            f"{hint}"
+        ) from exc
+
 
 def enforce_required_secrets(s: Settings) -> None:
     """Startup guard (called from app/main.py). Unlike SECRET_ENCRYPTION_KEY,

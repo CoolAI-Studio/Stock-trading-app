@@ -19,12 +19,19 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    subject = decode_token(token)
+    subject, version = decode_token(token)
     if subject is None:
         raise credentials_error
 
     user = db.get(User, int(subject))
     if user is None:
+        raise credentials_error
+
+    # Where revocation actually happens. A token minted before the password
+    # changed carries the older version and stops here, which is the whole
+    # point -- otherwise whoever held it kept broker keys and order placement
+    # for up to a day after the owner locked them out.
+    if version < user.token_version:
         raise credentials_error
 
     return user

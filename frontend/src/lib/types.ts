@@ -425,3 +425,17 @@ export interface BackupSchedule {
   last_error: string | null
   has_passphrase: boolean
 }
+
+/** The signed-in account.
+ *
+ * Two login stamps rather than one: "last login" showing the session you are
+ * sitting in tells you nothing -- the one before it is what you can recognise
+ * or fail to. */
+export interface Account {
+  id: number
+  email: string
+  is_active: boolean
+  timezone: string
+  last_login_at: string | null
+  previous_login_at: string | null
+}

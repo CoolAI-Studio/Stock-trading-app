@@ -9,6 +9,7 @@ import { PositionsPage } from './pages/PositionsPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { RiskSettingsPage } from './pages/RiskSettingsPage'
 import { BrokerSettingsPage } from './pages/BrokerSettingsPage'
+import { AccountPage } from './pages/AccountPage'
 import { WebhooksPage } from './pages/WebhooksPage'
 import { BacktestPage } from './pages/BacktestPage'
 
@@ -27,6 +28,7 @@ function App() {
           <Route path="/broker-settings" element={<BrokerSettingsPage />} />
           <Route path="/backtest" element={<BacktestPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/account" element={<AccountPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

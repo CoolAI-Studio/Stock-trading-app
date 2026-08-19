@@ -9,6 +9,7 @@ from app.config import settings
 from app.core import login_throttle
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
+from app.models.mixins import utcnow
 from app.models.user import User
 from app.schemas.auth import ChangePasswordRequest, RegisterRequest, Token
 from app.schemas.user import UserRead
@@ -66,7 +67,13 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         )
 
     login_throttle.clear(throttle_key)
-    token = create_access_token(subject=str(user.id))
+    # Recorded before the token is minted, and the previous one kept: "last
+    # login" showing the login happening right now tells the owner nothing,
+    # while the one before it is something they can recognise or not.
+    user.previous_login_at = user.last_login_at
+    user.last_login_at = utcnow()
+    db.commit()
+    token = create_access_token(subject=str(user.id), token_version=user.token_version)
     return Token(access_token=token)
 
 
@@ -86,9 +93,28 @@ def change_password(
         )
 
     user.hashed_password = hash_password(payload.new_password)
+    # Every token issued before now stops working. Without this, changing the
+    # password did nothing to whoever already held one -- they kept full
+    # access until it expired on its own, which makes "change your password"
+    # useless as a response to a compromise.
+    user.token_version += 1
     db.commit()
 
 
 @router.get("/me", response_model=UserRead)
 def me(user: User = Depends(get_current_active_user)) -> User:
     return user
+
+
+@router.post("/logout-everywhere", status_code=status.HTTP_204_NO_CONTENT)
+def logout_everywhere(
+    db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> None:
+    """Invalidate every token, including the one that asked.
+
+    Signing out other devices while leaving the one in your hand signed in has
+    not done what it says, and the owner reaching for this is not in a mood to
+    be reassured incorrectly. They log in again afterwards.
+    """
+    user.token_version += 1
+    db.commit()
