@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { ActionError } from '../components/ActionError'
 import type { Position, Strategy } from '../lib/types'
 
 const GLOBAL_RISK_LABEL = '全域'
@@ -76,6 +77,13 @@ function AdjustPositionForm({ position, onDone }: { position: Position; onDone: 
   )
 }
 
+/** Grey when there is no quote: an unpriced position is neither winning nor
+ * losing, and colouring it green would say it was. */
+function unrealizedTone(pnl: string | null): string {
+  if (pnl === null) return 'text-slate-500'
+  return Number(pnl) >= 0 ? 'text-emerald-400' : 'text-red-400'
+}
+
 function PositionRow({ position, riskOwner }: { position: Position; riskOwner: string }) {
   const [adjusting, setAdjusting] = useState(false)
   const queryClient = useQueryClient()
@@ -97,6 +105,20 @@ function PositionRow({ position, riskOwner }: { position: Position; riskOwner: s
         <td className="py-2 pr-4 font-medium">{position.symbol}</td>
         <td className="py-2 pr-4">{position.quantity}</td>
         <td className="py-2 pr-4">{position.avg_entry_price}</td>
+        <td className="py-2 pr-4" data-testid="current-price">
+          {position.current_price ?? '—'}
+        </td>
+        {/* The reason this page exists: am I up or down right now. Both
+            figures are null together when no quote has reached this symbol,
+            and an em-dash says that -- a zero would read as "flat". */}
+        <td
+          data-testid="unrealized"
+          className={`py-2 pr-4 ${unrealizedTone(position.unrealized_pnl)}`}
+        >
+          {position.unrealized_pnl === null
+            ? '—'
+            : `${position.unrealized_pnl}（${position.unrealized_pnl_pct}%）`}
+        </td>
         <td
           className={`py-2 pr-4 ${Number(position.realized_pnl) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
         >
@@ -116,7 +138,8 @@ function PositionRow({ position, riskOwner }: { position: Position; riskOwner: s
             {riskOwner}
           </span>
         </td>
-        <td className="flex gap-2 py-2">
+        <td className="flex flex-wrap items-center gap-2 py-2">
+          <ActionError error={flattenMutation.error} />
           <button
             onClick={() => setAdjusting((v) => !v)}
             className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600"
@@ -258,6 +281,8 @@ export function PositionsPage() {
               <th className="pb-2 font-normal">代號</th>
               <th className="pb-2 font-normal">數量</th>
               <th className="pb-2 font-normal">平均成本</th>
+              <th className="pb-2 font-normal">現價</th>
+              <th className="pb-2 font-normal">未實現損益</th>
               <th className="pb-2 font-normal">已實現損益</th>
               <th className="pb-2 font-normal">建倉時間</th>
               <th className="pb-2 font-normal">風險設定</th>

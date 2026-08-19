@@ -18,6 +18,17 @@ class PositionRead(BaseModel):
     # settings apply. Surfaced so the owner can see that rather than guess it.
     strategy_id: int | None
 
+    # What it is worth now. All four are None together when no quote has
+    # reached this symbol yet -- deliberately not zero, which would read as
+    # "flat", a much more reassuring statement than "the price feed has not
+    # got here". quote_time comes along so a price left over from Friday
+    # cannot pass for a live one.
+    current_price: MoneyStr | None = None
+    market_value: MoneyStr | None = None
+    unrealized_pnl: MoneyStr | None = None
+    unrealized_pnl_pct: MoneyStr | None = None
+    quote_time: UtcDatetime | None = None
+
 
 class PositionAdjust(BaseModel):
     # Non-negative: this app has no short-selling concept, and a negative

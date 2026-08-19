@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
+  DataSource,
   IndicatorCatalogue,
   OrderSide,
   RiskSettings,
@@ -126,6 +127,81 @@ function IndicatorCatalogueBrowser() {
       )}
     </div>
   )
+}
+
+/** Order size and data feed.
+ *
+ * Both existed as columns the backend honoured and neither had a field, so
+ * every strategy ever created here traded one unit of a yfinance symbol --
+ * `default_quantity` defaults to 1 and `data_source` to yfinance, and nothing
+ * on screen could change either. */
+function TradingFields({
+  idPrefix,
+  quantity,
+  onQuantity,
+  dataSource,
+  onDataSource,
+}: {
+  idPrefix: string
+  quantity: string
+  onQuantity: (value: string) => void
+  dataSource: DataSource
+  onDataSource: (value: DataSource) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-4">
+      <div>
+        <label htmlFor={`${idPrefix}-quantity`} className="text-sm text-slate-400">
+          每次下單數量
+        </label>
+        <input
+          id={`${idPrefix}-quantity`}
+          value={quantity}
+          onChange={(e) => onQuantity(e.target.value)}
+          className="block w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          這支策略每次發出訊號要買賣多少單位。台股整股請填 1000 的倍數。
+        </p>
+      </div>
+      <div>
+        <label htmlFor={`${idPrefix}-data-source`} className="text-sm text-slate-400">
+          資料來源
+        </label>
+        <select
+          id={`${idPrefix}-data-source`}
+          value={dataSource}
+          onChange={(e) => onDataSource(e.target.value as DataSource)}
+          className="block w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+        >
+          <option value="yfinance">Yahoo（台股／美股）</option>
+          <option value="binance">Binance（加密貨幣）</option>
+        </select>
+        <p className="mt-1 text-xs text-slate-500">
+          代號要跟來源相符：Yahoo 用 2330.TW、AAPL，Binance 用 BTCUSDT。
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function StrategyStatusNote({ strategy }: { strategy: Strategy }) {
+  if (strategy.consecutive_errors > 0) {
+    return <span className="text-xs text-red-400">{strategy.last_error}</span>
+  }
+  if (strategy.last_blocked_reason) {
+    return (
+      <span className="text-xs text-amber-300">
+        訊號被風控擋下：{strategy.last_blocked_reason}
+      </span>
+    )
+  }
+  // Not an error, despite the column it travels in: the backend puts the
+  // warm-up progress here because there was nowhere else to put it.
+  if (strategy.last_error) {
+    return <span className="text-xs text-sky-300">{strategy.last_error}</span>
+  }
+  return <span className="text-xs text-slate-600">—</span>
 }
 
 function AlertOnlyField({
@@ -320,6 +396,8 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
   // in hand, so the box never renders in the wrong state while the detail
   // request is in flight.
   const [alertOnly, setAlertOnly] = useState(strategy.alert_only)
+  const [quantity, setQuantity] = useState(strategy.default_quantity)
+  const [dataSource, setDataSource] = useState<DataSource>(strategy.data_source)
   // Same reasoning: the eight override columns ride on the list row, so the
   // toggle never renders off for a strategy that has its own settings.
   const [riskOverride, setRiskOverride] = useState(() => hasRiskOverrides(strategy))
@@ -352,7 +430,13 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const payload: Record<string, unknown> = { name, symbol, alert_only: alertOnly }
+      const payload: Record<string, unknown> = {
+        name,
+        symbol,
+        alert_only: alertOnly,
+        default_quantity: quantity,
+        data_source: dataSource,
+      }
       // Only send source_code once the real one has loaded, so a save that
       // races the fetch can't overwrite the stored code with an empty box.
       if (sourceCode !== null) payload.source_code = sourceCode
@@ -396,6 +480,13 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
+      <TradingFields
+        idPrefix={`edit-strategy-${strategy.id}`}
+        quantity={quantity}
+        onQuantity={setQuantity}
+        dataSource={dataSource}
+        onDataSource={setDataSource}
+      />
       <AlertOnlyField
         id={`edit-strategy-alert-only-${strategy.id}`}
         checked={alertOnly}
@@ -512,9 +603,18 @@ function StrategyRow({ strategy }: { strategy: Strategy }) {
             {hasRiskOverrides(strategy) ? '自訂' : '全域'}
           </span>
         </td>
+        <td className="py-2 pr-4" data-testid="order-size">
+          {strategy.default_quantity}
+        </td>
         <td className="py-2 pr-4 text-slate-400">{strategy.last_signal ?? '—'}</td>
-        <td className="py-2 pr-4 text-red-400">
-          {strategy.consecutive_errors > 0 ? strategy.last_error : ''}
+        {/* Three different reasons a strategy can look idle, and only one of
+            them used to show. `consecutive_errors > 0` hid the warm-up note
+            the backend already writes into last_error, and a signal refused
+            by the risk gate had nowhere to appear at all -- so "still warming
+            up", "blocked by its own capital ceiling" and "nothing to say"
+            were pixel-identical. */}
+        <td className="py-2 pr-4">
+          <StrategyStatusNote strategy={strategy} />
         </td>
         <td className="flex gap-2 py-2">
           <button
@@ -555,6 +655,8 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [symbol, setSymbol] = useState('')
   const [sourceCode, setSourceCode] = useState('')
   const [alertOnly, setAlertOnly] = useState(false)
+  const [quantity, setQuantity] = useState('1')
+  const [dataSource, setDataSource] = useState<DataSource>('yfinance')
   const [riskOverride, setRiskOverride] = useState(false)
   const [riskValues, setRiskValues] = useState(emptyOverrides)
   const [description, setDescription] = useState('')
@@ -650,6 +752,8 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         symbol,
         source_code: sourceCode,
         alert_only: alertOnly,
+        default_quantity: quantity,
+        data_source: dataSource,
         // Left out entirely while the toggle is off: the columns default to
         // NULL, which is inherit, so an untouched form sends what it always
         // sent.
@@ -774,6 +878,13 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
+      <TradingFields
+        idPrefix="strategy"
+        quantity={quantity}
+        onQuantity={setQuantity}
+        dataSource={dataSource}
+        onDataSource={setDataSource}
+      />
       <AlertOnlyField id="strategy-alert-only" checked={alertOnly} onChange={setAlertOnly} />
       <RiskOverrideFields
         idPrefix="strategy"
@@ -931,8 +1042,12 @@ export function StrategiesPage() {
             <th className="pb-2 font-normal">狀態</th>
             <th className="pb-2 font-normal">模式</th>
             <th className="pb-2 font-normal">風險設定</th>
+            <th className="pb-2 font-normal">下單量</th>
             <th className="pb-2 font-normal">最新訊號</th>
-            <th className="pb-2 font-normal">錯誤</th>
+            {/* Not just errors any more: warm-up progress and risk-gate
+                refusals land here too, because all three answer the same
+                question -- why is this strategy not doing anything. */}
+            <th className="pb-2 font-normal">狀況</th>
             <th className="pb-2 font-normal">操作</th>
           </tr>
         </thead>

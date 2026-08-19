@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -6,12 +7,20 @@ import { useWebSocket } from '../lib/useWebSocket'
 
 vi.mock('../lib/useWebSocket', () => ({ useWebSocket: vi.fn() }))
 vi.mock('../context/useAuth', () => ({ useAuth: () => ({ logout: vi.fn() }) }))
+// The layout now carries the worker-health banner, which is a query.
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
+  api: { get: vi.fn().mockResolvedValue({ status: 'ok', checks: {} }) },
+}))
 
 function renderLayout() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter>
-      <Layout />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <Layout />
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 

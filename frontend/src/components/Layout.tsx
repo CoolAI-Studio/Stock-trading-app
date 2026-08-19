@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useWebSocket } from '../lib/useWebSocket'
+import { WorkerHealthBanner } from './WorkerHealthBanner'
 
 const NAV_ITEMS = [
   { to: '/', label: '儀表板', end: true },
@@ -43,6 +44,10 @@ export function Layout() {
           登出
         </button>
       </header>
+      {/* Directly under the nav, on every page: the failure it reports makes
+          every other page's contents untrustworthy, so it cannot live on the
+          dashboard alone. */}
+      <WorkerHealthBanner />
       <main className="p-6">
         <Outlet />
       </main>

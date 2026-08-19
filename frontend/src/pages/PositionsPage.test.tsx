@@ -3,10 +3,13 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PositionsPage } from './PositionsPage'
-import { api } from '../lib/api'
+import { ApiError, api } from '../lib/api'
 import type { Position } from '../lib/types'
 
-vi.mock('../lib/api', () => ({
+// The page reads ApiError to decide how to word a failure, so the mock has to
+// carry the real class -- a stubbed one would never match `instanceof`.
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
   api: { get: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }))
 
@@ -17,6 +20,11 @@ const POSITION: Position = {
   realized_pnl: '25.50',
   opened_at: '2026-08-16T00:00:00Z',
   strategy_id: null,
+  current_price: null,
+  market_value: null,
+  unrealized_pnl: null,
+  unrealized_pnl_pct: null,
+  quote_time: null,
 }
 
 function renderPage() {
@@ -128,5 +136,63 @@ describe('PositionsPage', () => {
     renderPage()
 
     expect(await screen.findByText(/由誰先建立部位就跟誰/)).toBeInTheDocument()
+  })
+})
+
+describe('what the position is worth now', () => {
+  const VALUED: Position = {
+    ...POSITION,
+    quantity: '1000',
+    avg_entry_price: '1000',
+    current_price: '1050',
+    market_value: '1050000',
+    unrealized_pnl: '50000',
+    unrealized_pnl_pct: '5',
+    quote_time: '2026-08-19T01:30:00Z',
+  }
+
+  it('shows the live price and the unrealized gain', async () => {
+    vi.mocked(api.get).mockResolvedValue([VALUED] as never)
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('current-price')).toHaveTextContent('1050')
+    expect(within(row).getByTestId('unrealized')).toHaveTextContent('50000')
+    expect(within(row).getByTestId('unrealized')).toHaveTextContent('5')
+  })
+
+  it('colours a loss differently from a gain', async () => {
+    vi.mocked(api.get).mockResolvedValue([
+      { ...VALUED, current_price: '900', unrealized_pnl: '-100000', unrealized_pnl_pct: '-10' },
+    ] as never)
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('unrealized').className).toContain('red')
+  })
+
+  it('says the price has not arrived rather than showing a zero', async () => {
+    // Zero would read as "flat" -- a much more reassuring statement than
+    // "the price feed has not reached this symbol".
+    vi.mocked(api.get).mockResolvedValue([POSITION] as never)
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('unrealized')).toHaveTextContent('—')
+    expect(within(row).getByTestId('unrealized')).not.toHaveTextContent('0')
+  })
+})
+
+describe('when an action fails', () => {
+  it('says so instead of leaving the row looking untouched', async () => {
+    vi.mocked(api.get).mockResolvedValue([POSITION] as never)
+    vi.mocked(api.delete).mockRejectedValue(new ApiError(409, '這檔還有未確認的委託'))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: '出清' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('這檔還有未確認的委託')
   })
 })

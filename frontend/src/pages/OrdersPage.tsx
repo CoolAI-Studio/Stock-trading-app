@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
+import { ActionError } from '../components/ActionError'
 import { QueryError } from '../components/QueryError'
 import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
 
@@ -27,10 +28,17 @@ function useOrdersQuery(status?: string) {
 
 function PendingOrderRow({ order }: { order: Order }) {
   const [fillPrice, setFillPrice] = useState(order.signal_price ?? '')
+  // Prefilled with the whole order: filling in full is the common case and
+  // should need no typing, while a partial fill is a single edit away.
+  const [fillQuantity, setFillQuantity] = useState(order.quantity)
   const queryClient = useQueryClient()
 
   const confirmMutation = useMutation({
-    mutationFn: () => api.post(`/api/orders/${order.id}/confirm`, { fill_price: fillPrice }),
+    mutationFn: () =>
+      api.post(`/api/orders/${order.id}/confirm`, {
+        fill_price: fillPrice,
+        quantity: fillQuantity,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['positions'] })
@@ -43,6 +51,9 @@ function PendingOrderRow({ order }: { order: Order }) {
   })
 
   const busy = confirmMutation.isPending || rejectMutation.isPending
+  // Caught here rather than at the backend's 422, because the correction is
+  // one keystroke away and the round trip is not worth making anyone wait for.
+  const quantityFault = fillQuantityFault(fillQuantity, order.quantity)
 
   return (
     <tr className="border-b border-slate-800">
@@ -64,9 +75,21 @@ function PendingOrderRow({ order }: { order: Order }) {
           className="w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
         />
       </td>
-      <td className="flex gap-2 py-2">
+      <td className="py-2 pr-4">
+        <label htmlFor={`fill-qty-${order.id}`} className="sr-only">
+          成交數量
+        </label>
+        <input
+          id={`fill-qty-${order.id}`}
+          aria-label="成交數量"
+          value={fillQuantity}
+          onChange={(event) => setFillQuantity(event.target.value)}
+          className="w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm"
+        />
+      </td>
+      <td className="flex flex-wrap items-center gap-2 py-2">
         <button
-          disabled={busy || !fillPrice}
+          disabled={busy || !fillPrice || quantityFault !== null}
           onClick={() => confirmMutation.mutate()}
           className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >
@@ -79,9 +102,26 @@ function PendingOrderRow({ order }: { order: Order }) {
         >
           拒絕
         </button>
+        {quantityFault !== null ? (
+          <p role="alert" className="text-xs text-amber-300">
+            {quantityFault}
+          </p>
+        ) : (
+          <ActionError error={confirmMutation.error ?? rejectMutation.error} />
+        )}
       </td>
     </tr>
   )
+}
+
+/** null when the typed quantity is usable. Over-filling is the one that
+ * matters: the backend would accept it and grow the position past what the
+ * broker actually delivered. */
+function fillQuantityFault(typed: string, ordered: string): string | null {
+  const value = Number(typed)
+  if (typed.trim() === '' || Number.isNaN(value) || value <= 0) return '請填成交數量'
+  if (value > Number(ordered)) return `成交數量不能超過委託數量 ${ordered}`
+  return null
 }
 
 function NewOrderForm({ onDone }: { onDone: () => void }) {
@@ -240,9 +280,10 @@ export function OrdersPage() {
             <tr>
               <th className="pb-2 font-normal">代號</th>
               <th className="pb-2 font-normal">方向</th>
-              <th className="pb-2 font-normal">數量</th>
+              <th className="pb-2 font-normal">委託數量</th>
               <th className="pb-2 font-normal">來源</th>
               <th className="pb-2 font-normal">成交價</th>
+              <th className="pb-2 font-normal">成交數量</th>
               <th className="pb-2 font-normal">操作</th>
             </tr>
           </thead>

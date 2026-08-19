@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
+from app.models.market import MarketQuote
 from app.models.position import Position
 from app.models.user import User
 from app.schemas.position import PositionAdjust, PositionRead
@@ -25,23 +26,63 @@ def _get_owned_position(db: Session, user: User, symbol: str) -> Position:
     return position
 
 
+def _valued(db: Session, positions: list[Position]) -> list[PositionRead]:
+    """Attach the live quote to each position.
+
+    The prices are already here -- the worker upserts market_quotes on every
+    poll and the stop-loss scan reads the same rows on the same tick. They
+    were simply never handed to the page that exists to answer "am I up or
+    down", which left the owner subtracting the dashboard's price from the
+    position's cost by hand.
+
+    Fetched in one query rather than per row: the positions page is the one
+    screen that renders every open symbol at once.
+    """
+    if not positions:
+        return []
+
+    quotes = {
+        quote.symbol: quote
+        for quote in db.query(MarketQuote)
+        .filter(MarketQuote.symbol.in_({p.symbol for p in positions}))
+        .all()
+    }
+
+    valued = []
+    for position in positions:
+        read = PositionRead.model_validate(position)
+        quote = quotes.get(position.symbol)
+        if quote is not None and quote.price is not None:
+            read.current_price = quote.price
+            read.market_value = position.quantity * quote.price
+            read.unrealized_pnl = (quote.price - position.avg_entry_price) * position.quantity
+            if position.avg_entry_price > 0:
+                read.unrealized_pnl_pct = (
+                    (quote.price - position.avg_entry_price) / position.avg_entry_price
+                ) * 100
+            read.quote_time = quote.quote_time or quote.fetched_at
+        valued.append(read)
+    return valued
+
+
 @router.get("", response_model=list[PositionRead])
 def list_positions(
     db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
-) -> list[Position]:
-    return (
+) -> list[PositionRead]:
+    positions = (
         db.query(Position)
         .filter(Position.user_id == user.id, Position.quantity != 0)
         .order_by(Position.symbol)
         .all()
     )
+    return _valued(db, positions)
 
 
 @router.get("/{symbol}", response_model=PositionRead)
 def get_position(
     symbol: str, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
-) -> Position:
-    return _get_owned_position(db, user, symbol)
+) -> PositionRead:
+    return _valued(db, [_get_owned_position(db, user, symbol)])[0]
 
 
 @router.patch("/{symbol}", response_model=PositionRead)

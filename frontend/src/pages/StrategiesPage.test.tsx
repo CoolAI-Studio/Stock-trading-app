@@ -51,6 +51,8 @@ const STRATEGY: Strategy = {
   last_run_at: null,
   last_error: null,
   consecutive_errors: 0,
+  last_blocked_reason: null,
+  last_blocked_at: null,
 }
 
 // The same strategy after opting in to two of the eight knobs; the other
@@ -432,6 +434,8 @@ describe('StrategiesPage', () => {
         name: 'renamed',
         symbol: 'AAPL',
         alert_only: false,
+        default_quantity: '1',
+        data_source: 'yfinance',
         source_code: SAVED_SOURCE,
       }),
     )
@@ -478,6 +482,8 @@ describe('StrategiesPage', () => {
         symbol: 'TSLA',
         source_code: 'class Strategy: pass',
         alert_only: true,
+        default_quantity: '1',
+        data_source: 'yfinance',
       }),
     )
   })
@@ -508,6 +514,8 @@ describe('StrategiesPage', () => {
         name: 'ma5-cross',
         symbol: 'AAPL',
         alert_only: true,
+        default_quantity: '1',
+        data_source: 'yfinance',
         source_code: SAVED_SOURCE,
       }),
     )
@@ -775,6 +783,8 @@ describe('StrategiesPage', () => {
         symbol: 'TSLA',
         source_code: 'class Strategy: pass',
         alert_only: false,
+        default_quantity: '1',
+        data_source: 'yfinance',
       }),
     )
   })
@@ -832,6 +842,8 @@ describe('StrategiesPage', () => {
         symbol: 'TSLA',
         source_code: 'class Strategy: pass',
         alert_only: false,
+        default_quantity: '1',
+        data_source: 'yfinance',
         capital: '50000',
         stop_loss_pct: null,
         take_profit_pct: null,
@@ -889,6 +901,8 @@ describe('StrategiesPage', () => {
         name: 'ma5-cross',
         symbol: 'AAPL',
         alert_only: false,
+        default_quantity: '1',
+        data_source: 'yfinance',
         source_code: SAVED_SOURCE,
         capital: null,
         stop_loss_pct: null,
@@ -941,6 +955,8 @@ describe('StrategiesPage', () => {
         symbol: 'TSLA',
         source_code: 'class Strategy: pass',
         alert_only: false,
+        default_quantity: '1',
+        data_source: 'yfinance',
         capital: null,
         stop_loss_pct: '0',
         take_profit_pct: null,
@@ -1010,5 +1026,108 @@ describe('StrategiesPage', () => {
     expect(screen.getByLabelText('本金：不限制')).toBeInTheDocument()
     expect(screen.getByLabelText('下單訊號冷卻時間（秒）：不冷卻')).toBeInTheDocument()
     expect(screen.getByLabelText('提醒間隔（秒）：每次都通知')).toBeInTheDocument()
+  })
+})
+
+describe('order size and data feed', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/strategies/samples') return [] as never
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
+      return [] as never
+    })
+  })
+
+  it('sends the order size when creating a strategy', async () => {
+    // Without a field the column keeps its default of 1, so every strategy
+    // ever created here traded one share at a time.
+    vi.mocked(api.post).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'tsmc')
+    await user.type(screen.getByLabelText('股票代號'), '2330.TW')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    const qty = screen.getByLabelText('每次下單數量')
+    await user.clear(qty)
+    await user.type(qty, '1000')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/strategies',
+        expect.objectContaining({ default_quantity: '1000' }),
+      ),
+    )
+  })
+
+  it('lets a strategy be pointed at the crypto feed', async () => {
+    // The Binance provider is registered and complete on the backend; the UI
+    // simply never offered the choice, so every strategy was a yfinance one.
+    vi.mocked(api.post).mockResolvedValue(STRATEGY as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('名稱'), 'btc')
+    await user.type(screen.getByLabelText('股票代號'), 'BTCUSDT')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.selectOptions(screen.getByLabelText('資料來源'), 'binance')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/strategies',
+        expect.objectContaining({ data_source: 'binance' }),
+      ),
+    )
+  })
+
+  it('shows the order size on the list, so a one-share strategy is obvious', async () => {
+    renderPage()
+    const row = (await screen.findByText(STRATEGY.name)).closest('tr') as HTMLElement
+    expect(within(row).getByTestId('order-size')).toHaveTextContent('1')
+  })
+})
+
+describe('why a strategy is quiet', () => {
+  it('shows the risk gate that refused the last signal', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies/samples') return [] as never
+      if (path === '/api/strategies')
+        return [
+          {
+            ...STRATEGY,
+            last_blocked_reason: '買進後「tsmc」的持倉成本會超過該策略的本金上限',
+            last_blocked_at: '2026-08-19T01:30:00Z',
+          },
+        ] as never
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText(STRATEGY.name)).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('本金上限')
+  })
+
+  it('shows a warm-up note even when nothing has errored', async () => {
+    // The backend writes the warm-up progress into last_error, and the row
+    // hid it behind `consecutive_errors > 0` -- so it never once appeared.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies/samples') return [] as never
+      if (path === '/api/strategies')
+        return [
+          { ...STRATEGY, last_error: '暖身中：已累積 12/30 根 K 棒', consecutive_errors: 0 },
+        ] as never
+      if (path === '/api/risk-settings') return GLOBAL_RISK as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText(STRATEGY.name)).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('12/30')
   })
 })

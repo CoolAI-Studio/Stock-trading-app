@@ -55,6 +55,12 @@ export interface Strategy extends StrategyRiskOverrides {
   last_run_at: string | null
   last_error: string | null
   consecutive_errors: number
+  /** Why the last signal did not become an order -- a capital ceiling, a
+   * cooldown, an identical order already pending. Distinct from last_error:
+   * the strategy worked, the risk gate refused it. Cleared as soon as an
+   * order gets through. */
+  last_blocked_reason: string | null
+  last_blocked_at: string | null
 }
 
 /** GET /api/strategies/{id} -- unlike the list response, this carries the
@@ -150,6 +156,14 @@ export interface Position {
    * take-profit thresholds it is scanned under. null means the global
    * settings apply -- a manual order or a TradingView fill. */
   strategy_id: number | null
+  /** What the position is worth now, from the same market_quotes rows the
+   * stop-loss scan reads. All four are null together when no quote has
+   * reached this symbol -- not zero, which would read as "flat". */
+  current_price: string | null
+  market_value: string | null
+  unrealized_pnl: string | null
+  unrealized_pnl_pct: string | null
+  quote_time: string | null
 }
 
 export interface Quote {

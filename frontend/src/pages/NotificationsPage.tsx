@@ -6,6 +6,35 @@ import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/t
 
 const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', failed: '失敗' }
 
+/** The SMTP settings, shaped the way the backend's EmailConfig reads them.
+ *
+ * All six have been accepted since day one; the form only ever sent three, so
+ * Gmail, Outlook, SendGrid -- anything that authenticates -- could not be
+ * configured at all, and the test button came back with an authentication
+ * error the page had no field to fix. */
+function emailConfig(fields: {
+  host: string
+  port: string
+  username: string
+  password: string
+  fromAddr: string
+  toAddr: string
+}): Record<string, string | number | boolean> {
+  const port = Number(fields.port)
+  return {
+    host: fields.host,
+    port: Number.isFinite(port) && port > 0 ? port : 587,
+    username: fields.username,
+    password: fields.password,
+    from_addr: fields.fromAddr,
+    to_addr: fields.toAddr,
+    // TLS on submit-port SMTP is what every hosted provider requires, and
+    // there is no field for it because turning it off is not a thing anyone
+    // configuring Gmail needs to do.
+    use_tls: true,
+  }
+}
+
 function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; onDone: () => void }) {
   const [label, setLabel] = useState(channel.label)
   const [isEnabled, setIsEnabled] = useState(channel.is_enabled)
@@ -14,6 +43,9 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
   const [accessToken, setAccessToken] = useState('')
   const [to, setTo] = useState('')
   const [host, setHost] = useState('')
+  const [port, setPort] = useState('587')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [fromAddr, setFromAddr] = useState('')
   const [toAddr, setToAddr] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -27,8 +59,13 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
           ? { bot_token: botToken, chat_id: chatId }
           : channel.channel_type === 'line'
             ? { access_token: accessToken, to }
-            : { host, from_addr: fromAddr, to_addr: toAddr }
-      const hasNewConfig = Object.values(config).some((v) => v.trim() !== '')
+            : emailConfig({ host, port, username, password, fromAddr, toAddr })
+      // Port is excluded on purpose: it is prefilled with 587, so counting it
+      // would make every save look like a new configuration and overwrite the
+      // stored credentials with the blank boxes the form shows for them.
+      const hasNewConfig = Object.entries(config).some(
+        ([key, value]) => key !== 'port' && String(value).trim() !== '',
+      )
       if (hasNewConfig) payload.config = config
       return api.patch<NotificationChannel>(`/api/notifications/channels/${channel.id}`, payload)
     },
@@ -126,6 +163,48 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
               onChange={(e) => setHost(e.target.value)}
               className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
             />
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label htmlFor={`edit-smtp-port-${channel.id}`} className="text-sm text-slate-400">
+                連接埠
+              </label>
+              <input
+                id={`edit-smtp-port-${channel.id}`}
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                inputMode="numeric"
+                className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              />
+            </div>
+            <div className="flex-1">
+              <label htmlFor={`edit-smtp-username-${channel.id}`} className="text-sm text-slate-400">
+                帳號
+              </label>
+              <input
+                id={`edit-smtp-username-${channel.id}`}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor={`edit-smtp-password-${channel.id}`} className="text-sm text-slate-400">
+              密碼
+            </label>
+            <input
+              id={`edit-smtp-password-${channel.id}`}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Gmail 要用「應用程式密碼」，不是你平常登入的密碼。連接埠留 587 即可。
+            </p>
           </div>
           <div>
             <label htmlFor={`edit-from-addr-${channel.id}`} className="text-sm text-slate-400">
@@ -242,6 +321,9 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
   const [accessToken, setAccessToken] = useState('')
   const [to, setTo] = useState('')
   const [host, setHost] = useState('')
+  const [port, setPort] = useState('587')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [fromAddr, setFromAddr] = useState('')
   const [toAddr, setToAddr] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -261,7 +343,7 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           ? { bot_token: botToken, chat_id: chatId }
           : channelType === 'line'
             ? { access_token: accessToken, to }
-            : { host, from_addr: fromAddr, to_addr: toAddr }
+            : emailConfig({ host, port, username, password, fromAddr, toAddr })
       return api.post('/api/notifications/channels', { channel_type: channelType, label, config })
     },
     onSuccess: () => {
@@ -365,6 +447,48 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
               onChange={(e) => setHost(e.target.value)}
               className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
             />
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label htmlFor="smtp-port" className="text-sm text-slate-400">
+                連接埠
+              </label>
+              <input
+                id="smtp-port"
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                inputMode="numeric"
+                className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              />
+            </div>
+            <div className="flex-1">
+              <label htmlFor="smtp-username" className="text-sm text-slate-400">
+                帳號
+              </label>
+              <input
+                id="smtp-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="smtp-password" className="text-sm text-slate-400">
+              密碼
+            </label>
+            <input
+              id="smtp-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Gmail 要用「應用程式密碼」，不是你平常登入的密碼。連接埠留 587 即可。
+            </p>
           </div>
           <div>
             <label htmlFor="from-addr" className="text-sm text-slate-400">

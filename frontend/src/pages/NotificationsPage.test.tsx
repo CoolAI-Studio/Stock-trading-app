@@ -202,3 +202,49 @@ describe('NotificationsPage', () => {
     expect(api.delete).toHaveBeenCalledWith('/api/notifications/channels/2')
   })
 })
+
+describe('SMTP credentials', () => {
+  it('sends the account and password, so an authenticating mail server works', async () => {
+    // Gmail, Outlook and every hosted SMTP need these. The backend read all
+    // six fields from day one; the form sent three, so the only reachable
+    // mail server was an unauthenticated one on a local network.
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByRole('radio', { name: 'email' }))
+    await user.type(screen.getByLabelText('名稱'), 'gmail')
+    await user.type(screen.getByLabelText('SMTP 主機'), 'smtp.gmail.com')
+    await user.type(screen.getByLabelText('帳號'), 'me@gmail.com')
+    await user.type(screen.getByLabelText('密碼'), 'app-password')
+    await user.type(screen.getByLabelText('寄件人信箱'), 'me@gmail.com')
+    await user.type(screen.getByLabelText('收件人信箱'), 'me@gmail.com')
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/notifications/channels',
+        expect.objectContaining({
+          config: expect.objectContaining({
+            host: 'smtp.gmail.com',
+            port: 587,
+            username: 'me@gmail.com',
+            password: 'app-password',
+            use_tls: true,
+          }),
+        }),
+      ),
+    )
+  })
+
+  it('masks the password field', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.click(screen.getByRole('radio', { name: 'email' }))
+
+    expect(screen.getByLabelText('密碼')).toHaveAttribute('type', 'password')
+  })
+})

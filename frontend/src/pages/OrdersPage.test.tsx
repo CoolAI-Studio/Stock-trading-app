@@ -3,10 +3,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { OrdersPage } from './OrdersPage'
-import { api } from '../lib/api'
+import { ApiError, api } from '../lib/api'
 import type { Order } from '../lib/types'
 
-vi.mock('../lib/api', () => ({
+// The row reads ApiError to word a failure, so the mock has to carry the
+// real class -- a stub would never match `instanceof`.
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
   api: { get: vi.fn(), post: vi.fn() },
 }))
 
@@ -64,7 +67,10 @@ describe('OrdersPage', () => {
     await user.click(screen.getByRole('button', { name: '確認' }))
 
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith('/api/orders/1/confirm', { fill_price: '151.25' }),
+      expect(api.post).toHaveBeenCalledWith('/api/orders/1/confirm', {
+        fill_price: '151.25',
+        quantity: '10',
+      }),
     )
   })
 
@@ -146,5 +152,91 @@ describe('a fill that came back smaller than the order', () => {
       return [{ ...PARTIAL, filled_quantity: '10' }] as never
     })
     expect((await quantityCell()).textContent).toBe('10')
+  })
+})
+
+describe('confirming a fill that came back smaller than the order', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [PENDING_ORDER] as never
+      return [] as never
+    })
+  })
+
+  it('sends the quantity that actually filled', async () => {
+    // The backend has honoured a partial fill all along -- it is what reaches
+    // the position, and it is what the capital gate is billed for. The UI
+    // never offered the box, so every partial fill was booked as a full one.
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    const price = await screen.findByLabelText('成交價')
+    await user.clear(price)
+    await user.type(price, '151.25')
+    const qty = screen.getByLabelText('成交數量')
+    await user.clear(qty)
+    await user.type(qty, '4')
+    await user.click(screen.getByRole('button', { name: '確認' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/orders/1/confirm', {
+        fill_price: '151.25',
+        quantity: '4',
+      }),
+    )
+  })
+
+  it('defaults to the whole order, so the common case needs no typing', async () => {
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    renderPage()
+
+    expect(await screen.findByLabelText('成交數量')).toHaveValue('10')
+  })
+
+  it('will not send a quantity larger than the order', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.type(await screen.findByLabelText('成交價'), '151.25')
+    const qty = screen.getByLabelText('成交數量')
+    await user.clear(qty)
+    await user.type(qty, '11')
+
+    expect(screen.getByRole('button', { name: '確認' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('不能超過委託數量')
+  })
+})
+
+describe('when confirming or rejecting fails', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [PENDING_ORDER] as never
+      return [] as never
+    })
+  })
+
+  it('says why, instead of leaving the row looking untouched', async () => {
+    // Worst case is real: on a broker failure the backend commits the order as
+    // FAILED and then returns 422, so the row went on rendering 待確認 while
+    // the database said otherwise -- and pressing again is the natural move.
+    vi.mocked(api.post).mockRejectedValue(new ApiError(422, '持倉不足，無法賣出 10 股'))
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.type(await screen.findByLabelText('成交價'), '151.25')
+    await user.click(screen.getByRole('button', { name: '確認' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('持倉不足，無法賣出 10 股')
+  })
+
+  it('reports a failed rejection too', async () => {
+    vi.mocked(api.post).mockRejectedValue(new ApiError(409, 'Order is already confirmed'))
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '拒絕' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('already confirmed')
   })
 })
