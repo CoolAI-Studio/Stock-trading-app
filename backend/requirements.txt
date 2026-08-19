@@ -1,11 +1,11 @@
 fastapi>=0.115
-uvicorn[standard]>=0.32
+uvicorn[standard]>=0.37
 sqlalchemy>=2.0
 alembic>=1.13
 pydantic>=2.9
-pydantic-settings>=2.6
+pydantic-settings>=2.15
 email-validator>=2.2
-passlib[bcrypt]>=1.7
+passlib[bcrypt]>=1.7.4
 # passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt>=4.1 -- pin below that
 # until passlib cuts a compatible release (or we drop passlib for direct bcrypt).
 bcrypt<4.1
@@ -20,7 +20,7 @@ numpy>=1.26
 pandas>=2.2
 pytest>=8.3
 pytest-asyncio>=0.24
-ruff>=0.6
+ruff>=0.16
 
 # Optional cloud Postgres driver (needed once DATABASE_URL points at Neon/Supabase/etc.)
 psycopg2-binary>=2.9
@@ -35,4 +35,4 @@ psycopg2-binary>=2.9
 # python:3.13-slim -- the deploy image -- does not ship one either, so without
 # this the container would fail at import and never start. It arrives today
 # only as somebody else's transitive dependency, which is not a guarantee.
-tzdata>=2024.1
+tzdata>=2026.1
