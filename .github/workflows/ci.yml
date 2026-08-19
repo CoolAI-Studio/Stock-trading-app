@@ -39,6 +39,14 @@ jobs:
         # in the deploy image would mean CI never tested the build that ships.
         run: pip install -r requirements.lock
 
+      - name: The lock still matches what is declared
+        # Runs before the tests, because if these disagree the tests are
+        # measuring the wrong thing. Changing a range in requirements.txt
+        # without regenerating the lock produces a green build that tested
+        # nothing -- which is how a Dependabot PR relaxing a deliberate pin
+        # sailed through on its first day.
+        run: python scripts/check_lock.py
+
       - name: Lint
         run: ruff check app tests
 

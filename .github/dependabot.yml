@@ -16,7 +16,19 @@ updates:
       # reviewing this is far more likely to read one grouped diff than to
       # work through a queue, and an unread PR protects nobody.
       python-minor-and-patch:
+        # patterns is required for a group to match anything: without it the
+        # first run opened eleven separate pull requests, which is exactly the
+        # queue this was meant to avoid.
+        patterns: ["*"]
         update-types: [minor, patch]
+
+    ignore:
+      # Deliberate, with the reason written next to it in requirements.txt:
+      # passlib 1.7.4 reads bcrypt.__about__, which bcrypt removed in 4.1.
+      # Relaxing this breaks password hashing, and Dependabot has no way to
+      # know that -- it proposed exactly this on its first run.
+      - dependency-name: bcrypt
+        versions: [">=4.1"]
 
   - package-ecosystem: npm
     directory: /frontend
@@ -25,6 +37,7 @@ updates:
     open-pull-requests-limit: 5
     groups:
       js-minor-and-patch:
+        patterns: ["*"]
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions
