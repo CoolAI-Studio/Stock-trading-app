@@ -752,3 +752,88 @@ def test_migrated_strategy_still_runs_on_the_global_settings(db_session):
     assert first.created is True
     assert second.reason == "signal cooldown active"
 
+
+
+# ---- 0 means "off", and a 0 override is not an absent one ----
+# Three states, and they must stay three: NULL = inherit the global, 0 = this
+# knob is switched off for this strategy, a number = that limit. Collapsing 0
+# into NULL would hand a strategy back the global stop-loss it just turned off.
+
+
+def test_a_zero_override_is_kept_distinct_from_inheriting(db_session):
+    user = _make_user(db_session)
+    settings = _make_risk(db_session, user, **GLOBAL_VALUES)
+    strategy = _make_strategy(
+        db_session, user, **{field: 0 for field in risk_resolver.OVERRIDABLE_FIELDS}
+    )
+
+    effective = risk_resolver.resolve(settings, strategy)
+
+    for field in risk_resolver.OVERRIDABLE_FIELDS:
+        assert getattr(effective, field) == 0, field
+
+
+def test_strategy_stop_loss_of_zero_switches_it_off_instead_of_inheriting(db_session):
+    user = _make_user(db_session)
+    _make_risk(db_session, user, stop_loss_pct=Decimal("0.05"), take_profit_pct=Decimal("0.10"))
+    strategy = _make_strategy(db_session, user, stop_loss_pct=Decimal(0))
+    _make_position(
+        db_session,
+        user,
+        quantity=Decimal(10),
+        avg_entry_price=Decimal(100),
+        strategy_id=strategy.id,
+    )
+
+    # A 50% drawdown -- ten times the global stop. No exit, because this
+    # strategy's stop-loss is off, not merely unset.
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=50.0))
+
+    assert db_session.query(Order).filter(Order.side == OrderSide.SELL).count() == 0
+
+
+def test_strategy_take_profit_of_zero_switches_it_off_instead_of_inheriting(db_session):
+    user = _make_user(db_session)
+    _make_risk(db_session, user, stop_loss_pct=Decimal("0.05"), take_profit_pct=Decimal("0.10"))
+    strategy = _make_strategy(db_session, user, take_profit_pct=Decimal(0))
+    _make_position(
+        db_session,
+        user,
+        quantity=Decimal(10),
+        avg_entry_price=Decimal(100),
+        strategy_id=strategy.id,
+    )
+
+    # A 50% gain -- five times the global target, and still no exit.
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=150.0))
+
+    assert db_session.query(Order).filter(Order.side == OrderSide.SELL).count() == 0
+
+
+def test_strategy_max_pending_of_zero_switches_it_off_instead_of_inheriting(db_session):
+    user = _make_user(db_session)
+    _make_risk(db_session, user, max_pending_orders_per_symbol=1, signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, max_pending_orders_per_symbol=0)
+
+    buy = create_pending_order(db_session, user, _signal(strategy_id=strategy.id))
+    # The global cap of 1 would refuse this second pending order for AAPL;
+    # the strategy's 0 means it has no cap of its own to hit.
+    sell = create_pending_order(
+        db_session, user, _signal(side=OrderSide.SELL, strategy_id=strategy.id)
+    )
+
+    assert buy.created is True
+    assert sell.created is True
+
+
+def test_global_stop_loss_of_zero_switches_it_off(db_session):
+    """The same rule one level up: an unattributed position resolves to the
+    global row, and 0 there is off too."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, stop_loss_pct=Decimal(0), take_profit_pct=Decimal(0))
+    _make_position(db_session, user, quantity=Decimal(10), avg_entry_price=Decimal(100))
+
+    # Cost exactly: the old `current <= entry * (1 - 0)` fired right here.
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=100.0))
+
+    assert db_session.query(Order).filter(Order.side == OrderSide.SELL).count() == 0

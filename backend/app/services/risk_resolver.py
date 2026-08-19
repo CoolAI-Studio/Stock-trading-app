@@ -73,6 +73,11 @@ def resolve(
     values = {}
     for field in OVERRIDABLE_FIELDS:
         override = None if strategy is None else getattr(strategy, field)
+        # Three states, and they must stay three: NULL inherits, 0 means the
+        # knob is switched off for this strategy (see services/risk.py), any
+        # other number is that limit. Hence `is None` and never a truthiness
+        # test -- `override or global` would read a deliberate 0 as "unset"
+        # and hand the strategy back the very global stop-loss it turned off.
         values[field] = getattr(global_settings, field) if override is None else override
     return EffectiveRiskSettings(
         **values, strategy_id=None if strategy is None else strategy.id

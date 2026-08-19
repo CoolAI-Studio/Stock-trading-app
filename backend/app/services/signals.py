@@ -110,7 +110,12 @@ def create_pending_order(db: Session, user: User, signal: SignalIn) -> SignalRes
         )
         .count()
     )
-    if pending_count >= limits.max_pending_orders_per_symbol:
+    # `<= 0` is off, the same rule every other risk knob follows (see the
+    # note at the top of services/risk.py). Guarding this is not cosmetic:
+    # `pending_count >= 0` is true before a single order exists, so reading
+    # a stored 0 literally blocked every order for that symbol forever, with
+    # nothing on screen to say why.
+    if 0 < limits.max_pending_orders_per_symbol <= pending_count:
         return SignalResult(
             order=None, created=False, reason="max pending orders for this symbol reached"
         )

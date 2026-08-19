@@ -133,3 +133,18 @@ def test_sell_signals_are_not_gated_by_position_limit(db_session):
     )
 
     assert result.created is True
+
+
+def test_max_pending_orders_per_symbol_zero_means_unlimited(db_session):
+    # The third of the three traps: `pending >= 0` is already true before a
+    # single order exists, so 0 used to block every order silently. It now
+    # means "no limit", matching the other seven knobs.
+    user = _make_user(db_session)
+    db_session.add(RiskSettings(user_id=user.id, max_pending_orders_per_symbol=0))
+    db_session.commit()
+
+    buy = create_pending_order(db_session, user, _signal(side=OrderSide.BUY))
+    sell = create_pending_order(db_session, user, _signal(side=OrderSide.SELL))
+
+    assert buy.created is True
+    assert sell.created is True
