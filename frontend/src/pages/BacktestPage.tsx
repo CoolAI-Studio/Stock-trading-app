@@ -8,6 +8,7 @@ import type {
   BacktestRunDetail,
   BacktestSummary,
   BacktestTrade,
+  BrokerCostPreset,
   FillPriceBasis,
   Strategy,
 } from '../lib/types'
@@ -24,6 +25,7 @@ const FILL_BASIS_LABEL: Record<FillPriceBasis, string> = {
 const DEFAULTS = {
   fill_price_basis: 'next_open' as FillPriceBasis,
   commission_rate: '0.001425',
+  minimum_fee: '0',
   slippage_rate: '0.0005',
   sell_tax_rate: '0',
   quantity: '1',
@@ -247,6 +249,29 @@ export function BacktestPage() {
   const [strategyId, setStrategyId] = useState<string>('')
   const [range, setRange] = useState(defaultRange)
   const [costs, setCosts] = useState(DEFAULTS)
+  // Which preset the numbers came from, or 'custom' once they are edited by
+  // hand. Purely for the dropdown's own display -- the request always carries
+  // the numbers, never the preset id, so a preset changing later cannot
+  // silently re-price a saved run.
+  const [presetId, setPresetId] = useState('custom')
+
+  const presetsQuery = useQuery({
+    queryKey: ['broker-costs'],
+    queryFn: () => api.get<BrokerCostPreset[]>('/api/broker-costs'),
+  })
+  const presets = presetsQuery.data ?? []
+
+  function applyPreset(id: string) {
+    setPresetId(id)
+    const preset = presets.find((p) => p.id === id)
+    if (!preset) return
+    setCosts((prev) => ({
+      ...prev,
+      commission_rate: preset.commission_rate,
+      minimum_fee: preset.minimum_fee,
+      sell_tax_rate: preset.sell_tax_rate,
+    }))
+  }
   const [run, setRun] = useState<BacktestRunDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -319,7 +344,10 @@ export function BacktestPage() {
         <input
           id={`bt-${key}`}
           value={costs[key]}
-          onChange={(e) => setCosts((prev) => ({ ...prev, [key]: e.target.value }))}
+          onChange={(e) => {
+            setCosts((prev) => ({ ...prev, [key]: e.target.value }))
+            setPresetId('custom')
+          }}
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
         {hint && <p className="text-xs text-slate-500">{hint}</p>}
@@ -405,7 +433,37 @@ export function BacktestPage() {
               收盤價要等 K 棒收完才知道，所以最早能成交的時間點是下一根開盤。
             </p>
           </div>
+          <div className="md:col-span-3">
+            <label htmlFor="bt-broker" className="text-sm text-slate-400">
+              券商
+            </label>
+            <select
+              id="bt-broker"
+              value={presetId}
+              onChange={(e) => applyPreset(e.target.value)}
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            >
+              <option value="custom">自訂（下面自己填）</option>
+              {presets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+            {/* The note matters more than the label: the discount tier is the
+                part most likely to be wrong for any given person, and a
+                preset read as a promise is worse than no preset. */}
+            <p className="mt-1 text-xs text-slate-500">
+              {presets.find((p) => p.id === presetId)?.note ??
+                '選一家券商會自動帶入手續費、最低手續費與交易稅；任何一格改過就會變成「自訂」。折扣依個人方案而異，請以你實際拿到的費率為準。'}
+            </p>
+          </div>
           {costField('commission_rate', '手續費率（單邊）', `＝ ${asPercent(costs.commission_rate)}`)}
+          {costField(
+            'minimum_fee',
+            '最低手續費（單邊）',
+            costs.minimum_fee === '0' ? '不設下限' : `每筆至少 ${costs.minimum_fee} 元`,
+          )}
           {costField('slippage_rate', '滑價率', `＝ ${asPercent(costs.slippage_rate)}`)}
           {costField('sell_tax_rate', '賣出交易稅率', `＝ ${asPercent(costs.sell_tax_rate)}`)}
           {costField('quantity', '每次下單數量')}

@@ -4,6 +4,7 @@ from app.api.routers import (
     alerts,
     auth,
     backtests,
+    broker_costs,
     broker_credentials,
     indicators,
     market,
@@ -30,6 +31,7 @@ api_router.include_router(webhooks.router)
 api_router.include_router(ws_ticket.router)
 api_router.include_router(notifications.router)
 api_router.include_router(broker_credentials.router)
+api_router.include_router(broker_costs.router)
 # app/main.py mounts this under the /api prefix. The health check and the
 # raw /ws WebSocket route are mounted separately at root (see app/main.py)
 # since neither is an /api resource.

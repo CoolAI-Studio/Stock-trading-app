@@ -89,6 +89,12 @@ DEFAULT_SLIPPAGE_RATE = Decimal("0.0005")
 # transaction tax on every sale, but this app also backtests crypto, where
 # that number would be pure invention. The owner sets it per run.
 DEFAULT_SELL_TAX_RATE = Decimal(0)
+
+# Zero, so the default stays exactly what it has always been. Real Taiwan
+# brokers charge 1 to 20 元 a trade whatever the percentage works out to, which
+# on a small lot is the difference between 0.71 元 and 20 元 -- see
+# services/broker_costs.py for the per-broker figures.
+DEFAULT_MINIMUM_FEE = Decimal(0)
 DEFAULT_QUANTITY = Decimal(1)
 DEFAULT_INITIAL_CAPITAL = Decimal(100_000)
 
@@ -146,6 +152,10 @@ class BacktestAssumptions:
 
     fill_price_basis: FillPriceBasis = FillPriceBasis.NEXT_OPEN
     commission_rate: Decimal = DEFAULT_COMMISSION_RATE
+    # A floor on the commission, charged per leg. Cannot be folded into the
+    # fill price like the rates above -- it does not scale with the trade, so
+    # it comes out of cash separately.
+    minimum_fee: Decimal = DEFAULT_MINIMUM_FEE
     slippage_rate: Decimal = DEFAULT_SLIPPAGE_RATE
     sell_tax_rate: Decimal = DEFAULT_SELL_TAX_RATE
     quantity: Decimal = DEFAULT_QUANTITY
@@ -328,6 +338,20 @@ def _fill_price(reference: Decimal, side: str, assumptions: BacktestAssumptions)
     return _money(worsened)
 
 
+def _minimum_fee_shortfall(
+    reference: Decimal, quantity: Decimal, assumptions: BacktestAssumptions
+) -> Decimal:
+    """How much more than the percentage the broker would actually charge.
+
+    Zero when there is no floor, or when the trade is big enough to clear it,
+    which keeps every existing result byte-identical.
+    """
+    if assumptions.minimum_fee <= 0:
+        return Decimal(0)
+    proportional = reference * quantity * assumptions.commission_rate
+    return max(Decimal(0), assumptions.minimum_fee - proportional)
+
+
 def _execute(
     account: _Account,
     side: str,
@@ -338,6 +362,15 @@ def _execute(
     quantity = assumptions.quantity
     price = _fill_price(reference, side, assumptions)
     account.costs += abs(price - reference) * quantity
+
+    # The percentage is already inside `price`; this is only the shortfall up
+    # to the broker's floor, which is why it is deducted rather than folded in.
+    # Charged on both legs, because both legs pay commission -- a round trip on
+    # one small lot in Taiwan really does cost 40 元 before the stock moves.
+    shortfall = _minimum_fee_shortfall(reference, quantity, assumptions)
+    if shortfall > 0:
+        account.cash -= shortfall
+        account.costs += shortfall
 
     if side == "BUY":
         account.cash -= price * quantity

@@ -333,3 +333,18 @@ export interface BacktestRunDetail extends BacktestRun {
   code_hash: string
   result: BacktestResult
 }
+
+/** One entry in the backtest form's 券商 dropdown.
+ *
+ * Served rather than hard-coded here so the rates live next to the tests that
+ * pin them. `note` is not decoration: discount tiers vary per customer, and a
+ * preset read as a promise is worse than no preset at all. */
+export interface BrokerCostPreset {
+  id: string
+  label: string
+  market: string
+  commission_rate: string
+  minimum_fee: string
+  sell_tax_rate: string
+  note: string
+}

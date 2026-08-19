@@ -8,6 +8,7 @@ from app.schemas.common import MoneyStr, UtcDatetime
 from app.services.backtest import (
     DEFAULT_COMMISSION_RATE,
     DEFAULT_INITIAL_CAPITAL,
+    DEFAULT_MINIMUM_FEE,
     DEFAULT_QUANTITY,
     DEFAULT_SELL_TAX_RATE,
     DEFAULT_SLIPPAGE_RATE,
@@ -25,6 +26,7 @@ class BacktestAssumptionsRead(BaseModel):
 
     fill_price_basis: FillPriceBasis
     commission_rate: MoneyStr
+    minimum_fee: MoneyStr
     slippage_rate: MoneyStr
     sell_tax_rate: MoneyStr
     quantity: MoneyStr
@@ -48,6 +50,11 @@ class BacktestRunRequest(BaseModel):
 
     fill_price_basis: FillPriceBasis = FillPriceBasis.NEXT_OPEN
     commission_rate: Decimal = Field(default=DEFAULT_COMMISSION_RATE, ge=0, le=1)
+    # A per-leg floor on the commission, in the account currency. Taiwan
+    # brokers charge 1 to 20 元 whatever the percentage works out to, which on
+    # a small lot is the whole cost. No upper bound: it is an amount, not a
+    # rate.
+    minimum_fee: Decimal = Field(default=DEFAULT_MINIMUM_FEE, ge=0)
     slippage_rate: Decimal = Field(default=DEFAULT_SLIPPAGE_RATE, ge=0, le=1)
     sell_tax_rate: Decimal = Field(default=DEFAULT_SELL_TAX_RATE, ge=0, le=1)
     quantity: Decimal = Field(default=DEFAULT_QUANTITY, gt=0)
@@ -77,6 +84,7 @@ class BacktestRunRequest(BaseModel):
         return BacktestAssumptions(
             fill_price_basis=self.fill_price_basis,
             commission_rate=self.commission_rate,
+            minimum_fee=self.minimum_fee,
             slippage_rate=self.slippage_rate,
             sell_tax_rate=self.sell_tax_rate,
             quantity=self.quantity,

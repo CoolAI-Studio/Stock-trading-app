@@ -263,6 +263,7 @@ describe('BacktestPage', () => {
         end: '2026-03-01T23:59:59Z',
         fill_price_basis: 'next_open',
         commission_rate: '0.001425',
+        minimum_fee: '0',
         slippage_rate: '0.0005',
         sell_tax_rate: '0.003',
         quantity: '1',
@@ -518,5 +519,95 @@ describe('deleting a backtest run', () => {
     await user.click(await screen.findByRole('button', { name: '清空全部' }))
 
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/backtests'))
+  })
+})
+
+describe('picking a broker instead of inventing cost numbers', () => {
+  const PRESETS = [
+    {
+      id: 'tw-cathay',
+      label: '國泰證券（電子下單 2.8 折）',
+      market: 'TW',
+      commission_rate: '0.000399',
+      minimum_fee: '1',
+      sell_tax_rate: '0.003',
+      note: '2.8 折、最低 1 元。',
+    },
+    {
+      id: 'us-firstrade',
+      label: 'Firstrade（美股 0 佣金）',
+      market: 'US',
+      commission_rate: '0',
+      minimum_fee: '0',
+      sell_tax_rate: '0.0000206',
+      note: '股票與 ETF 免佣金；賣出仍有 SEC 規費。',
+    },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/broker-costs') return PRESETS as never
+      return [] as never
+    })
+  })
+
+  it('fills the cost fields from the chosen broker', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByRole('option', { name: /國泰/ })
+    await user.selectOptions(screen.getByLabelText('券商'), 'tw-cathay')
+
+    expect(screen.getByLabelText('手續費率（單邊）')).toHaveValue('0.000399')
+    expect(screen.getByLabelText('最低手續費（單邊）')).toHaveValue('1')
+    expect(screen.getByLabelText('賣出交易稅率')).toHaveValue('0.003')
+  })
+
+  it("shows the preset's caveat, because discounts vary per customer", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByRole('option', { name: /國泰/ })
+    await user.selectOptions(screen.getByLabelText('券商'), 'tw-cathay')
+
+    expect(screen.getByText(/2.8 折、最低 1 元/)).toBeInTheDocument()
+  })
+
+  it('falls back to 自訂 the moment a number is edited by hand', async () => {
+    // Otherwise the form would go on claiming these are 國泰's rates after
+    // the owner has changed them.
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByRole('option', { name: /國泰/ })
+    const dropdown = screen.getByLabelText('券商')
+    await user.selectOptions(dropdown, 'tw-cathay')
+    const rate = screen.getByLabelText('手續費率（單邊）')
+    await user.clear(rate)
+    await user.type(rate, '0.0005')
+
+    expect(dropdown).toHaveValue('custom')
+  })
+
+  it('sends the numbers, not the preset id', async () => {
+    // A preset changing later must not silently re-price a saved run.
+    vi.mocked(api.post).mockResolvedValue(RUN as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByRole('option', { name: /Firstrade/ })
+    await user.selectOptions(screen.getByLabelText('券商'), 'us-firstrade')
+    await user.selectOptions(screen.getByLabelText('策略'), String(STRATEGY.id))
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/backtests',
+        expect.objectContaining({ commission_rate: '0', minimum_fee: '0' }),
+      ),
+    )
+    expect(api.post).not.toHaveBeenCalledWith('/api/backtests', expect.objectContaining({ preset_id: expect.anything() }))
   })
 })
