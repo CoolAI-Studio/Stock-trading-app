@@ -17,8 +17,20 @@
 
 ## 執行紀律（務必遵守）
 
-0. **標準：IEEE 12207 + TDD + linter + 版本控制 + CI/CD。** 這五項是不可退讓的底線，每一項
-   都要真的執行，不是寫在文件上。CI 綠燈才算綠燈——本機跑過不算數，要 pipeline 跑過。
+0. **工程標準（不可退讓的底線）。** 每一項都要**真的在跑**，不是寫在文件上。
+   後面標記的是目前狀態，做到了就把標記改掉；沒做到的不要當成已完成。
+
+   | 項目 | 這個專案的具體要求 | 現況 |
+   | --- | --- | --- |
+   | **IEEE 12207** | 需求→設計→實作→驗證→維運全程有跡可循；決策寫進 commit message 和 `CLAUDE.md`，不留在對話裡 | 進行中 |
+   | **TDD** | 先紅後綠。每個功能先寫會失敗的測試，確認它為**正確的原因**失敗，才動實作 | ✅ |
+   | **Linter** | `ruff check` + `ruff format`（後端）、`tsc --noEmit` + `oxlint`（前端）。除錯先看 linter，不要用 print 猜 | ✅ |
+   | **Git** | 每個邏輯單元一個 commit，訊息寫清楚「為什麼」而不只是「改了什麼」 | ✅ |
+   | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數 | ✅ CI；CD 待做（Render 自動部署 webhook 沒觸發，目前手動） |
+   | **DevSecOps** | 安全左移：相依套件漏洞掃描（Dependabot/`pip-audit`）、密鑰不進版控、CI 內做 SAST、部署前檢查設定 | ❌ 待做 |
+   | **需求追蹤** | GitHub Issues 當單一事實來源；每個 commit / PR 連回一個 issue，缺口清單逐項建票 | ❌ 待做 |
+   | **Docker / IaC** | 容器已有（`backend/Dockerfile`）；雲端資源（Render / Neon / Vercel）改用 Terraform 宣告，不要靠手點介面 | ⚠️ Docker ✅，Terraform ❌ |
+   | **可觀測性** | Prometheus 指標端點 + Grafana 儀表板：worker 心跳、行情抓取成敗、通知送達率、策略執行延遲。**警告不能停擺，就必須看得到它有沒有在跑** | ❌ 待做 |
 
 1. **TDD 為主。** 每個功能/每個 Phase 都要先有測試，`pytest`（或對應測試指令）結果為**綠燈**才能
    進行下一步。不可以在測試沒過的狀態下堆疊下一層功能。
