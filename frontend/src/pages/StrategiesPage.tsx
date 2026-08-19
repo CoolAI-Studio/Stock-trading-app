@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
+import { ExportButton } from '../components/ExportButton'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
   DataSource,
@@ -965,6 +966,7 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-300">提醒紀錄</h2>
+        {alerts.length > 0 && <ExportButton resource="alerts" label="匯出 CSV" />}
         {alerts.length > 0 && (
           <DeleteButton
             what="全部的提醒紀錄"

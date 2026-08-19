@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { ActionError } from '../components/ActionError'
+import { ExportButton } from '../components/ExportButton'
 import type { Position, Strategy } from '../lib/types'
 
 const GLOBAL_RISK_LABEL = '全域'
@@ -272,7 +273,12 @@ export function PositionsPage() {
       {/* The owner agreed to first-opener-wins on condition they could see
           which strategy a position landed under, so the rule is spelled out
           next to the column rather than left in a tooltip. */}
-      {positions.length > 0 && <p className="text-xs text-slate-500">{RISK_OWNER_HELP}</p>}
+      {positions.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">{RISK_OWNER_HELP}</p>
+          <ExportButton resource="positions" label="匯出 CSV" />
+        </div>
+      )}
 
       {positions.length > 0 && (
         <table className="w-full text-left text-sm">

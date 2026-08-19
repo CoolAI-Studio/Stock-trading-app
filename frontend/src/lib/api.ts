@@ -94,6 +94,41 @@ export const api = {
   delete: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
 }
 
+/** Fetches a file and hands it to the browser as a download.
+ *
+ * Not a plain link: the export endpoints are behind the same bearer token as
+ * everything else, and an `<a href>` carries no Authorization header, so the
+ * download would arrive as a 401 page saved to disk. Fetch it, turn it into a
+ * blob, click a synthetic link, revoke the URL.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const token = getToken()
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (response.status === 401) {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
+    setToken(null)
+    unauthorizedHandler?.()
+    throw new ApiError(401, '登入時效到了')
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response))
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // Freed on the next tick rather than immediately: revoking before the
+  // browser has started reading it cancels the download in Safari.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export async function login(email: string, password: string): Promise<string> {
   const params = new URLSearchParams({ username: email, password })
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {

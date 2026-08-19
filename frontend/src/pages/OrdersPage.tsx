@@ -4,6 +4,7 @@ import { ApiError, api } from '../lib/api'
 import { ActionError } from '../components/ActionError'
 import { Pager } from '../components/Pager'
 import { DeleteButton } from '../components/DeleteButton'
+import { ExportButton } from '../components/ExportButton'
 import { QueryError } from '../components/QueryError'
 import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
 
@@ -399,6 +400,10 @@ export function OrdersPage() {
               className="block w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1"
             />
           </div>
+          {/* Every May there is a tax return, and the history page shows
+              fifty rows. Reading them off the screen was the only way to
+              produce a year's fills. */}
+          <ExportButton resource="orders" label="匯出 CSV" />
           <DeleteButton
             what="全部已結束的訂單紀錄（已成交與待確認的不會被刪）"
             label="清空歷史"

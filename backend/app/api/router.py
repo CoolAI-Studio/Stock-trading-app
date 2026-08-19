@@ -6,6 +6,7 @@ from app.api.routers import (
     backtests,
     broker_costs,
     broker_credentials,
+    export,
     indicators,
     market,
     notifications,
@@ -29,6 +30,7 @@ api_router.include_router(orders.router)
 api_router.include_router(positions.router)
 api_router.include_router(risk.router)
 api_router.include_router(webhooks.router)
+api_router.include_router(export.router)
 api_router.include_router(watchlist.router)
 api_router.include_router(ws_ticket.router)
 api_router.include_router(notifications.router)
