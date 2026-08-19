@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError } from '../lib/api'
+import { ApiError, SESSION_EXPIRED_KEY } from '../lib/api'
 import { useAuth } from '../context/useAuth'
 
 export function LoginPage() {
@@ -10,6 +10,14 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // Read once, on first render: arriving here because a token expired is a
+  // different situation from arriving here on purpose, and the difference is
+  // the whole reason to say anything.
+  const [expired] = useState(() => {
+    const flag = sessionStorage.getItem(SESSION_EXPIRED_KEY) !== null
+    sessionStorage.removeItem(SESSION_EXPIRED_KEY)
+    return flag
+  })
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -63,6 +71,11 @@ export function LoginPage() {
           />
         </div>
 
+        {expired && !error && (
+          <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+            登入時效到了，請重新登入。你的資料都還在，背景盯盤與通知也沒有停。
+          </p>
+        )}
         {error && <p className="text-sm text-red-400">{error}</p>}
 
         <button

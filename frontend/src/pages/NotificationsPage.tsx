@@ -19,6 +19,22 @@ const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', fai
  * every send bounces. The retry sweep switches a permanently dead channel off
  * and writes what to do about it into last_error, and this is where the owner
  * reads it. */
+/** The owner did not build this and should not have to read its enum names.
+ * WEB_PUSH and order.created were appearing verbatim on the page. */
+const CHANNEL_LABEL: Record<ChannelType, string> = {
+  line: 'LINE',
+  telegram: 'Telegram',
+  email: 'Email',
+  web_push: '瀏覽器推播',
+}
+
+const EVENT_LABEL: Record<string, string> = {
+  'order.created': '新的待確認訂單',
+  'order.updated': '訂單狀態變更',
+  'strategy.error': '策略發生錯誤',
+  'strategy.alert': '策略提醒',
+}
+
 function ChannelHealth({ channel }: { channel: NotificationChannel }) {
   if (!channel.is_enabled) {
     return (
@@ -318,7 +334,7 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
     <>
       <tr className="border-b border-slate-800">
         <td className="py-2 pr-4 font-medium">{channel.label}</td>
-        <td className="py-2 pr-4 uppercase text-slate-400">{channel.channel_type}</td>
+        <td className="py-2 pr-4 text-slate-400">{CHANNEL_LABEL[channel.channel_type]}</td>
         <td className="py-2 pr-4 text-slate-400">{channel.config_preview}</td>
         {/* Whether it is actually delivering. A disabled channel and a
             silently failing one used to look exactly like a working one, so
@@ -645,7 +661,7 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
             {logs.map((log) => (
               <tr key={log.id} className="border-b border-slate-800 text-slate-300">
                 <td className="py-2 pr-4 font-medium">{labelFor(log.channel_id)}</td>
-                <td className="py-2 pr-4">{log.event}</td>
+                <td className="py-2 pr-4">{EVENT_LABEL[log.event] ?? log.event}</td>
                 <td className={`py-2 pr-4 ${log.status === 'sent' ? 'text-emerald-400' : 'text-red-400'}`}>
                   {STATUS_LABEL[log.status]}
                 </td>

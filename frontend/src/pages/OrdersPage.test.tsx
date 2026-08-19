@@ -283,3 +283,72 @@ describe('deleting from the order history', () => {
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/orders/9'))
   })
 })
+
+describe('why this sell order exists', () => {
+  it('marks a stop-loss exit apart from an ordinary strategy signal', async () => {
+    // Two very different levels of urgency that used to look identical in the
+    // pending list. The backend has stamped the trigger on the order since
+    // the exit scan was written; nothing rendered it.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending'))
+        return [
+          {
+            ...PENDING_ORDER,
+            side: 'sell',
+            source: 'strategy',
+            risk_notes: { trigger: 'stop_loss' },
+          },
+        ] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('停損')
+  })
+
+  it('marks a take-profit exit too', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending'))
+        return [
+          {
+            ...PENDING_ORDER,
+            side: 'sell',
+            source: 'strategy',
+            risk_notes: { trigger: 'take_profit' },
+          },
+        ] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('停利')
+  })
+
+  it('says nothing extra for an ordinary signal', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [PENDING_ORDER] as never
+      return [] as never
+    })
+    renderPage()
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(row).not.toHaveTextContent('停損')
+  })
+
+  it('explains a rejection in the history rather than just saying 已拒絕', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [] as never
+      return [
+        { ...PENDING_ORDER, status: 'rejected', reject_reason: '買進後的總持倉成本會超過本金上限' },
+      ] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /歷史/ }))
+
+    const row = (await screen.findByText('AAPL')).closest('tr') as HTMLElement
+    expect(row).toHaveTextContent('本金上限')
+  })
+})

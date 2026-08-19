@@ -22,6 +22,17 @@ const FILL_BASIS_LABEL: Record<FillPriceBasis, string> = {
  * research brokerage fees first. Tax is left at 0 because it only applies to
  * Taiwan equities -- charging it silently on a US backtest would overstate the
  * costs as confidently as omitting it understates them. */
+/** 1wk is not a word. The owner reads 週線. */
+const TIMEFRAME_LABEL: Record<string, string> = {
+  '1m': '1 分線',
+  '5m': '5 分線',
+  '15m': '15 分線',
+  '1h': '小時線',
+  '1d': '日線',
+  '1wk': '週線',
+  '1mo': '月線',
+}
+
 const DEFAULTS = {
   fill_price_basis: 'next_open' as FillPriceBasis,
   commission_rate: '0.001425',
@@ -670,7 +681,9 @@ export function BacktestPage() {
                 <tr key={row.id} className="border-b border-slate-800">
                   <td className="py-2 pr-4 font-medium">{row.strategy_name}</td>
                   <td className="py-2 pr-4">{row.symbol}</td>
-                  <td className="py-2 pr-4 text-slate-400">{row.timeframe}</td>
+                  <td className="py-2 pr-4 text-slate-400">
+                    {TIMEFRAME_LABEL[row.timeframe] ?? row.timeframe}
+                  </td>
                   <td className="py-2 pr-4 text-slate-400">
                     {new Date(row.range_start).toLocaleDateString()} –{' '}
                     {new Date(row.range_end).toLocaleDateString()}

@@ -27,6 +27,30 @@ function useOrdersQuery(status?: string) {
   })
 }
 
+/** Why a sell order exists.
+ *
+ * A strategy's ordinary exit and a stop-loss being hit are very different
+ * levels of urgency, and they looked identical in the pending list -- both
+ * just 賣出 from 策略訊號. The backend has stamped the trigger on the order
+ * since the exit scan was written; nothing rendered it.
+ */
+function TriggerBadge({ order }: { order: Order }) {
+  const trigger = order.risk_notes?.trigger
+  if (trigger !== 'stop_loss' && trigger !== 'take_profit') return null
+  const isStop = trigger === 'stop_loss'
+  return (
+    <span
+      className={`ml-2 rounded px-1.5 py-0.5 text-xs ${
+        isStop
+          ? 'border border-red-800 bg-red-950/50 text-red-300'
+          : 'border border-emerald-800 bg-emerald-950/50 text-emerald-300'
+      }`}
+    >
+      {isStop ? '停損觸發' : '停利觸發'}
+    </span>
+  )
+}
+
 function PendingOrderRow({ order }: { order: Order }) {
   const [fillPrice, setFillPrice] = useState(order.signal_price ?? '')
   // Prefilled with the whole order: filling in full is the common case and
@@ -61,6 +85,7 @@ function PendingOrderRow({ order }: { order: Order }) {
       <td className="py-2 pr-4 font-medium">{order.symbol}</td>
       <td className={`py-2 pr-4 ${order.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
         {SIDE_LABEL[order.side]}
+        <TriggerBadge order={order} />
       </td>
       <td className="py-2 pr-4">{order.quantity}</td>
       <td className="py-2 pr-4 text-slate-400">{SOURCE_LABEL[order.source]}</td>
@@ -240,7 +265,15 @@ function HistoryRow({ order }: { order: Order }) {
         {filledLabel(order)}
       </td>
       <td className="py-2 pr-4">{order.fill_price ?? '—'}</td>
-      <td className="py-2 pr-4">{STATUS_LABEL[order.status]}</td>
+      <td className="py-2 pr-4">
+        {STATUS_LABEL[order.status]}
+        <TriggerBadge order={order} />
+        {/* 已拒絕 on its own does not say whether the owner pressed it or a
+            risk gate did, which is the only part worth knowing. */}
+        {order.reject_reason && (
+          <p className="max-w-xs text-xs text-slate-500">{order.reject_reason}</p>
+        )}
+      </td>
       <td className="py-2 pr-4 text-slate-500">
         {new Date(order.created_at).toLocaleString()}
       </td>

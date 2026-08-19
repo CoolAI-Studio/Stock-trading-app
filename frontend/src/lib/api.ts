@@ -1,6 +1,11 @@
 const TOKEN_KEY = 'trading_app_token'
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
+/** Set when a request comes back 401, read once by the login page. Session
+ * storage rather than a state variable, because the redirect it causes
+ * remounts the tree. */
+export const SESSION_EXPIRED_KEY = 'session-expired'
+
 let inMemoryToken: string | null = null
 let unauthorizedHandler: (() => void) | null = null
 
@@ -57,6 +62,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers })
 
   if (response.status === 401) {
+    // Recorded before the token goes: the login page reads it to explain why
+    // the owner is suddenly back here. Without it, being bounced mid-task --
+    // halfway through a strategy, with the code they were writing gone --
+    // looks like the app crashed or logged them out on purpose.
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
     setToken(null)
     unauthorizedHandler?.()
     throw new ApiError(401, await parseErrorDetail(response))
