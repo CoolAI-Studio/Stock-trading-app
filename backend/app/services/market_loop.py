@@ -15,7 +15,7 @@ from app.models.position import Position
 from app.models.risk import RiskSettings
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.services import alerts, risk, risk_resolver, worker_health
+from app.services import alerts, market_calendar, risk, risk_resolver, worker_health
 from app.services.events import Event, bus
 from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
@@ -34,6 +34,16 @@ logger = logging.getLogger("app.market_loop")
 # How many poll intervals a tick may take before it is worth a log line. Three
 # is past "a slow provider day" and into "something is not coming back".
 _SLOW_TICK_FACTOR = 3
+
+# How long to wait between polls when nothing being watched is trading.
+#
+# Deliberately a slower poll rather than none at all: a daily-bar strategy's
+# candle only closes after the session, so stopping entirely would push its
+# signal to the next opening bell -- telling the owner at exactly the moment
+# they needed to have already decided. Five minutes still collects that,
+# while taking one symbol from ~17,000 requests a day to a few hundred
+# against a scraper that blocks IPs for precisely that behaviour.
+CLOSED_POLL_INTERVAL_SEC = 300.0
 
 _registry = StrategyRegistry()
 
@@ -220,6 +230,14 @@ def _check_position_exit(db: Session, position: Position, quote: Quote) -> None:
     if position.avg_entry_price <= 0:
         return
 
+    # The quote outside session hours is just the last close, and comparing it
+    # to the entry price filed a SELL at 3am that nobody could act on -- which
+    # then expired and was filed again on the next poll, several times a
+    # night. The price cannot move while the market is shut, so there is
+    # nothing here that will not still be true at the opening bell.
+    if not market_calendar.is_open(position.symbol):
+        return
+
     risk_settings = db.query(RiskSettings).filter(RiskSettings.user_id == position.user_id).first()
     if risk_settings is None:
         return
@@ -266,12 +284,22 @@ def _expire_stale_orders(db: Session, events: list[Event]) -> None:
     stale_orders = (
         db.query(Order).filter(Order.status == OrderStatus.PENDING, Order.created_at < cutoff).all()
     )
+    expired = False
     for order in stale_orders:
+        # A daily-bar strategy's signal arrives after the close by definition,
+        # so its order was always expired before the owner woke up -- which
+        # made daily strategies effectively unusable. The clock is held while
+        # the market is shut: the owner cannot act on an order at 3am, so the
+        # 180 minutes should not be running. Crypto has no closing bell and is
+        # therefore never held.
+        if not market_calendar.is_open(order.symbol):
+            continue
         order.status = OrderStatus.EXPIRED
         order.decided_at = utcnow()
         data = {"order_id": order.id, "status": "expired", "user_id": order.user_id}
         events.append(Event(type="order.updated", data=data))
-    if stale_orders:
+        expired = True
+    if expired:
         db.commit()
 
 
@@ -357,8 +385,16 @@ def tick_once(
                 _run_bar_strategy(session, strategy, loaded, bars_by_key.get(key, []), events)
                 continue
             quote = quotes.get(strategy.symbol)
-            if quote is not None:
-                _run_tick_strategy(session, strategy, loaded, quote, events)
+            if quote is None:
+                continue
+            # Outside session hours the quote is just the last close, and
+            # feeding it to on_tick thousands of times overnight walks the
+            # strategy's own moving averages away from anything real before
+            # the next session opens. on_bar strategies are unaffected --
+            # closed_bars() already withholds a candle until it has closed.
+            if not market_calendar.is_open(strategy.symbol, data_source=strategy.data_source):
+                continue
+            _run_tick_strategy(session, strategy, loaded, quote, events)
 
         for position in positions:
             quote = quotes.get(position.symbol)
@@ -386,6 +422,38 @@ def tick_once(
     for event in events:
         bus.publish(event)
     return events
+
+
+def next_poll_delay(db: Session | None = None) -> float:
+    """Seconds to wait before the next poll.
+
+    Reads the watch list rather than the clock alone, because "is the market
+    open" has no answer without knowing which markets are being watched -- a
+    crypto strategy never sleeps, and a portfolio spanning Taipei and New York
+    is awake for most of the day.
+    """
+    owns_session = db is None
+    session = db or SessionLocal()
+    try:
+        watched: list[tuple[str, DataSource]] = [
+            (strategy.symbol, strategy.data_source)
+            for strategy in session.query(Strategy).filter(Strategy.is_active.is_(True)).all()
+        ]
+        watched += [
+            (position.symbol, DataSource.YFINANCE)
+            for position in session.query(Position).filter(Position.quantity > 0).all()
+        ]
+    finally:
+        if owns_session:
+            session.close()
+
+    if not watched:
+        # Nothing to watch is not the same as everything being shut, but it is
+        # equally not a reason to poll hard.
+        return CLOSED_POLL_INTERVAL_SEC
+    if market_calendar.any_open(watched):
+        return settings.MARKET_DATA_POLL_INTERVAL_SEC
+    return CLOSED_POLL_INTERVAL_SEC
 
 
 async def run_forever(stop_event: asyncio.Event) -> None:
@@ -424,7 +492,7 @@ async def run_forever(stop_event: asyncio.Event) -> None:
                 )
         try:
             await asyncio.wait_for(
-                stop_event.wait(), timeout=settings.MARKET_DATA_POLL_INTERVAL_SEC
+                stop_event.wait(), timeout=await asyncio.to_thread(next_poll_delay)
             )
         except TimeoutError:
             pass

@@ -95,3 +95,23 @@ def published_events() -> Iterator[list[Event]]:
         yield collected
     finally:
         bus.unsubscribe(collected.append)
+
+
+@pytest.fixture(autouse=True)
+def _market_always_open(request, monkeypatch):
+    """Pretend every market is trading, unless a test says otherwise.
+
+    The worker refuses to run tick strategies, file stop-loss exits or expire
+    pending orders outside session hours (services/market_calendar.py). That
+    is the right behaviour and it broke thirty-odd tests that were written
+    when the clock did not matter -- they are about risk gates and strategy
+    logic, and would otherwise pass or fail depending on what time of day the
+    suite happens to run, which is worse than not testing the calendar at all.
+
+    Tests that *are* about market hours opt out with
+    `@pytest.mark.real_market_hours` and drive the clock themselves.
+    """
+    if "real_market_hours" in request.keywords:
+        return
+    monkeypatch.setattr("app.services.market_calendar.is_open", lambda *a, **k: True)
+    monkeypatch.setattr("app.services.market_calendar.any_open", lambda *a, **k: True)
