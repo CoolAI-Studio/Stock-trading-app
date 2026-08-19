@@ -254,3 +254,43 @@ def test_bars_are_still_collected_overnight_so_a_daily_signal_is_not_lost(db_ses
     would push its signal to the next opening bell -- the owner would get
     told at the moment they needed to have already decided."""
     assert market_loop.CLOSED_POLL_INTERVAL_SEC > 0
+
+
+def test_working_out_the_delay_never_kills_the_loop():
+    """The first version of this opened its own database session every
+    iteration to decide how long to sleep. On a machine with no database yet
+    -- a fresh CI runner, a first boot -- the query raised inside the loop and
+    the worker died on its first pass. Getting the sleep length wrong is a
+    small problem; losing the loop that files stop-losses and sends alerts is
+    not.
+    """
+    from app.config import settings
+
+    with patch(
+        "app.services.market_loop.market_calendar.any_open",
+        side_effect=RuntimeError("no such table: strategies"),
+    ):
+        market_loop._last_watched = [("2330.TW", DataSource.YFINANCE)]
+        assert market_loop.next_poll_delay() == settings.MARKET_DATA_POLL_INTERVAL_SEC
+
+
+def test_the_delay_costs_no_query_once_a_tick_has_run(db_session):
+    """Deciding how long to sleep should not be a database round trip every
+    few seconds -- the tick already loaded exactly these rows."""
+    user = _user(db_session)
+    db_session.add(
+        Strategy(
+            user_id=user.id,
+            name="tw",
+            symbol="2330.TW",
+            source_code=ALWAYS_BUY,
+            code_hash="h",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    with _at(TW_OPEN):
+        market_loop.tick_once(db=db_session, market_data_service=_service())
+
+    assert ("2330.TW", DataSource.YFINANCE) in market_loop._last_watched

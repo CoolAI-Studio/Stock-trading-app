@@ -114,3 +114,14 @@ def test_holidays_are_knowingly_treated_as_open():
     the cheaper mistake."""
     # 2026-01-01 is a Thursday and a public holiday in both markets.
     assert cal.is_open("2330.TW", datetime(2026, 1, 1, 10, 0, tzinfo=TPE))
+
+
+def test_both_time_zones_resolve_at_all():
+    """A canary for the deploy image. zoneinfo needs either a system tz
+    database or the `tzdata` package; Windows has no system one and
+    python:3.13-slim does not ship one either, so if tzdata ever stops being
+    installed the calendar raises at import -- and market_loop imports it, and
+    main imports that, so the container simply never starts. Cheaper to fail
+    here."""
+    assert ZoneInfo("Asia/Taipei") is not None
+    assert ZoneInfo("America/New_York") is not None

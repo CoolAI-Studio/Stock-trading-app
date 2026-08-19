@@ -28,3 +28,11 @@ psycopg2-binary>=2.9
 # Optional: only needed if AI_PROVIDER=anthropic is selected (default provider is
 # the plain-httpx OpenAI-compatible client, which needs no extra SDK)
 # anthropic>=0.39
+
+# Declared, not left to chance: services/market_calendar.py resolves
+# Asia/Taipei and America/New_York through zoneinfo, which falls back to this
+# package when the host has no system tz database. Windows never has one, and
+# python:3.13-slim -- the deploy image -- does not ship one either, so without
+# this the container would fail at import and never start. It arrives today
+# only as somebody else's transitive dependency, which is not a guarantee.
+tzdata>=2024.1

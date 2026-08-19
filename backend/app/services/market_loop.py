@@ -45,6 +45,12 @@ _SLOW_TICK_FACTOR = 3
 # against a scraper that blocks IPs for precisely that behaviour.
 CLOSED_POLL_INTERVAL_SEC = 300.0
 
+# What the last tick was watching, so working out the next sleep costs no
+# query. Empty until the first tick, which means the first sleep is the slow
+# one -- harmless, and better than a query that can fail before the app has a
+# database.
+_last_watched: list[tuple[str, DataSource]] = []
+
 _registry = StrategyRegistry()
 
 
@@ -357,6 +363,14 @@ def tick_once(
         # that used to look perfectly healthy -- the providers swallow every
         # exception, so the loop kept completing polls on schedule while not
         # one price came back.
+        # Recorded here rather than re-queried later: these are the rows the
+        # tick already loaded, and they are exactly what decides how long to
+        # sleep before the next one.
+        global _last_watched
+        _last_watched = [(strat.symbol, strat.data_source) for strat in strategies] + [
+            (pos.symbol, DataSource.YFINANCE) for pos in positions
+        ]
+
         if symbols_by_source:
             if quotes:
                 worker_health.heartbeat.mark_quotes_fetched()
@@ -431,29 +445,41 @@ def next_poll_delay(db: Session | None = None) -> float:
     open" has no answer without knowing which markets are being watched -- a
     crypto strategy never sleeps, and a portfolio spanning Taipei and New York
     is awake for most of the day.
-    """
-    owns_session = db is None
-    session = db or SessionLocal()
-    try:
-        watched: list[tuple[str, DataSource]] = [
-            (strategy.symbol, strategy.data_source)
-            for strategy in session.query(Strategy).filter(Strategy.is_active.is_(True)).all()
-        ]
-        watched += [
-            (position.symbol, DataSource.YFINANCE)
-            for position in session.query(Position).filter(Position.quantity > 0).all()
-        ]
-    finally:
-        if owns_session:
-            session.close()
 
-    if not watched:
-        # Nothing to watch is not the same as everything being shut, but it is
-        # equally not a reason to poll hard.
+    Normally answered from what the last tick already loaded, so deciding how
+    long to sleep costs no query at all. Passing a session is for tests that
+    want an answer before any tick has run.
+
+    Never raises. Getting the sleep length wrong is a small problem; letting
+    it kill the loop that files stop-losses and sends alerts is not, and the
+    first version of this did exactly that -- it opened its own session every
+    iteration, so on a machine with no database yet the worker died on its
+    first pass.
+    """
+    try:
+        watched = _watched_symbols(db) if db is not None else _last_watched
+        if not watched:
+            # Nothing to watch is not the same as everything being shut, but
+            # it is equally not a reason to poll hard.
+            return CLOSED_POLL_INTERVAL_SEC
+        if market_calendar.any_open(watched):
+            return settings.MARKET_DATA_POLL_INTERVAL_SEC
         return CLOSED_POLL_INTERVAL_SEC
-    if market_calendar.any_open(watched):
+    except Exception:
+        logger.exception("could not work out the next poll delay; using the normal interval")
         return settings.MARKET_DATA_POLL_INTERVAL_SEC
-    return CLOSED_POLL_INTERVAL_SEC
+
+
+def _watched_symbols(db: Session) -> list[tuple[str, DataSource]]:
+    watched = [
+        (strategy.symbol, strategy.data_source)
+        for strategy in db.query(Strategy).filter(Strategy.is_active.is_(True)).all()
+    ]
+    watched += [
+        (position.symbol, DataSource.YFINANCE)
+        for position in db.query(Position).filter(Position.quantity > 0).all()
+    ]
+    return watched
 
 
 async def run_forever(stop_event: asyncio.Event) -> None:
