@@ -12,6 +12,15 @@
 # point of this file.
 #
 # The repo is public, so scheduled Actions minutes are free.
+#
+# ONE HOLE, WRITTEN DOWN RATHER THAN HOPED OVER: GitHub disables scheduled
+# workflows in a public repository after 60 days with no activity in it. If
+# this project goes quiet for two months, this watchdog switches itself off --
+# silently, which is the exact failure it exists to catch. Re-enabling it is
+# one click on the Actions tab, but nothing tells you to go and click it. If
+# the alerts ever need to survive a quiet stretch, this has to move to a
+# service that has no such rule (UptimeRobot's free tier does 5-minute checks
+# and emails on failure; /healthz was written for it).
 
 name: Watchdog
 
