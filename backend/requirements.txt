@@ -20,7 +20,7 @@ numpy>=1.26
 pandas>=2.2
 pytest>=8.3
 pytest-asyncio>=0.24
-ruff>=0.6
+ruff>=0.16.3
 
 # Optional cloud Postgres driver (needed once DATABASE_URL points at Neon/Supabase/etc.)
 psycopg2-binary>=2.9
