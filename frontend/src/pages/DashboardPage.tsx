@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { TradingViewWidget } from '../components/TradingViewWidget'
 import { QueryError } from '../components/QueryError'
-import type { Order, Position, Quote, Strategy, WatchlistItem } from '../lib/types'
+import type { DataSource, Order, Position, Quote, Strategy, WatchlistItem } from '../lib/types'
 
 /** The old browser-local list. Read once, uploaded, then removed -- without
  * this the owner's existing watch list simply vanishes on the deploy that
@@ -91,6 +91,17 @@ export function DashboardPage() {
 
   const [selectedSymbol, setSelectedSymbol] = useState('AAPL')
 
+  // Which provider each symbol belongs to, so the chart can be asked for the
+  // right exchange. Only Binance actually needs it -- the Taiwan boards are
+  // decided by the suffix -- but reading the real value beats guessing crypto
+  // from a symbol that happens to end in USDT.
+  const sourceOf = useMemo(() => {
+    const map = new Map<string, DataSource>()
+    for (const item of watchlistQuery.data ?? []) map.set(item.symbol, item.data_source)
+    for (const s of strategiesQuery.data ?? []) map.set(s.symbol, s.data_source)
+    return map
+  }, [watchlistQuery.data, strategiesQuery.data])
+
   const quotesQuery = useQuery({
     queryKey: ['market-quotes', symbols.join(',')],
     queryFn: () => api.get<Quote[]>(`/api/market/quote?symbols=${symbols.join(',')}`),
@@ -133,7 +144,7 @@ export function DashboardPage() {
         />
       </div>
 
-      <TradingViewWidget symbol={selectedSymbol} />
+      <TradingViewWidget symbol={selectedSymbol} dataSource={sourceOf.get(selectedSymbol)} />
 
       <form
         className="flex gap-2"

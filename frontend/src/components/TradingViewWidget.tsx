@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { tradingViewSymbol, unsupportedMarketNote } from '../lib/tradingView'
+import type { DataSource } from '../lib/types'
 
 // Tall enough that the price pane isn't squeezed to a sliver -- the widget's
 // own toolbar and symbol-info row already take a fixed ~65px off the top.
@@ -7,8 +9,19 @@ const CHART_HEIGHT_PX = 650
 /** Embeds TradingView's free "Advanced Chart" widget for display only --
  * price data used for strategy math comes from the backend's own
  * yfinance/Binance providers, never from this widget. */
-export function TradingViewWidget({ symbol }: { symbol: string }) {
+export function TradingViewWidget({
+  symbol,
+  dataSource,
+}: {
+  symbol: string
+  dataSource?: DataSource
+}) {
   const containerRef = useRef<HTMLDivElement>(null)
+  // The app's own spelling is yfinance's; TradingView's is not the same, and
+  // sending `2330.TW` was why Taiwanese stocks appeared to be unavailable
+  // here. See lib/tradingView.ts -- the stocks were always there.
+  const tvSymbol = tradingViewSymbol(symbol, dataSource)
+  const note = unsupportedMarketNote(symbol, dataSource)
 
   useEffect(() => {
     const container = containerRef.current
@@ -21,8 +34,8 @@ export function TradingViewWidget({ symbol }: { symbol: string }) {
     // in-flight script and throw inside TradingView's own code. Skipping
     // a re-run for the same symbol on the same node avoids that without
     // needing to fight StrictMode.
-    if (container.dataset.tvSymbol === symbol) return
-    container.dataset.tvSymbol = symbol
+    if (container.dataset.tvSymbol === tvSymbol) return
+    container.dataset.tvSymbol = tvSymbol
 
     container.innerHTML = ''
 
@@ -38,7 +51,7 @@ export function TradingViewWidget({ symbol }: { symbol: string }) {
     script.innerHTML = JSON.stringify({
       width: '100%',
       height: CHART_HEIGHT_PX,
-      symbol,
+      symbol: tvSymbol,
       interval: 'D',
       timezone: 'Etc/UTC',
       theme: 'dark',
@@ -53,13 +66,18 @@ export function TradingViewWidget({ symbol }: { symbol: string }) {
     // above). A symbol change already falls through the guard on its own
     // since the dataset value won't match; a true unmount removes this
     // whole subtree via React regardless.
-  }, [symbol])
+  }, [tvSymbol])
 
   return (
-    <div
-      ref={containerRef}
-      className="tradingview-widget-container"
-      style={{ height: CHART_HEIGHT_PX }}
-    />
+    <div className="space-y-1">
+      <div
+        ref={containerRef}
+        className="tradingview-widget-container"
+        style={{ height: CHART_HEIGHT_PX }}
+      />
+      {/* A blank chart with no explanation is indistinguishable from a typo,
+          an outage, or a broken app. */}
+      {note && <p className="text-xs text-amber-300">{note}</p>}
+    </div>
   )
 }
