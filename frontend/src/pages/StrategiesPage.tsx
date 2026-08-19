@@ -299,7 +299,11 @@ function RiskOverrideFields({
                     {field.offWarning}
                   </p>
                 )}
-                {field.help && <p className="mt-1 text-xs text-slate-500">{field.help}</p>}
+                {(field.strategyHelp ?? field.help) && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {field.strategyHelp ?? field.help}
+                  </p>
+                )}
               </div>
             )
           })}

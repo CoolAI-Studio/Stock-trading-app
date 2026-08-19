@@ -169,12 +169,23 @@ function NewOrderForm({ onDone }: { onDone: () => void }) {
   )
 }
 
+// A confirmation may fill less than was asked for, and that smaller number is
+// what actually reached the position. Showing the order quantity alone made a
+// 10-share buy that delivered 2 read as a completed 10.
+function filledLabel(order: Order): string {
+  if (order.filled_quantity === null) return order.quantity
+  if (Number(order.filled_quantity) === Number(order.quantity)) return order.quantity
+  return `${order.filled_quantity} / ${order.quantity}`
+}
+
 function HistoryRow({ order }: { order: Order }) {
   return (
     <tr className="border-b border-slate-800 text-slate-300">
       <td className="py-2 pr-4 font-medium">{order.symbol}</td>
       <td className="py-2 pr-4">{SIDE_LABEL[order.side]}</td>
-      <td className="py-2 pr-4">{order.quantity}</td>
+      <td className="py-2 pr-4" data-cell="quantity">
+        {filledLabel(order)}
+      </td>
       <td className="py-2 pr-4">{order.fill_price ?? '—'}</td>
       <td className="py-2 pr-4">{STATUS_LABEL[order.status]}</td>
       <td className="py-2 text-slate-500">{new Date(order.created_at).toLocaleString()}</td>

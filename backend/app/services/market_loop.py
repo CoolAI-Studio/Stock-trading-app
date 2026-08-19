@@ -216,6 +216,11 @@ def _check_position_exit(db: Session, position: Position, quote: Quote) -> None:
             symbol=position.symbol,
             side=OrderSide.SELL,
             source=OrderSource.STRATEGY,
+            # The exit belongs to the strategy that opened the position. An
+            # unattributed exit closes the position but never credits the
+            # capital back, so the strategy's own stop-loss would lock it out
+            # of the allocation it just freed.
+            strategy_id=position.strategy_id,
             quantity=position.quantity,
             signal_price=quote.price,
             risk_notes={"trigger": "stop_loss" if hit_stop else "take_profit"},

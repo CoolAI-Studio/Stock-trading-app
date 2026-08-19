@@ -36,6 +36,11 @@ class Order(TimestampMixin, Base):
     reject_reason: Mapped[str | None] = mapped_column(Text, default=None)
 
     fill_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), default=None)
+    # How much actually filled, which is not always `quantity`: confirming an
+    # order may name a smaller amount, and that smaller amount is what reaches
+    # the position. Without it recorded, the order row overstates what changed
+    # hands and anything totalling spend from order history is wrong.
+    filled_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), default=None)
     filled_at: Mapped[datetime | None] = mapped_column(default=None)
     decided_at: Mapped[datetime | None] = mapped_column(default=None)
     broker_ref: Mapped[str | None] = mapped_column(String(128), default=None)

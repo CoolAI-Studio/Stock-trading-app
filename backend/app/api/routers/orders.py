@@ -120,6 +120,9 @@ def confirm_order(
 
     order.status = OrderStatus.CONFIRMED
     order.fill_price = result.fill_price
+    # What reached the position, which is what `fill_quantity` is -- recording
+    # `quantity` here would bill a partially filled order for the whole thing.
+    order.filled_quantity = fill_quantity
     order.broker_ref = result.ref
     order.filled_at = utcnow()
     order.decided_at = utcnow()

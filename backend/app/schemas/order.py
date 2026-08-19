@@ -21,6 +21,7 @@ class OrderRead(BaseModel):
     risk_notes: dict | None
     reject_reason: str | None
     fill_price: MoneyStr | None
+    filled_quantity: MoneyStr | None
     filled_at: datetime | None
     decided_at: datetime | None
     broker_ref: str | None

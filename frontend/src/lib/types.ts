@@ -16,6 +16,7 @@ export interface Order {
   risk_notes: Record<string, unknown> | null
   reject_reason: string | null
   fill_price: string | null
+  filled_quantity: string | null
   filled_at: string | null
   decided_at: string | null
   broker_ref: string | null

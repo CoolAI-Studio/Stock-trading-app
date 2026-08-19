@@ -60,6 +60,7 @@ const PENDING_ORDER: Order = {
   risk_notes: null,
   reject_reason: null,
   fill_price: null,
+  filled_quantity: null,
   filled_at: null,
   decided_at: null,
   broker_ref: null,

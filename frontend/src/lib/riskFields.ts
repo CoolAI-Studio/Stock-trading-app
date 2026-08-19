@@ -19,6 +19,10 @@ export interface RiskFieldSpec {
   /** Shown only while the switch is on, where the consequence is worth saying
    * out loud rather than leaving the owner to work out. */
   offWarning?: string
+  /** Replaces `help` on the per-strategy form, for the one knob whose scope
+   * genuinely differs there: the global 本金 covers the whole book, a
+   * strategy's covers only what that strategy itself bought. */
+  strategyHelp?: string
 }
 
 /** The backend reads `<= 0` as "off / no limit" for every one of these
@@ -50,6 +54,10 @@ export const RISK_FIELDS: readonly RiskFieldSpec[] = [
     kind: 'cap',
     offLabel: '不限制',
     help: '買進後的持倉總成本不能超過這個金額，會超過的買進訊號會被擋下來。',
+    strategyHelp:
+      '這個策略自己買進、還沒賣掉的部位成本不能超過這個金額。算的是這個策略花的錢，' +
+      '別的策略買同一支不會算到它頭上；賣掉之後額度就放回來。全域本金仍然同時生效，' +
+      '兩個上限都要過得去。',
   },
   {
     key: 'stop_loss_pct',

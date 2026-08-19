@@ -35,16 +35,66 @@ class SignalResult:
     reason: str | None = None
 
 
-def _committed_cost(db: Session, user_id: int, strategy_id: int | None = None) -> Decimal:
-    """Cost basis currently tied up in open positions -- the whole book, or
-    just the slice one strategy opened. Summed in Python rather than SQL
-    because the row count is tiny and Numeric arithmetic stays exact."""
-    query = db.query(Position).filter(Position.user_id == user_id, Position.quantity > 0)
-    if strategy_id is not None:
-        query = query.filter(Position.strategy_id == strategy_id)
-    return sum(
-        (position.quantity * position.avg_entry_price for position in query.all()), Decimal(0)
+def _committed_cost(db: Session, user_id: int) -> Decimal:
+    """Cost basis currently tied up in open positions, across the whole book.
+    Summed in Python rather than SQL because the row count is tiny and Numeric
+    arithmetic stays exact."""
+    positions = db.query(Position).filter(Position.user_id == user_id, Position.quantity > 0).all()
+    return sum((p.quantity * p.avg_entry_price for p in positions), Decimal(0))
+
+
+def _strategy_committed_cost(db: Session, user_id: int, strategy_id: int) -> Decimal:
+    """The share of the open book this strategy is holding, at book cost.
+
+    Deliberately *not* "positions whose strategy_id is this one". A position
+    is owned by whoever opened it, so that reading was wrong in both
+    directions: a strategy buying into a position somebody else opened
+    contributed nothing to its own total and never hit its ceiling, while the
+    strategy that happened to open a position was billed for every other
+    strategy's buys into it.
+
+    So the quantity comes from the strategy's own filled orders -- buys minus
+    sells, per symbol -- and only the price comes from the position. Valuing at
+    the position's blended entry price rather than each order's fill price
+    keeps this on the same basis as the global gate above and keeps the shares
+    strategies hold summing to exactly the position, however they were priced.
+
+    Capped at what is actually still open: once the position is gone the money
+    is not tied up any more, whoever closed it. Without that cap a strategy
+    liquidated by another one would stay charged for shares that no longer
+    exist, and the allocation would be a one-way ratchet.
+    """
+    filled = (
+        db.query(Order)
+        .filter(
+            Order.user_id == user_id,
+            Order.strategy_id == strategy_id,
+            Order.status == OrderStatus.CONFIRMED,
+        )
+        .all()
     )
+
+    net_by_symbol: dict[str, Decimal] = {}
+    for order in filled:
+        # Orders confirmed before filled_quantity existed are backfilled by the
+        # migration; None here would mean a fill that recorded nothing.
+        quantity = order.filled_quantity if order.filled_quantity is not None else order.quantity
+        signed = quantity if order.side == OrderSide.BUY else -quantity
+        net_by_symbol[order.symbol] = net_by_symbol.get(order.symbol, Decimal(0)) + signed
+
+    committed = Decimal(0)
+    for symbol, net in net_by_symbol.items():
+        if net <= 0:
+            continue
+        position = (
+            db.query(Position)
+            .filter(Position.user_id == user_id, Position.symbol == symbol)
+            .first()
+        )
+        if position is None or position.quantity <= 0:
+            continue
+        committed += min(net, position.quantity) * position.avg_entry_price
+    return committed
 
 
 def create_pending_order(db: Session, user: User, signal: SignalIn) -> SignalResult:
@@ -146,7 +196,7 @@ def create_pending_order(db: Session, user: User, signal: SignalIn) -> SignalRes
         # allocations are checked rather than one -- the global cap covers the
         # whole book, so it reads the global row directly and is never
         # displaced by an override; the strategy's own cap covers only the
-        # positions that strategy opened.
+        # shares that strategy itself bought and has not sold.
         if signal.signal_price is not None:
             incoming_cost = signal.quantity * signal.signal_price
             if not risk.check_capital_limit(
@@ -158,7 +208,9 @@ def create_pending_order(db: Session, user: User, signal: SignalIn) -> SignalRes
                     reason="買進後的總持倉成本會超過全域本金上限，請調高本金或先減碼",
                 )
             if strategy is not None and not risk.check_capital_limit(
-                _committed_cost(db, user.id, strategy.id), incoming_cost, limits.capital
+                _strategy_committed_cost(db, user.id, strategy.id),
+                incoming_cost,
+                limits.capital,
             ):
                 return SignalResult(
                     order=None,

@@ -141,3 +141,31 @@ def test_confirming_a_sell_larger_than_the_position_is_rejected(auth_client):
     unchanged = auth_client.get("/api/positions/AAPL")
     assert unchanged.json()["quantity"] == "10"
     assert unchanged.json()["realized_pnl"] == "0"
+
+
+def test_a_partial_fill_reports_what_actually_filled(auth_client):
+    """Confirming with a smaller quantity moves the position by that smaller
+    amount, so the order has to say so. Reporting `quantity` alone left the
+    orders list showing a 10-share buy that only ever delivered 2."""
+    create_resp = auth_client.post(
+        "/api/orders", json={"symbol": "AAPL", "side": "buy", "quantity": "10"}
+    )
+    order_id = create_resp.json()["id"]
+
+    confirm_resp = auth_client.post(
+        f"/api/orders/{order_id}/confirm", json={"fill_price": "100", "quantity": "2"}
+    )
+    assert confirm_resp.status_code == 200, confirm_resp.text
+    body = confirm_resp.json()
+    assert Decimal(body["quantity"]) == Decimal(10)
+    assert Decimal(body["filled_quantity"]) == Decimal(2)
+
+    position_resp = auth_client.get("/api/positions/AAPL")
+    assert Decimal(position_resp.json()["quantity"]) == Decimal(2)
+
+
+def test_a_pending_order_has_not_filled_anything_yet(auth_client):
+    create_resp = auth_client.post(
+        "/api/orders", json={"symbol": "AAPL", "side": "buy", "quantity": "10"}
+    )
+    assert create_resp.json()["filled_quantity"] is None

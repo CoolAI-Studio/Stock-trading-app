@@ -379,13 +379,11 @@ def test_strategy_capital_override_blocks_a_breaching_buy(db_session):
     user = _make_user(db_session)
     _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
     strategy = _make_strategy(db_session, user, capital=Decimal(1000))
-    _make_position(
-        db_session,
-        user,
-        quantity=Decimal(8),
-        avg_entry_price=Decimal(100),
-        strategy_id=strategy.id,
+
+    opened = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(8), strategy_id=strategy.id)
     )
+    _confirm(db_session, opened.order)
 
     result = create_pending_order(
         db_session, user, _signal(quantity=Decimal(5), strategy_id=strategy.id)
@@ -395,25 +393,34 @@ def test_strategy_capital_override_blocks_a_breaching_buy(db_session):
     assert "本金" in result.reason
 
 
-def test_strategy_capital_counts_only_the_positions_it_opened(db_session):
+def test_owning_a_position_you_did_not_pay_for_does_not_consume_your_allocation(db_session):
+    """A position row belongs to whoever opened it, and it keeps belonging to
+    them however much everyone else buys into it. Reading that row as "this
+    strategy's money" charged the first opener for the whole thing -- here that
+    is a 100 buy being billed 1000 and locked out of its own allocation."""
     user = _make_user(db_session)
     _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
     mine = _make_strategy(db_session, user, name="mine", capital=Decimal(1000))
     theirs = _make_strategy(db_session, user, name="theirs")
-    _make_position(
-        db_session,
-        user,
-        symbol="TSLA",
-        quantity=Decimal(9),
-        avg_entry_price=Decimal(100),
-        strategy_id=theirs.id,
+
+    opened_by_mine = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(1), strategy_id=mine.id)
     )
+    _confirm(db_session, opened_by_mine.order)
+    piled_on_by_theirs = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=theirs.id)
+    )
+    _confirm(db_session, piled_on_by_theirs.order)
+
+    position = portfolio.get_position(db_session, user.id, "AAPL")
+    assert position.quantity == Decimal(10)
+    assert position.strategy_id == mine.id, "opened by mine, so the row stays mine"
 
     result = create_pending_order(
         db_session, user, _signal(quantity=Decimal(5), strategy_id=mine.id)
     )
 
-    assert result.created is True
+    assert result.created is True, "mine has 100 at work, not 1000; 500 more still fits"
 
 
 def test_capital_zero_allows_everything(db_session):
@@ -837,3 +844,162 @@ def test_global_stop_loss_of_zero_switches_it_off(db_session):
     market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=100.0))
 
     assert db_session.query(Order).filter(Order.side == OrderSide.SELL).count() == 0
+
+
+# --- capital measures what a strategy SPENT, not what it happens to own -----
+#
+# The owner's rule, in their words: 本金上限就是上限，不可超過這個數值.
+# Counting "positions this strategy opened" fails that in both directions --
+# spending into someone else's position was free, and the first opener was
+# billed for everyone else's buys.
+
+
+def _confirm(db_session, order, fill_price=Decimal(100), fill_quantity=None) -> None:
+    """A fill, the way the confirm endpoint records one -- including moving the
+    position, since a test that marked the order confirmed but left the book
+    untouched would be measuring a state the app can never actually be in."""
+    quantity = order.quantity if fill_quantity is None else fill_quantity
+    order.status = OrderStatus.CONFIRMED
+    order.fill_price = fill_price
+    order.filled_quantity = quantity
+    db_session.commit()
+    portfolio.apply_fill(db_session, order, fill_price, quantity)
+
+
+def test_a_strategy_is_charged_for_buying_into_a_position_it_does_not_own(db_session):
+    """Was the expensive hole: the gate looked at Position.strategy_id, so a
+    strategy buying into a manual/webhook/other-strategy position contributed
+    nothing to its own total and its ceiling never bound. Measured live at the
+    time: a 1000 allocation spent past 2500 unblocked."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    mine = _make_strategy(db_session, user, name="mine", capital=Decimal(1000))
+    # Opened by hand, so it is nobody's -- exactly the case that used to be free.
+    _make_position(db_session, user, quantity=Decimal(5), avg_entry_price=Decimal(100))
+
+    first = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(8), strategy_id=mine.id)
+    )
+    assert first.created is True
+    _confirm(db_session, first.order)
+
+    second = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(5), strategy_id=mine.id)
+    )
+    assert second.created is False, "800 already spent of 1000; another 500 must not fit"
+    assert "本金" in second.reason
+
+
+def test_a_strategy_is_not_charged_for_another_strategys_spending(db_session):
+    """The opposite direction, and just as wrong: the strategy that opened a
+    position was billed for every other strategy's buys into it, so it hit a
+    ceiling on money it never spent."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    mine = _make_strategy(db_session, user, name="mine", capital=Decimal(1000))
+    theirs = _make_strategy(db_session, user, name="theirs")
+
+    spent_by_theirs = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=theirs.id)
+    )
+    _confirm(db_session, spent_by_theirs.order)
+
+    result = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=mine.id)
+    )
+    assert result.created is True, "mine has spent nothing; theirs' 900 is not its bill"
+
+
+def test_selling_gives_the_strategy_its_capital_back(db_session):
+    """Otherwise a ceiling is a one-way ratchet: the strategy trades until it
+    reaches the number once, then never trades again however much it closed."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, capital=Decimal(1000))
+
+    bought = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=strategy.id)
+    )
+    _confirm(db_session, bought.order)
+
+    blocked = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(5), strategy_id=strategy.id)
+    )
+    assert blocked.created is False
+
+    sold = create_pending_order(
+        db_session,
+        user,
+        _signal(side=OrderSide.SELL, quantity=Decimal(9), strategy_id=strategy.id),
+    )
+    _confirm(db_session, sold.order)
+
+    again = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=strategy.id)
+    )
+    assert again.created is True, "the position was closed, so the allocation is free again"
+
+
+def test_a_partial_fill_is_charged_at_what_actually_filled(db_session):
+    """confirm_order accepts a fill smaller than the order and applies that
+    smaller amount to the position, so charging the requested quantity would
+    bill the strategy for shares it never received."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, capital=Decimal(1000))
+
+    bought = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=strategy.id)
+    )
+    _confirm(db_session, bought.order, fill_quantity=Decimal(2))
+
+    result = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(7), strategy_id=strategy.id)
+    )
+    assert result.created is True, "only 200 actually filled, so 700 more still fits in 1000"
+
+
+def test_a_stop_loss_exit_is_attributed_to_the_strategy_that_owns_the_position(db_session):
+    """The exit has to carry the owner, or the capital it frees is never
+    credited back and the strategy is locked out by its own stop-loss."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(0), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, stop_loss_pct=Decimal("0.05"))
+    _make_position(
+        db_session,
+        user,
+        quantity=Decimal(10),
+        avg_entry_price=Decimal(100),
+        strategy_id=strategy.id,
+    )
+
+    market_loop.tick_once(db=db_session, market_data_service=_mock_service(price=80.0))
+
+    exit_order = (
+        db_session.query(Order)
+        .filter(Order.side == OrderSide.SELL, Order.user_id == user.id)
+        .first()
+    )
+    assert exit_order is not None, "a 20% drop against a 5% stop must produce an exit"
+    assert exit_order.strategy_id == strategy.id
+
+
+def test_the_global_ceiling_still_applies_inside_a_generous_strategy_allocation(db_session):
+    """The two caps compose -- a strategy allocation is a limit on top of the
+    book's, never a way around it. A strategy handed 100000 must still not be
+    able to spend past the account's own 1000."""
+    user = _make_user(db_session)
+    _make_risk(db_session, user, capital=Decimal(1000), signal_cooldown_sec=0)
+    strategy = _make_strategy(db_session, user, capital=Decimal(100000))
+
+    opened = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(9), strategy_id=strategy.id)
+    )
+    _confirm(db_session, opened.order)
+
+    result = create_pending_order(
+        db_session, user, _signal(quantity=Decimal(5), strategy_id=strategy.id)
+    )
+
+    assert result.created is False
+    assert "全域本金" in result.reason, "the global cap is what bit, and the message must say so"
