@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { ActionError } from '../components/ActionError'
+import { Pager } from '../components/Pager'
 import { DeleteButton } from '../components/DeleteButton'
 import { QueryError } from '../components/QueryError'
 import type { Order, OrderSide, OrderSource, OrderStatus } from '../lib/types'
@@ -20,10 +21,18 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   failed: '失敗',
 }
 
-function useOrdersQuery(status?: string) {
+// The backend caps a page at 200 and defaults to 50. Fifty is plenty per
+// screen; the point of asking explicitly is that the offset goes with it.
+const PAGE_SIZE = 50
+
+function useOrdersQuery(status?: string, offset = 0, symbol?: string) {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) })
+  if (status) params.set('status', status)
+  if (symbol) params.set('symbol', symbol)
+  const query = params.toString()
   return useQuery({
-    queryKey: ['orders', status ?? 'all'],
-    queryFn: () => api.get<Order[]>(`/api/orders${status ? `?status=${status}` : ''}`),
+    queryKey: ['orders', status ?? 'all', offset, symbol ?? ''],
+    queryFn: () => api.get<Order[]>(`/api/orders?${query}`),
   })
 }
 
@@ -298,9 +307,20 @@ function HistoryRow({ order }: { order: Order }) {
 export function OrdersPage() {
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
   const [showForm, setShowForm] = useState(false)
+  const queryClient = useQueryClient()
+  const clearHistory = useMutation({
+    mutationFn: () => api.delete<{ deleted: number }>('/api/orders'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+  })
+  const [historyOffset, setHistoryOffset] = useState(0)
+  const [symbolFilter, setSymbolFilter] = useState('')
   const pendingQuery = useOrdersQuery('pending')
-  const historyQuery = useOrdersQuery()
+  const historyQuery = useOrdersQuery(undefined, historyOffset, symbolFilter || undefined)
 
+  // Filtered client-side only to drop the pending rows, which the history tab
+  // shows separately. Everything else -- the page window, the symbol -- is
+  // done by the backend, so a page is a page rather than whatever survives a
+  // local filter.
   const history = (historyQuery.data ?? []).filter((o) => o.status !== 'pending')
 
   const activeQuery = tab === 'pending' ? pendingQuery : historyQuery
@@ -361,6 +381,36 @@ export function OrdersPage() {
       )}
 
       {tab === 'history' && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label htmlFor="orders-symbol-filter" className="text-sm text-slate-400">
+              只看某一檔
+            </label>
+            <input
+              id="orders-symbol-filter"
+              value={symbolFilter}
+              onChange={(e) => {
+                setSymbolFilter(e.target.value.toUpperCase())
+                // A filter that kept the old page number would show an empty
+                // page 3 of a one-page result.
+                setHistoryOffset(0)
+              }}
+              placeholder="全部"
+              className="block w-40 rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            />
+          </div>
+          <DeleteButton
+            what="全部已結束的訂單紀錄（已成交與待確認的不會被刪）"
+            label="清空歷史"
+            tone="loud"
+            onConfirm={() => clearHistory.mutate()}
+            pending={clearHistory.isPending}
+            error={clearHistory.error}
+          />
+        </div>
+      )}
+
+      {tab === 'history' && (
         <table className="w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
@@ -379,6 +429,14 @@ export function OrdersPage() {
             ))}
           </tbody>
         </table>
+      )}
+      {tab === 'history' && (
+        <Pager
+          offset={historyOffset}
+          pageSize={PAGE_SIZE}
+          shown={historyQuery.data?.length ?? 0}
+          onChange={setHistoryOffset}
+        />
       )}
     </div>
   )

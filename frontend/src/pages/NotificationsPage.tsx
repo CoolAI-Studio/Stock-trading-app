@@ -21,6 +21,70 @@ const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', fai
  * reads it. */
 /** The owner did not build this and should not have to read its enum names.
  * WEB_PUSH and order.created were appearing verbatim on the page. */
+/** Which events this channel should receive.
+ *
+ * The column and the dispatcher's filter have existed since notifications
+ * did; the form never sent the field, so it stayed NULL and NULL means "all".
+ * Every enabled channel therefore got all four kinds, the owner got washed
+ * out by order.updated, and the usual response is to switch the whole channel
+ * off -- taking the stop-loss alerts with it.
+ *
+ * Nothing selected means all, deliberately: it matches the stored NULL and it
+ * is the sane reading of "I have not chosen". A channel that received nothing
+ * would be an enabled channel that never fires. */
+const EVENT_CHOICES = [
+  { value: 'order.created', label: '新的待確認訂單' },
+  { value: 'order.updated', label: '訂單狀態變更' },
+  { value: 'strategy.alert', label: '策略提醒（只提醒模式）' },
+  { value: 'strategy.error', label: '策略發生錯誤' },
+] as const
+
+function EventPicker({
+  idPrefix,
+  selected,
+  onChange,
+}: {
+  idPrefix: string
+  selected: string[] | null
+  onChange: (value: string[] | null) => void
+}) {
+  function toggle(value: string) {
+    // null means "all", so unticking one from that state has to yield the
+    // other three -- not just the one that was clicked. Reading null as an
+    // empty list here inverted the control: the box the owner unticked was
+    // the only one that stayed.
+    const current = selected ?? EVENT_CHOICES.map((c) => c.value)
+    const next = current.includes(value)
+      ? current.filter((v) => v !== value)
+      : [...current, value]
+    // Back to null rather than an empty list at either end: everything
+    // selected is the same thing as no preference, and an empty list would be
+    // a channel that is enabled and never fires.
+    onChange(next.length === 0 || next.length === EVENT_CHOICES.length ? null : next)
+  }
+
+  return (
+    <fieldset className="space-y-1">
+      <legend className="text-sm text-slate-400">要收哪些通知</legend>
+      {EVENT_CHOICES.map((choice) => (
+        <label key={choice.value} className="flex items-center gap-2 text-sm">
+          <input
+            id={`${idPrefix}-event-${choice.value}`}
+            type="checkbox"
+            checked={selected === null || selected.includes(choice.value)}
+            onChange={() => toggle(choice.value)}
+          />
+          {choice.label}
+        </label>
+      ))}
+      <p className="text-xs text-slate-500">
+        全部不選＝全部都收。想分流的話，例如「下單通知走 Telegram、策略錯誤才寄 email」，
+        就在各個管道分別勾選。
+      </p>
+    </fieldset>
+  )
+}
+
 const CHANNEL_LABEL: Record<ChannelType, string> = {
   line: 'LINE',
   telegram: 'Telegram',
@@ -98,6 +162,7 @@ function emailConfig(fields: {
 function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; onDone: () => void }) {
   const [label, setLabel] = useState(channel.label)
   const [isEnabled, setIsEnabled] = useState(channel.is_enabled)
+  const [events, setEvents] = useState<string[] | null>(channel.subscribed_events)
   const [botToken, setBotToken] = useState('')
   const [chatId, setChatId] = useState('')
   const [accessToken, setAccessToken] = useState('')
@@ -113,7 +178,11 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const payload: Record<string, unknown> = { label, is_enabled: isEnabled }
+      const payload: Record<string, unknown> = {
+        label,
+        is_enabled: isEnabled,
+        subscribed_events: events,
+      }
       const config =
         channel.channel_type === 'telegram'
           ? { bot_token: botToken, chat_id: chatId }
@@ -149,6 +218,12 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
+
+      <EventPicker
+        idPrefix={`edit-channel-${channel.id}`}
+        selected={events}
+        onChange={setEvents}
+      />
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isEnabled} onChange={(e) => setIsEnabled(e.target.checked)} />
@@ -382,6 +457,7 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
 function NewChannelForm({ onDone }: { onDone: () => void }) {
   const [channelType, setChannelType] = useState<ChannelType>('telegram')
   const [label, setLabel] = useState('')
+  const [events, setEvents] = useState<string[] | null>(null)
   const [botToken, setBotToken] = useState('')
   const [chatId, setChatId] = useState('')
   const [accessToken, setAccessToken] = useState('')
@@ -402,7 +478,12 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           '/api/notifications/push/vapid-public-key',
         )
         const config = await subscribeToPush(public_key)
-        return api.post('/api/notifications/channels', { channel_type: channelType, label, config })
+        return api.post('/api/notifications/channels', {
+          channel_type: channelType,
+          label,
+          config,
+          subscribed_events: events,
+        })
       }
       const config =
         channelType === 'telegram'
@@ -410,7 +491,12 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           : channelType === 'line'
             ? { access_token: accessToken, to }
             : emailConfig({ host, port, username, password, fromAddr, toAddr })
-      return api.post('/api/notifications/channels', { channel_type: channelType, label, config })
+      return api.post('/api/notifications/channels', {
+        channel_type: channelType,
+        label,
+        config,
+        subscribed_events: events,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notification-channels'] })
@@ -446,6 +532,8 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
+
+      <EventPicker idPrefix="new-channel" selected={events} onChange={setEvents} />
 
       {channelType === 'telegram' && (
         <>

@@ -352,3 +352,79 @@ describe('why this sell order exists', () => {
     expect(row).toHaveTextContent('本金上限')
   })
 })
+
+describe('reaching older orders', () => {
+  function pageOf(count: number, startId = 100) {
+    return Array.from({ length: count }, (_, i) => ({
+      ...PENDING_ORDER,
+      id: startId + i,
+      status: 'confirmed' as const,
+      symbol: `SYM${i}`,
+    }))
+  }
+
+  it('asks the backend for a page rather than taking whatever comes', async () => {
+    // The list fetched a fixed first page and said nothing about it, so after
+    // a few weeks the history simply stopped at fifty.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [] as never
+      return pageOf(50) as never
+    })
+    renderPage()
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('limit=50&offset=0')),
+    )
+  })
+
+  it('steps to the next page of history', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [] as never
+      return pageOf(50) as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /歷史/ }))
+    await user.click(await screen.findByRole('button', { name: '下一頁' }))
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('offset=50')),
+    )
+  })
+
+  it('filters by symbol on the backend, not by hiding rows locally', async () => {
+    // Hiding rows locally would filter one page and call it the answer.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [] as never
+      return pageOf(3) as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /歷史/ }))
+    await user.type(screen.getByLabelText('只看某一檔'), '2330.tw')
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('symbol=2330.TW')),
+    )
+  })
+
+  it('goes back to the first page when the filter changes', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('status=pending')) return [] as never
+      return pageOf(50) as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /歷史/ }))
+    await user.click(await screen.findByRole('button', { name: '下一頁' }))
+    await user.type(screen.getByLabelText('只看某一檔'), 'A')
+
+    // An unchanged offset would show an empty page 2 of a one-page result.
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('offset=0&symbol=A')),
+    )
+  })
+})

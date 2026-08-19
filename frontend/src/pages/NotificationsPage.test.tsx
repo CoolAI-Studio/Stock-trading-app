@@ -103,6 +103,7 @@ describe('NotificationsPage', () => {
         channel_type: 'telegram',
         label: 'my-phone',
         config: { bot_token: 't123', chat_id: '555' },
+        subscribed_events: null,
       }),
     )
   })
@@ -124,6 +125,7 @@ describe('NotificationsPage', () => {
       expect(api.patch).toHaveBeenCalledWith('/api/notifications/channels/1', {
         label: 'renamed',
         is_enabled: true,
+        subscribed_events: null,
       }),
     )
   })
@@ -142,6 +144,7 @@ describe('NotificationsPage', () => {
       expect(api.patch).toHaveBeenCalledWith('/api/notifications/channels/1', {
         label: 'phone',
         is_enabled: true,
+        subscribed_events: null,
         config: { bot_token: 'newtoken', chat_id: '' },
       }),
     )
@@ -181,6 +184,7 @@ describe('NotificationsPage', () => {
         channel_type: 'web_push',
         label: 'my-laptop',
         config: { endpoint: 'https://push.example.com/x', p256dh: 'p', auth: 'a' },
+        subscribed_events: null,
       }),
     )
   })
@@ -308,3 +312,71 @@ describe('whether a channel is actually working', () => {
     expect(within(row).getByTestId('channel-health')).toHaveTextContent('正常')
   })
 })
+
+describe('choosing which events a channel receives', () => {
+  // Asserting on mock.calls[0] needs a clean slate; earlier tests in this file
+  // leave their own calls behind.
+  beforeEach(() => vi.clearAllMocks())
+
+  it('sends the chosen subset', async () => {
+    // The column and the dispatcher's filter have existed all along; the form
+    // never sent the field, so every enabled channel received all four kinds
+    // and the owner got washed out by order.updated.
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.type(screen.getByLabelText('名稱'), 'quiet-phone')
+    await user.type(screen.getByLabelText(/機器人權杖/), 't')
+    await user.type(screen.getByLabelText(/聊天室代號/), '1')
+    // Start from "all selected"; drop the noisy one.
+    await user.click(screen.getByLabelText('訂單狀態變更'))
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const payload = vi.mocked(api.post).mock.calls[0][1] as { subscribed_events: string[] }
+    expect(payload.subscribed_events).not.toContain('order.updated')
+    expect(payload.subscribed_events).toContain('order.created')
+  })
+
+  it('sends null when nothing is picked, which the backend reads as all', async () => {
+    // An empty list would be a channel that is enabled and never fires.
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '新增管道' }))
+    await user.type(screen.getByLabelText('名稱'), 'all-events')
+    await user.type(screen.getByLabelText(/機器人權杖/), 't')
+    await user.type(screen.getByLabelText(/聊天室代號/), '1')
+    for (const label of [
+      '新的待確認訂單',
+      '訂單狀態變更',
+      '策略提醒（只提醒模式）',
+      '策略發生錯誤',
+    ]) {
+      await user.click(screen.getByLabelText(label))
+    }
+    await user.click(screen.getByRole('button', { name: '建立' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const payload = vi.mocked(api.post).mock.calls[0][1] as { subscribed_events: unknown }
+    expect(payload.subscribed_events).toBeNull()
+  })
+
+  it('shows everything ticked for a channel that never chose', async () => {
+    // null means all, and the boxes have to say so rather than looking like
+    // a channel subscribed to nothing.
+    renderPage()
+    await user_open_edit()
+
+    expect(screen.getByLabelText('新的待確認訂單')).toBeChecked()
+    expect(screen.getByLabelText('策略發生錯誤')).toBeChecked()
+  })
+})
+
+async function user_open_edit() {
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: '編輯' }))
+}
