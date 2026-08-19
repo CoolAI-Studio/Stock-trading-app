@@ -1,0 +1,61 @@
+# Is the alerting still running?
+#
+# The one failure this product cannot survive is the worker stopping, because
+# every alert stops with it -- silently. /healthz has been able to see that
+# since it was written (it runs a real query, reads the worker heartbeat, and
+# answers 503 when either is wrong), but nothing ever asked it. The only way to
+# find out was to open the page, which is what somebody who set an alert is
+# specifically not doing.
+#
+# A dying process cannot report its own death, so this runs somewhere else.
+# When it fails, GitHub emails the repo owner -- that email is the entire
+# point of this file.
+#
+# The repo is public, so scheduled Actions minutes are free.
+
+name: Watchdog
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub's scheduler is best-effort and often runs late
+    # under load, which is fine here: this is "has it been down for a while",
+    # not a stopwatch. Any faster and a late run would overlap the next one for
+    # no extra information.
+    - cron: "*/15 * * * *"
+  # So the owner can prove it works without waiting for the schedule -- an
+  # untested alarm is not an alarm.
+  workflow_dispatch:
+
+# A pile-up of runs all reporting the same outage is noise; the newest answer
+# is the only one worth having.
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    # A hung request must not hold a runner open; the script's own timeout is
+    # 60s and it makes at most two attempts 45s apart.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # No pip install: the script is deliberately stdlib-only so this job
+      # cannot be broken by a dependency, which would take the watchdog down
+      # exactly when a release is in flight.
+      - name: Ask the deployment whether it is still alerting
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "::notice::HEALTH_URL 這個 repository variable 沒有設定，略過檢查。"
+            echo "要啟用：Settings → Secrets and variables → Actions → Variables，"
+            echo "新增 HEALTH_URL，值是你後端的 https://<你的服務>.onrender.com/healthz"
+            exit 0
+          fi
+          python backend/scripts/watchdog.py "$HEALTH_URL"

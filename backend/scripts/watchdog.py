@@ -1,0 +1,178 @@
+"""Check from outside that the alerts are still running.
+
+/healthz already knows everything worth knowing -- it runs a real query, reads
+the worker's heartbeat, counts empty market-data polls, and answers 503 when
+any of it is wrong. Its docstring has said "UptimeRobot hits it every 5
+minutes" since it was written. Nothing ever hit it.
+
+So the failure this product cannot survive -- the worker stops, and every
+alert stops with it -- was detectable only by a human opening the page. That
+is exactly the person who is not looking: they set an alert so they would not
+have to.
+
+A dying process cannot report its own death, which is why this runs somewhere
+else: a scheduled GitHub Actions job (the repo is public, so the minutes cost
+nothing). A failed scheduled workflow emails the repo owner, and that email is
+the whole point of the file.
+
+NO SECOND DEFINITION OF HEALTHY. This never re-derives whether the worker is
+late; /healthz owns that (settings.HEALTH_MAX_AGE_SEC, the startup grace
+window, the empty-poll run). Two definitions would drift, and the one that
+drifted would be the one that stopped mailing. All this adds is "did anything
+answer at all", which is the one question the service cannot answer about
+itself.
+
+    python scripts/watchdog.py https://your-app.onrender.com/healthz
+"""
+
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+
+# How long to wait before looking again after no answer. Render's free tier
+# spins the process down when idle and a cold start takes the better part of a
+# minute -- during which the service is genuinely unreachable and genuinely
+# fine. Shorter than this and the retry is decoration: both requests land
+# inside the same cold start, both fail, and the owner gets an email about an
+# outage that was a boot.
+COLD_START_WAIT_SEC = 45
+
+# Long enough to sit through a cold start rather than time out in the middle of
+# one and call it an outage.
+TIMEOUT_SEC = 60
+
+# What each check guards, in the owner's language. The email has to say what
+# has actually stopped working; "health check failed" sends them to a
+# dashboard to work it out from scratch at whatever hour it arrived.
+_MEANING = {
+    "worker": "背景 worker 沒有在跑 —— 策略不會執行，提醒不會發出。",
+    "market_data": "抓不到行情 —— 沒有價格就不會有任何提醒。",
+    "database": "連不上資料庫 —— 策略、持倉、通知設定全都讀不到。",
+}
+
+
+def read_verdict(status_code: int | None, body: str | None) -> list[str]:
+    """What is wrong, in the owner's language. Empty means healthy.
+
+    `status_code is None` means nothing answered at all, which covers the worst
+    outcome there is -- the whole deployment gone -- so it can never be silent.
+    """
+    if status_code is None:
+        return ["連不上服務（完全沒有回應）。整個後端可能已經停掉，所有提醒都不會發出。"]
+
+    try:
+        payload = json.loads(body or "")
+    except (json.JSONDecodeError, TypeError):
+        # A proxy error page, a parked domain, somebody else's app on that
+        # hostname: all answer with something that is not this service.
+        # Treating "it responded" as "it is healthy" would report green for a
+        # deployment that no longer exists.
+        return [
+            f"服務有回應（HTTP {status_code}），但回傳的內容看不懂，"
+            "不是這個 app 的健康檢查格式。這個網址現在指向的可能不是你的後端。"
+        ]
+
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    if not isinstance(checks, dict):
+        return [
+            f"服務有回應（HTTP {status_code}），但回傳的 JSON 裡沒有 checks 區塊，"
+            "不是這個 app 的健康檢查格式。"
+        ]
+
+    problems = []
+    for name, check in checks.items():
+        # Anything that is not an outright "fail" is left alone on purpose --
+        # 'starting' is the grace window after a cold start, and 'disabled' is
+        # a deliberate configuration. The endpoint already drew those lines.
+        if not isinstance(check, dict) or check.get("status") != "fail":
+            continue
+        problems.append(_MEANING.get(name, f"{name} 檢查失敗。") + f"（{name}）")
+
+    if not problems and status_code != 200:
+        # It said nothing is wrong and still refused. Worth reporting rather
+        # than trusting either half of a contradiction.
+        problems.append(
+            f"HTTP {status_code}，但回傳的檢查項目都說正常。"
+            "可能是 Render 或中間的代理擋下來的，不是 app 自己回的。"
+        )
+
+    return problems
+
+
+def fetch(url: str) -> tuple[int | None, str | None]:
+    """The response, or (None, None) if nothing came back at all."""
+    try:
+        with urllib.request.urlopen(url, timeout=TIMEOUT_SEC) as response:  # noqa: S310
+            return response.status, response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        # A 503 is an ANSWER, and the most informative one there is -- the body
+        # carries which check failed. Losing it to an exception handler would
+        # turn every real outage into a generic "could not connect".
+        return exc.code, exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        return None, None
+
+
+def run_check(
+    fetch_once: Callable[[], tuple[int | None, str | None]],
+    *,
+    attempts: int = 2,
+    wait: Callable[[float], None] = time.sleep,
+) -> list[str]:
+    """Ask, and ask again only when the answer was "nothing".
+
+    A 503 with a dead worker is a definite answer; retrying it only delays the
+    email. No answer at all is the ambiguous case -- on a free tier it is
+    usually a cold start -- so that one, and only that one, is worth a second
+    look.
+    """
+    problems: list[str] = []
+    for attempt in range(attempts):
+        status_code, body = fetch_once()
+        problems = read_verdict(status_code, body)
+        if not problems:
+            return []
+        if status_code is not None:
+            # It answered. Asking again tells us nothing new.
+            return problems
+        if attempt < attempts - 1:
+            wait(COLD_START_WAIT_SEC)
+    return problems
+
+
+def main(argv: list[str]) -> int:
+    # Every message here is Traditional Chinese, and Python picks the console's
+    # own codepage for stdout -- cp950 on the owner's Windows machine, which
+    # mangles the text into unreadable bytes. The runner it normally runs on is
+    # UTF-8 so this would only ever break when read locally, which is exactly
+    # when someone is debugging and needs to read it.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+    if len(argv) < 2 or not argv[1].strip():
+        print("用法：python scripts/watchdog.py <健康檢查網址>")
+        return 2
+
+    url = argv[1].strip()
+    problems = run_check(lambda: fetch(url))
+
+    if not problems:
+        print(f"OK — {url} 回報一切正常。")
+        return 0
+
+    print(f"這個後端有問題：{url}\n")
+    for problem in problems:
+        print(f"  - {problem}")
+    print(
+        "\n這代表提醒可能已經停擺。先去 Render 的 dashboard 看 log，"
+        "確認服務有沒有在跑；必要時按一次 Manual Deploy。"
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

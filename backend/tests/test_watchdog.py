@@ -1,0 +1,192 @@
+"""The check that runs when nobody is looking.
+
+Every way this app can fail quietly is already visible on /healthz -- it runs
+a real query, checks the worker's heartbeat, and returns 503 when any of them
+is bad. Its docstring even says "UptimeRobot hits it every 5 minutes". Nothing
+ever hit it. So the one failure the product cannot survive -- the worker stops
+and the alerts stop with it -- was detectable only by a human opening the page,
+which is precisely what somebody who set an alert is not doing.
+
+A dying process cannot report its own death, so the check has to run somewhere
+else. It runs as a scheduled GitHub Actions job (the repo is public, so the
+minutes are free), and a failed scheduled workflow emails the owner. This
+module is the part with judgement in it, kept out of the YAML so it can be
+tested at all.
+
+THE RETRY IS NOT POLITENESS. Render's free tier spins the process down when
+idle and a cold start takes the better part of a minute, during which the
+service really is unreachable and really is fine. A watchdog that mails on
+that trains the owner to ignore it, and an ignored alarm is worse than none --
+it costs the same attention and buys nothing.
+"""
+
+import json
+
+import pytest
+
+from scripts.watchdog import read_verdict, run_check
+
+
+def _body(**checks) -> str:
+    """A /healthz body. Spelled out from a dict rather than pasted as a long
+    literal so the shape being asserted against stays readable."""
+    failing = any(c.get("status") == "fail" for c in checks.values())
+    return json.dumps({"status": "fail" if failing else "ok", "checks": checks})
+
+
+HEALTHY = _body(
+    database={"status": "ok"},
+    worker={"status": "ok", "last_loop_age_sec": 4.1},
+    market_data={"status": "ok", "last_poll_age_sec": 3.9},
+)
+
+WORKER_DEAD = _body(
+    database={"status": "ok"},
+    worker={"status": "fail"},
+    market_data={"status": "fail"},
+)
+
+STARTING = _body(
+    database={"status": "ok"},
+    worker={"status": "starting"},
+    market_data={"status": "starting"},
+)
+
+
+# --- reading the answer -----------------------------------------------------
+
+
+def test_a_healthy_service_reports_nothing():
+    assert read_verdict(200, HEALTHY) == []
+
+
+def test_a_dead_worker_is_named_not_just_counted():
+    """The email has to say what to go and look at. "health check failed" sends
+    the owner to the dashboard to work it out from scratch."""
+    problems = read_verdict(503, WORKER_DEAD)
+
+    assert problems
+    joined = "\n".join(problems)
+    assert "worker" in joined
+    assert "行情" in joined
+
+
+def test_a_healthy_database_is_not_listed_among_the_problems():
+    joined = "\n".join(read_verdict(503, WORKER_DEAD))
+    assert "資料庫" not in joined
+
+
+def test_a_worker_that_has_only_just_started_is_not_an_outage():
+    """The grace window after a cold start is a start, not a failure -- and the
+    endpoint already draws that line, so this must not draw a second one."""
+    assert read_verdict(200, STARTING) == []
+
+
+def test_no_response_at_all_is_the_loudest_case():
+    """Nothing answered. That covers the worst outcome there is -- the whole
+    deployment gone -- so it can never be silent."""
+    problems = read_verdict(None, None)
+
+    assert problems
+    assert "連不上" in problems[0]
+
+
+def test_an_unexpected_status_code_says_which_one():
+    problems = read_verdict(502, "<html>Bad Gateway</html>")
+
+    assert any("502" in p for p in problems)
+
+
+def test_a_200_that_is_not_the_health_json_is_still_a_problem():
+    """A proxy error page, a parked domain, somebody else's app on that
+    hostname: all of them answer 200 with something that is not this service,
+    and treating "it responded" as "it is healthy" would make the watchdog
+    report green for a deployment that no longer exists."""
+    problems = read_verdict(200, "<html>welcome to nginx</html>")
+
+    assert problems
+    assert any("看不懂" in p or "不是" in p for p in problems)
+
+
+def test_json_that_is_missing_the_checks_block_is_a_problem_too():
+    problems = read_verdict(200, '{"hello": "world"}')
+    assert problems
+
+
+# --- the retry --------------------------------------------------------------
+
+
+def test_one_bad_answer_followed_by_a_good_one_is_not_an_outage():
+    """The cold-start case, which is the common one on a free tier and is not
+    a failure. Mailing on it is how a watchdog gets muted."""
+    answers = [(None, None), (200, HEALTHY)]
+
+    problems = run_check(lambda: answers.pop(0), attempts=2, wait=lambda _: None)
+
+    assert problems == []
+
+
+def test_two_bad_answers_in_a_row_is_an_outage():
+    """A cold start finishes in well under a minute; still down on the second
+    look is the real thing."""
+    problems = run_check(lambda: (None, None), attempts=2, wait=lambda _: None)
+
+    assert problems
+
+
+def test_it_waits_between_the_two_looks_rather_than_asking_twice_at_once():
+    """Two immediate requests both land inside the same cold start and both
+    fail, which turns the retry into decoration."""
+    slept: list[float] = []
+    answers = [(None, None), (200, HEALTHY)]
+
+    run_check(lambda: answers.pop(0), attempts=2, wait=slept.append)
+
+    assert slept and slept[0] >= 30, "a cold start needs longer than a moment"
+
+
+def test_a_healthy_first_answer_costs_no_extra_request():
+    """This runs on a schedule forever; the quiet path has to stay one
+    request."""
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return (200, HEALTHY)
+
+    run_check(fetch, attempts=2, wait=lambda _: None)
+
+    assert len(calls) == 1
+
+
+def test_a_real_failure_is_not_retried_away():
+    """503 with a dead worker is a definite answer, not a maybe. Retrying it
+    only delays the email."""
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return (503, WORKER_DEAD)
+
+    problems = run_check(fetch, attempts=2, wait=lambda _: None)
+
+    assert problems
+    assert len(calls) == 1, "the service answered; asking again tells us nothing new"
+
+
+# --- the thing it is guarding against ---------------------------------------
+
+
+def test_the_check_names_the_product_failure_rather_than_the_http_one():
+    """Whoever reads this email at 2am needs to know that alerts have stopped,
+    not that a probe returned a number."""
+    problems = read_verdict(503, WORKER_DEAD)
+
+    assert any("提醒" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("body", ["", "null", "[]"])
+def test_degenerate_bodies_do_not_crash_the_watchdog(body):
+    """It must fail loudly, never fail to run -- a watchdog that raises is a
+    watchdog that reports nothing."""
+    assert read_verdict(200, body)
