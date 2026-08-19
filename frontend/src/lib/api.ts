@@ -129,6 +129,47 @@ export async function downloadFile(path: string, filename: string): Promise<void
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
+/** Posts a body and hands the response back as a download.
+ *
+ * The backup passphrase must not travel in a URL -- it would land in the
+ * browser history and in whatever logs the proxy keeps -- so this is a POST
+ * whose response is a file rather than JSON.
+ */
+export async function downloadPost(
+  path: string,
+  body: unknown,
+  filename: string,
+): Promise<void> {
+  const token = getToken()
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (response.status === 401) {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, '1')
+    setToken(null)
+    unauthorizedHandler?.()
+    throw new ApiError(401, '登入時效到了')
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorDetail(response))
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export async function login(email: string, password: string): Promise<string> {
   const params = new URLSearchParams({ username: email, password })
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {

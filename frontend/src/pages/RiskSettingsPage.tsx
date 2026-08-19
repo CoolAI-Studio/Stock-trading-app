@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { BackupPanel } from '../components/BackupPanel'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type { RiskSettings } from '../lib/types'
 
@@ -110,6 +111,7 @@ export function RiskSettingsPage() {
         儲存
       </button>
       {saveMutation.isSuccess && <span className="ml-3 text-sm text-emerald-400">已儲存。</span>}
+      <BackupPanel />
     </div>
   )
 }

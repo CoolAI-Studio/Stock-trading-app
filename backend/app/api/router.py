@@ -4,6 +4,7 @@ from app.api.routers import (
     alerts,
     auth,
     backtests,
+    backup,
     broker_costs,
     broker_credentials,
     export,
@@ -24,6 +25,7 @@ api_router.include_router(auth.router)
 api_router.include_router(alerts.router)
 api_router.include_router(strategies.router)
 api_router.include_router(backtests.router)
+api_router.include_router(backup.router)
 api_router.include_router(indicators.router)
 api_router.include_router(market.router)
 api_router.include_router(orders.router)
