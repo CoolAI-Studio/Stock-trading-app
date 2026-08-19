@@ -32,10 +32,12 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: backend/requirements.lock
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # The lock, not the floating ranges: installing one here and the other
+        # in the deploy image would mean CI never tested the build that ships.
+        run: pip install -r requirements.lock
 
       - name: Lint
         run: ruff check app tests
@@ -53,6 +55,16 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+
+      - name: Known vulnerabilities in the locked dependencies
+        # Advisory, not a gate: a CVE published in a transitive package is
+        # worth knowing about today, but failing the build would block an
+        # unrelated fix on an upstream release nobody here controls. The
+        # annotation is the point.
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.lock --desc
 
       - name: Tests
         run: pytest -q

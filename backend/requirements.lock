@@ -1,0 +1,94 @@
+# Exact versions, generated from a working install with `pip freeze`.
+#
+# requirements.txt says what this app depends on; this file says what it was
+# last known to work with, transitive packages included. Both CI and the
+# deploy image install from HERE, so what ships is what the tests ran against
+# -- installing floating ranges in one place and a lock in the other would
+# mean CI never tested the build that actually deploys.
+#
+# Before this existed, pressing Manual Deploy pulled whatever the upstreams
+# had published that day, months after the version anyone had tested. One
+# breaking release anywhere in this list stops the container starting, and
+# with `alembic upgrade head && uvicorn` as the command that is the whole
+# service -- with no CI signal, because CI had installed something else.
+#
+# To update: edit requirements.txt, reinstall, `pip freeze > requirements.lock`,
+# and let CI say whether it still works.
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+alembic==1.19.1
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+attrs==26.1.0
+bcrypt==4.0.1
+beautifulsoup4==4.15.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.4.2
+colorama==0.4.6
+cryptography==50.0.0
+curl_cffi==0.16.0
+dnspython==2.8.0
+ecdsa==0.19.2
+email-validator==2.3.0
+fastapi==0.141.1
+frozenlist==1.8.0
+greenlet==3.5.5
+h11==0.16.0
+http_ece==1.2.1
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.18
+iniconfig==2.3.0
+lxml==6.1.1
+Mako==1.4.1
+MarkupSafe==3.0.3
+multidict==6.7.1
+multitasking==0.0.13
+numpy==2.5.2
+packaging==26.3
+pandas==3.0.5
+passlib==1.7.4
+peewee==4.3.0
+platformdirs==4.11.3
+pluggy==1.6.0
+propcache==0.5.2
+protobuf==7.35.1
+psycopg2-binary==2.9.12
+py-vapid==1.9.4
+pyasn1==0.6.4
+pycparser==3.0
+pydantic==2.13.4
+pydantic-settings==2.15.0
+pydantic_core==2.46.4
+Pygments==2.20.0
+PyOTP==2.10.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-jose==3.5.0
+python-multipart==0.0.32
+pytz==2026.3.post1
+pywebpush==2.4.0
+PyYAML==6.0.3
+requests==2.34.2
+rsa==4.9.1
+ruff==0.16.3
+six==1.17.0
+soupsieve==2.9.2
+SQLAlchemy==2.0.52
+starlette==1.6.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.3
+urllib3==2.7.0
+uvicorn==0.52.3
+watchfiles==1.2.0
+websockets==17.0.1
+yarl==1.24.5
+yfinance==1.6.0

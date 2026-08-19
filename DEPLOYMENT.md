@@ -203,6 +203,59 @@ pg_restore --clean --if-exists --no-owner -d "postgresql://...要還原到的連
 
 ---
 
+## 8. 上線壞掉的時候：怎麼退回去
+
+寫在這裡是因為需要它的那一刻，沒有人有心情從頭想一遍。
+
+### 先分清楚是哪一種壞
+
+在 Render 的 Logs 看啟動訊息，兩種壞法的處理方式完全不同：
+
+| 症狀 | 多半是 |
+| --- | --- |
+| 服務起不來、log 停在 `alembic upgrade head` | 遷移本身失敗 |
+| 服務起得來但功能不對、log 有 Python traceback | 程式碼的問題 |
+| 前幾秒 502 之後就正常 | Neon 冷啟動，不是故障，等一下就好 |
+
+### 情況 A：程式碼壞了，但資料庫結構沒變
+
+最單純。Render → 該服務 → **Events**，找到上一個成功的 deploy → **Rollback**。
+幾分鐘內回到舊版，資料完全不動。
+
+### 情況 B：程式碼壞了，而且這一版帶了遷移
+
+**不能直接 Rollback。** 容器每次啟動都會跑 `alembic upgrade head`，資料庫已經在新
+結構上，舊程式碼配新結構通常直接 500——你會從一個壞掉換到另一個壞掉。
+
+順序是：**先把資料庫降回去，再回舊版程式**。免費方案沒有 shell，所以降級要從你自己的
+電腦跑：
+
+```bash
+cd backend
+# DATABASE_URL 用 Neon 的連線字串（Render 環境變數裡那一條）
+DATABASE_URL="postgresql://..." python -m alembic downgrade -1
+```
+
+`-1` 是退一個版本。要退多個就多跑幾次，或用 `downgrade <revision>` 指定。
+每一支遷移都寫了 `downgrade()`，所以這是可行的——但**先做備份**（第 7 節），
+因為 downgrade 會丟掉那個欄位裡的資料。
+
+降完之後再到 Render 做 Rollback。
+
+### 情況 C：資料本身壞了（不是程式）
+
+程式沒問題，是資料被寫壞了。Rollback 沒有用。
+
+1. Neon 的 **Restore**（免費方案只保留幾小時，過了就沒有）
+2. 或用第 7 節的加密備份還原：`python scripts/inspect_backup.py 檔案` 先看內容
+
+### 事後
+
+Render 的 Events 只說「哪一次部署」，不說「那是哪一版程式」。要對得起來，
+到 GitHub 看 commit 時間，跟 deploy 時間對照。
+
+---
+
 ## 檢查清單
 
 - [ ] Neon 資料庫建立完成，拿到連線字串

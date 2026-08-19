@@ -7,8 +7,15 @@ WORKDIR /app
 # bcrypt<4.1 is pinned in requirements.txt for passlib compat (see
 # app/core/security.py) -- no extra system packages needed for it or for
 # cryptography/psycopg2-binary on this base image.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.lock, not requirements.txt: the ranges in requirements.txt say
+# what this app depends on, and the lock says what it was last tested with.
+# Building from the ranges meant every Manual Deploy pulled whatever the
+# upstreams had published that day, months after the version anyone had run --
+# and one breaking release stops this container starting, which with the CMD
+# below is the whole service. CI installs the same file, so the tests run
+# against the build that ships.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.api.routers.health import router as health_router
 from app.config import enforce_required_secrets, settings
+from app.logging_setup import configure_logging
 from app.services.events import bus
 from app.services.market_loop import run_forever
 from app.services.notification.dispatcher import handle_event as dispatch_notification
@@ -33,6 +34,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     bus.unsubscribe(broadcaster.handle_event)
     bus.unsubscribe(dispatch_notification)
 
+
+# At import, before anything else runs, so the guard below and every module
+# imported after this point can actually say something. Configured here rather
+# than in the lifespan for the same reason: a failure during startup is
+# exactly the one worth having a log line for.
+configure_logging(settings.LOG_LEVEL)
 
 # At import, not in lifespan: uvicorn then dies while loading the app, so a
 # misconfigured deploy never binds a port and never serves a single request.

@@ -1,0 +1,33 @@
+# Dependency updates arrive as pull requests, which CI then tests.
+#
+# The alternative was noticing a CVE by reading the news, and updating by
+# hand-editing a version range and hoping. With the lockfile in place nothing
+# moves on its own any more, so without this the versions would simply freeze
+# and quietly rot instead.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine bumps rather than fifteen. A single owner
+      # reviewing this is far more likely to read one grouped diff than to
+      # work through a queue, and an unread PR protects nobody.
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      js-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

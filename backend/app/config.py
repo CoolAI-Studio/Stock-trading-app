@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     # genuinely repeated setup later in the session still gets through.
     TV_WEBHOOK_REPLAY_WINDOW_SEC: int = 600
 
+    # How much the app says about itself. INFO is the useful default -- it is
+    # what the worker uses to record what it actually did, and losing that was
+    # the reason a strategy that should have signalled left no trace. Turn it
+    # to WARNING only if the volume becomes a problem, which on one owner's
+    # traffic it will not.
+    LOG_LEVEL: str = "INFO"
+
     # A manual-confirm pending order older than this is stale and gets
     # auto-expired by the worker loop rather than sitting there forever.
     PENDING_ORDER_EXPIRY_MINUTES: int = 180

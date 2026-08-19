@@ -27,9 +27,9 @@
    | **Linter** | `ruff check` + `ruff format`（後端）、**`npm run build`**（前端，等於 `tsc -b` + vite build）+ `oxlint`。前端不要只跑 `tsc --noEmit`——它不涵蓋測試檔，漏掉的型別錯誤會等到 CI 的 build 步驟才爆。除錯先看 linter，不要用 print 猜 | ✅ |
    | **Git** | 每個邏輯單元一個 commit，訊息寫清楚「為什麼」而不只是「改了什麼」 | ✅ |
    | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數。要在推之前先確認，就把 `backend/.env` 和 `trading_app_dev.db` 暫時移開再跑一次——CI 沒有這兩個，而它們已經三次讓本機綠、CI 紅 | ✅ CI；CD 待做（Render 自動部署 webhook 沒觸發，目前手動） |
-   | **DevSecOps** | 安全左移：相依套件漏洞掃描（Dependabot/`pip-audit`）、密鑰不進版控、CI 內做 SAST、部署前檢查設定 | ❌ 待做 |
+   | **DevSecOps** | 安全左移：相依套件漏洞掃描（Dependabot/`pip-audit`）、密鑰不進版控、CI 內做 SAST、部署前檢查設定 | ⚠️ Dependabot ✅、CI 內 pip-audit ✅、開機檢查密鑰 ✅；SAST ❌ |
    | **需求追蹤** | GitHub Issues 當單一事實來源；每個 commit / PR 連回一個 issue，缺口清單逐項建票 | ❌ 待做 |
-   | **Docker / IaC** | 容器已有（`backend/Dockerfile`）；雲端資源（Render / Neon / Vercel）改用 Terraform 宣告，不要靠手點介面 | ⚠️ Docker ✅，Terraform ❌ |
+   | **Docker / IaC** | 容器已有（`backend/Dockerfile`），相依套件用 `requirements.lock` 鎖版、CI 與映像檔裝同一份；雲端資源（Render / Neon / Vercel）改用 Terraform 宣告，不要靠手點介面 | ⚠️ Docker ✅、鎖版 ✅，Terraform ❌ |
    | **可觀測性** | Prometheus 指標端點 + Grafana 儀表板：worker 心跳、行情抓取成敗、通知送達率、策略執行延遲。**警告不能停擺，就必須看得到它有沒有在跑** | ❌ 待做 |
 
 1. **TDD 為主。** 每個功能/每個 Phase 都要先有測試，`pytest`（或對應測試指令）結果為**綠燈**才能
