@@ -8,7 +8,7 @@ email-validator>=2.2
 passlib[bcrypt]>=1.7
 # passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt>=4.1 -- pin below that
 # until passlib cuts a compatible release (or we drop passlib for direct bcrypt).
-bcrypt<4.1
+bcrypt<5.1
 python-jose[cryptography]>=3.3
 pyotp>=2.9
 python-multipart>=0.0.12
