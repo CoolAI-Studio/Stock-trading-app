@@ -46,6 +46,8 @@ const STRATEGY: Strategy = {
   last_run_at: null,
   last_error: null,
   consecutive_errors: 0,
+  last_blocked_reason: null,
+  last_blocked_at: null,
 }
 
 const ASSUMPTIONS: BacktestAssumptions = {

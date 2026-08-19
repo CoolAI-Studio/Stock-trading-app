@@ -37,6 +37,8 @@ const STRATEGY: Strategy = {
   last_run_at: null,
   last_error: null,
   consecutive_errors: 0,
+  last_blocked_reason: null,
+  last_blocked_at: null,
 }
 
 const POSITION: Position = {
@@ -46,6 +48,11 @@ const POSITION: Position = {
   realized_pnl: '0',
   opened_at: null,
   strategy_id: null,
+  current_price: null,
+  market_value: null,
+  unrealized_pnl: null,
+  unrealized_pnl_pct: null,
+  quote_time: null,
 }
 
 const PENDING_ORDER: Order = {
