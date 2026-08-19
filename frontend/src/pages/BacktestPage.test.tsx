@@ -698,3 +698,76 @@ describe('is the strategy actually worth running', () => {
     expect(await screen.findByLabelText('細項統計')).toHaveTextContent('沒有虧損的交易')
   })
 })
+
+describe('testing a strategy somewhere other than where it lives', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/broker-costs') return [] as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue(RUN as never)
+  })
+
+  async function pickStrategy() {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('option', { name: new RegExp(STRATEGY.name) })
+    await user.selectOptions(screen.getByLabelText('策略'), String(STRATEGY.id))
+    return user
+  }
+
+  it('runs the same strategy against a different symbol', async () => {
+    // The backend has taken a symbol override all along; the form had no box
+    // for it, so testing an idea on another stock meant editing the saved
+    // strategy first.
+    const user = await pickStrategy()
+    await user.type(screen.getByLabelText(/測試代號/), 'AAPL')
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/backtests',
+        expect.objectContaining({ symbol: 'AAPL' }),
+      ),
+    )
+  })
+
+  it('leaves the symbol out entirely when the box is blank', async () => {
+    // Blank has to mean "the strategy's own", not an empty string the backend
+    // would reject.
+    const user = await pickStrategy()
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const payload = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>
+    expect('symbol' in payload).toBe(false)
+  })
+
+  it('lets a quote-driven strategy be replayed at a chosen candle size', async () => {
+    const user = await pickStrategy()
+    await user.selectOptions(screen.getByLabelText(/K 棒週期/), '1h')
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/backtests',
+        expect.objectContaining({ timeframe: '1h' }),
+      ),
+    )
+  })
+
+  it('uppercases the symbol, because the providers do', async () => {
+    const user = await pickStrategy()
+    await user.type(screen.getByLabelText(/測試代號/), '2330.tw')
+    await user.click(screen.getByRole('button', { name: '開始回測' }))
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/backtests',
+        expect.objectContaining({ symbol: '2330.TW' }),
+      ),
+    )
+  })
+})

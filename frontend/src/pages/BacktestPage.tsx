@@ -343,6 +343,11 @@ export function BacktestPage() {
   // the numbers, never the preset id, so a preset changing later cannot
   // silently re-price a saved run.
   const [presetId, setPresetId] = useState('custom')
+  // Both blank by default, meaning "whatever the strategy itself says". The
+  // backend has accepted these overrides all along; the form had no boxes, so
+  // trying an idea on another stock meant editing the saved strategy first.
+  const [symbolOverride, setSymbolOverride] = useState('')
+  const [timeframeOverride, setTimeframeOverride] = useState('')
 
   const presetsQuery = useQuery({
     queryKey: ['broker-costs'],
@@ -375,6 +380,7 @@ export function BacktestPage() {
 
   const strategies = strategiesQuery.data ?? []
   const selectedId = strategyId || (strategies[0] ? String(strategies[0].id) : '')
+  const selectedStrategy = strategies.find((s) => String(s.id) === selectedId)
 
   const runMutation = useMutation({
     mutationFn: () =>
@@ -384,6 +390,11 @@ export function BacktestPage() {
         // own candle out of the range the owner thought they asked for.
         start: `${range.start}T00:00:00Z`,
         end: `${range.end}T23:59:59Z`,
+        // Omitted entirely when blank rather than sent empty: the backend
+        // reads absent as "use the strategy's own", and an empty string as a
+        // validation error.
+        ...(symbolOverride.trim() ? { symbol: symbolOverride.trim().toUpperCase() } : {}),
+        ...(timeframeOverride ? { timeframe: timeframeOverride } : {}),
         ...costs,
       }),
     onSuccess: (result) => {
@@ -472,6 +483,46 @@ export function BacktestPage() {
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label htmlFor="bt-symbol" className="text-sm text-slate-400">
+              測試代號（選填）
+            </label>
+            <input
+              id="bt-symbol"
+              value={symbolOverride}
+              onChange={(e) => setSymbolOverride(e.target.value)}
+              placeholder={selectedStrategy ? selectedStrategy.symbol : '沿用策略自己的代號'}
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              留空就用策略自己的代號。填別的可以拿同一套規則去試另一檔，不用先改存檔。
+            </p>
+          </div>
+          <div>
+            <label htmlFor="bt-timeframe" className="text-sm text-slate-400">
+              K 棒週期（選填）
+            </label>
+            <select
+              id="bt-timeframe"
+              value={timeframeOverride}
+              onChange={(e) => setTimeframeOverride(e.target.value)}
+              className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
+            >
+              <option value="">沿用策略自己的</option>
+              <option value="5m">5 分線</option>
+              <option value="15m">15 分線</option>
+              <option value="1h">小時線</option>
+              <option value="1d">日線</option>
+              <option value="1wk">週線</option>
+            </select>
+            {/* on_bar strategies declare their own candle and the backend
+                refuses a conflicting one -- rightly, since replaying that code
+                at another size scores behaviour the owner cannot run. Saying
+                so here beats letting them find out through a 422. */}
+            <p className="mt-1 text-xs text-slate-500">
+              只對「逐筆報價（on_tick）」策略有效。用 on_bar 的策略自己就宣告了週期，改這裡會被擋下來。
+            </p>
           </div>
           <div>
             <label htmlFor="bt-start" className="text-sm text-slate-400">
