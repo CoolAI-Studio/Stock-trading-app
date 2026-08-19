@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
 import { EquityCurveChart } from '../components/EquityCurveChart'
+import { RunComparison } from '../components/RunComparison'
 import type {
   BacktestRun,
   BacktestRunDetail,
@@ -419,6 +420,10 @@ export function BacktestPage() {
   }
   const [run, setRun] = useState<BacktestRunDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Ids only, never the rows: the history query refetches after every run, and
+  // a held copy of a row would go stale (or point at a run the prune has since
+  // evicted) while still looking like a live selection.
+  const [compareIds, setCompareIds] = useState<number[]>([])
 
   const strategiesQuery = useQuery({
     queryKey: ['strategies'],
@@ -491,6 +496,25 @@ export function BacktestPage() {
     },
     onError: (err) => setError(runErrorMessage(err)),
   })
+
+  function toggleCompare(id: number) {
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id)
+      // Two at a time. Picking a third drops the one chosen first, so the
+      // checkbox never silently refuses a click -- a box that ticks and does
+      // nothing is worse than one that displaces something visible.
+      return [...prev, id].slice(-2)
+    })
+  }
+
+  const history = historyQuery.data ?? []
+  // A and B are decided by WHEN THE RUNS HAPPENED, not by click order.
+  // Otherwise the same two runs read as an improvement or a regression
+  // depending on which box was ticked first, and "B − A" means nothing.
+  const comparePair = compareIds
+    .map((id) => history.find((row) => row.id === id))
+    .filter((row): row is BacktestRun => row !== undefined)
+    .sort((x, y) => new Date(x.created_at).getTime() - new Date(y.created_at).getTime())
 
   function costField(key: keyof typeof DEFAULTS, label: string, hint?: string) {
     return (
@@ -736,7 +760,9 @@ export function BacktestPage() {
 
       {run && <RunResult run={run} />}
 
-      {(historyQuery.data ?? []).length > 0 && (
+      {comparePair.length === 2 && <RunComparison a={comparePair[0]} b={comparePair[1]} />}
+
+      {history.length > 0 && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-slate-300">過去的回測</h2>
@@ -756,6 +782,7 @@ export function BacktestPage() {
           <table aria-label="過去的回測" className="w-full text-left text-sm">
             <thead className="text-slate-500">
               <tr>
+                <th className="pb-2 font-normal">比較</th>
                 <th className="pb-2 font-normal">策略</th>
                 <th className="pb-2 font-normal">代號</th>
                 <th className="pb-2 font-normal">週期</th>
@@ -766,8 +793,17 @@ export function BacktestPage() {
               </tr>
             </thead>
             <tbody>
-              {(historyQuery.data ?? []).map((row) => (
+              {history.map((row) => (
                 <tr key={row.id} className="border-b border-slate-800">
+                  <td className="py-2 pr-4">
+                    <input
+                      type="checkbox"
+                      aria-label="選來比較"
+                      checked={compareIds.includes(row.id)}
+                      onChange={() => toggleCompare(row.id)}
+                      className="h-4 w-4 accent-emerald-500"
+                    />
+                  </td>
                   <td className="py-2 pr-4 font-medium">{row.strategy_name}</td>
                   <td className="py-2 pr-4">{row.symbol}</td>
                   <td className="py-2 pr-4 text-slate-400">

@@ -485,3 +485,17 @@ def test_every_trade_says_why_it_ended(auth_client, stub_market_data):
     ).json()
 
     assert body["result"]["trades"][0]["exit_reason"] == "take_profit"
+
+
+def test_the_history_list_says_which_runs_scored_the_same_code(auth_client, stub_market_data):
+    """Two runs are only comparable if it is knowable what changed between
+    them. Without the fingerprint in the list, "this version does better" and
+    "I also moved the date range" look identical from the outside."""
+    first = auth_client.post("/api/backtests", json=_request()).json()
+    edited = DAILY_BUYER.replace("self.seen == 8", "self.seen == 9")
+    second = auth_client.post("/api/backtests", json=_request(source_code=edited)).json()
+
+    rows = {row["id"]: row["code_hash"] for row in auth_client.get("/api/backtests").json()}
+
+    assert rows[first["id"]] == first["code_hash"]
+    assert rows[first["id"]] != rows[second["id"]]

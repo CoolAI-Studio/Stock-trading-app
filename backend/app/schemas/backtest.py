@@ -196,6 +196,11 @@ class BacktestRunRead(BaseModel):
     id: int
     strategy_id: int | None
     strategy_name: str
+    # The source's fingerprint, but not the source. It is what lets two runs
+    # be told apart as "same code, different costs" from "different code" --
+    # which is the difference between a comparison and a coincidence -- without
+    # shipping every run's full program in a list the page polls.
+    code_hash: str
     symbol: str
     timeframe: str
     data_source: DataSource

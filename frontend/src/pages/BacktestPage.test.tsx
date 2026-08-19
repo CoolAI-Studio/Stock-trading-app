@@ -172,6 +172,7 @@ const HISTORY_ROW: BacktestRun = {
   id: 11,
   strategy_id: 1,
   strategy_name: 'ma5-cross',
+  code_hash: 'abc123',
   symbol: '2330.TW',
   timeframe: '1d',
   data_source: 'yfinance',
@@ -904,5 +905,77 @@ describe('停損停利', () => {
     const details = await screen.findByLabelText('細項統計')
     expect(within(details).getByText('停損出場次數')).toBeInTheDocument()
     expect(within(details).getByText('3')).toBeInTheDocument()
+  })
+})
+
+// --- comparing two runs -----------------------------------------------------
+
+describe('比較兩次回測', () => {
+  const OTHER_ROW: BacktestRun = {
+    ...HISTORY_ROW,
+    id: 12,
+    code_hash: 'def456',
+    created_at: '2026-03-03T01:00:00Z',
+    summary: { ...SUMMARY, total_return_pct: '9' },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/strategies') return [STRATEGY] as never
+      if (path === '/api/backtests') return [OTHER_ROW, HISTORY_ROW] as never
+      if (path === '/api/broker-costs') return [] as never
+      return [] as never
+    })
+  })
+
+  it('挑一筆還不會比較 —— 比較需要兩筆', async () => {
+    renderPage()
+    const table = await screen.findByLabelText('過去的回測')
+
+    fireEvent.click(within(table).getAllByLabelText('選來比較')[0])
+
+    expect(screen.queryByText('比較兩次回測')).not.toBeInTheDocument()
+  })
+
+  it('挑兩筆就把它們擺在一起比', async () => {
+    renderPage()
+    const table = await screen.findByLabelText('過去的回測')
+
+    const boxes = within(table).getAllByLabelText('選來比較')
+    fireEvent.click(boxes[0])
+    fireEvent.click(boxes[1])
+
+    expect(await screen.findByText('比較兩次回測')).toBeInTheDocument()
+    expect(screen.getByLabelText('兩次的差異')).toBeInTheDocument()
+  })
+
+  it('比較時 A 是先跑的那一筆，不是先點的那一筆', async () => {
+    // Otherwise "B − A" flips sign depending on click order, and the same two
+    // runs would read as an improvement or a regression at random.
+    renderPage()
+    const table = await screen.findByLabelText('過去的回測')
+
+    const boxes = within(table).getAllByLabelText('選來比較')
+    fireEvent.click(boxes[0]) // the newer run, listed first
+    fireEvent.click(boxes[1]) // the older one
+
+    const heading = await screen.findByText(/A ＝/)
+    expect(heading).toHaveTextContent(`#${HISTORY_ROW.id}`)
+    expect(heading.textContent?.indexOf(`#${HISTORY_ROW.id}`)).toBeLessThan(
+      heading.textContent?.indexOf(`#${OTHER_ROW.id}`) ?? -1,
+    )
+  })
+
+  it('點第三筆時換掉比較舊的那一筆，而不是整個清空重來', async () => {
+    renderPage()
+    const table = await screen.findByLabelText('過去的回測')
+
+    const boxes = within(table).getAllByLabelText('選來比較')
+    fireEvent.click(boxes[0])
+    fireEvent.click(boxes[1])
+    fireEvent.click(boxes[0]) // untick
+
+    expect(screen.queryByText('比較兩次回測')).not.toBeInTheDocument()
   })
 })

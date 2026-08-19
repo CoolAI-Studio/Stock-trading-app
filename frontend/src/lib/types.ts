@@ -347,6 +347,10 @@ export interface BacktestRun {
   id: number
   strategy_id: number | null
   strategy_name: string
+  /** The scored source's fingerprint. Present on the list row so two runs can
+   * be told apart as "same code, different costs" from "different code"
+   * without fetching both programs. */
+  code_hash: string
   symbol: string
   timeframe: string
   data_source: DataSource
@@ -361,7 +365,6 @@ export interface BacktestRun {
  * including the source it actually scored. */
 export interface BacktestRunDetail extends BacktestRun {
   source_code: string
-  code_hash: string
   result: BacktestResult
 }
 
