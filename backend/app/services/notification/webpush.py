@@ -28,6 +28,22 @@ MAX_BODY_CHARS = 600
 # be useful anyway.
 TIMEOUT_SECONDS = 10.0
 
+# RFC 8030 §5.3. With no Urgency header the message is `normal`, and a push
+# service is explicitly allowed to hold a `normal` message while the device is
+# in a power-saving state -- Android Doze, iOS background scheduling -- and
+# deliver it whenever the phone next wakes up on its own.
+#
+# That default is written for a chat app's read receipts. Here the entire value
+# of a message is that it arrives WHEN THE THING HAPPENED: 「2330 跌破 900」
+# delivered forty minutes later is not a late alert, it is a wrong one, because
+# the owner reads it as current. `high` is the level that asks for immediate
+# delivery to a sleeping device, and it is the honest description of every
+# alert this app sends.
+#
+# Safe to use: what push services throttle is a high-urgency push that displays
+# nothing, and the service worker always shows a notification.
+URGENCY = "high"
+
 
 class WebPushSender:
     """Sends to a single browser subscription (one NotificationChannel row
@@ -71,9 +87,20 @@ class WebPushSender:
                 subscription_info=subscription_info,
                 data=payload,
                 vapid_private_key=settings.VAPID_PRIVATE_KEY,
+                # Built inline on EVERY send, and it has to stay that way.
+                # pywebpush mutates this dict in place, writing `aud` (derived
+                # from this endpoint's origin) and `exp` into it. Hoisting it
+                # to a module constant would look like a harmless tidy-up and
+                # would sign the first push service's audience into every push
+                # to every other one -- 401 from all of them, forever, while
+                # the first carried on working. Pinned by
+                # tests/test_push_urgency_and_vapid_freshness.py.
                 vapid_claims={"sub": settings.VAPID_SUBJECT},
                 ttl=self.TTL_SECONDS,
                 timeout=TIMEOUT_SECONDS,
+                # pywebpush copies this dict before adding the VAPID and TTL
+                # headers of its own, so passing one does not displace those.
+                headers={"Urgency": URGENCY},
             )
             return SendResult(ok=True)
         except WebPushException as exc:
