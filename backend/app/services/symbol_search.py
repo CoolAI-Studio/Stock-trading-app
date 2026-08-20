@@ -43,6 +43,7 @@ _DATA = Path(__file__).resolve().parent.parent / "data" / "tw_listings.json"
 # visible in review and the owner always picks against a name the price feed
 # supplied rather than a claim this repo makes.
 _US_DATA = Path(__file__).resolve().parent.parent / "data" / "us_aliases.json"
+_US_LISTINGS_DATA = Path(__file__).resolve().parent.parent / "data" / "us_listings.json"
 
 # What a Taiwanese stock code looks like, with or without its board suffix.
 # The optional trailing letter is the ETF class marker -- 00631L is 元大台灣50
@@ -146,6 +147,26 @@ def _listings() -> list[dict]:
 
 
 @lru_cache(maxsize=1)
+def _us_listings() -> list[dict]:
+    """The NASDAQ Trader symbol directory, read once.
+
+    13,000-odd rows covering NASDAQ, NYSE, NYSE American, NYSE Arca, Cboe BZX
+    and IEX. Distinct from _us_aliases(), which is 53 hand-reviewed entries
+    carrying CHINESE names -- that file answers 「輝達」, this one answers
+    「Nvidia」 and, more importantly, answers whether a ticker is listed at all.
+
+    Absent means Latin search degrades to what it was before rather than
+    erroring on the page somebody is using to add a stock.
+    """
+    try:
+        payload = json.loads(_US_LISTINGS_DATA.read_text(encoding="utf-8"))
+        rows = payload.get("listings", [])
+        return rows if isinstance(rows, list) else []
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return []
+
+
+@lru_cache(maxsize=1)
 def _us_aliases() -> list[dict]:
     """The bundled US name table, read once. Absent means the search simply
     loses Chinese names for US stocks -- never an error on the page somebody is
@@ -158,6 +179,12 @@ def _us_aliases() -> list[dict]:
         return []
 
 
+@lru_cache(maxsize=1)
+def _us_venue_by_symbol() -> dict[str, str]:
+    """Ticker -> the exchange it lists on, from the bundled directory."""
+    return {row["symbol"]: row.get("market", "") for row in _us_listings() if row.get("symbol")}
+
+
 def _us_match(entry: dict) -> SymbolMatch:
     return SymbolMatch(
         symbol=entry["symbol"],
@@ -167,7 +194,12 @@ def _us_match(entry: dict) -> SymbolMatch:
         # and pushed the only human-readable identifier down into the detail
         # line.
         name=entry.get("name", entry["symbol"]),
-        detail="",
+        # The venue, when the directory knows it. 「美股」 in the market column
+        # does not separate an NYSE listing from an Arca ETF, and a reviewed
+        # alias describes the same instrument the directory does -- there is no
+        # reason for the answer to be poorer just because a different table
+        # happened to find it first.
+        detail=_us_venue_by_symbol().get(entry["symbol"], ""),
         market=MARKET_US,
         data_source=DataSource.YFINANCE,
         # Checked against the live feed at build time and reviewed, unlike a
@@ -194,6 +226,42 @@ def _adr_match(entry: dict) -> SymbolMatch:
         verified=base.verified,
         currency=base.currency,
     )
+
+
+def _us_listing_match(row: dict) -> SymbolMatch:
+    return SymbolMatch(
+        symbol=row["symbol"],
+        name=row.get("name", row["symbol"]),
+        # The venue, in the detail line. 「美股」 in the market column does not
+        # separate an NYSE listing from an Arca ETF, and that is a difference
+        # the owner is entitled to see before picking one.
+        detail=row.get("market", ""),
+        market=MARKET_US,
+        data_source=DataSource.YFINANCE,
+        # From the exchanges' own directory, so this is a lookup rather than
+        # the shape guess the fallback below makes.
+        verified=True,
+        currency=currency_for(row["symbol"], DataSource.YFINANCE),
+    )
+
+
+def _us_listing_score(row: dict, query: str) -> int | None:
+    """Lower is better; None is no match. `query` is already upper-cased.
+
+    Names in this table are English, so the comparison is on upper case
+    throughout -- 「apple」 and 「Apple」 are the same search.
+    """
+    symbol = row.get("symbol", "")
+    if query == symbol:
+        return 0
+    name = row.get("name", "").upper()
+    if symbol.startswith(query):
+        return 1
+    if name.startswith(query):
+        return 2
+    if query in name:
+        return 3
+    return None
 
 
 def _us_score(entry: dict, query: str) -> int | None:
@@ -383,18 +451,55 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
             us_scored.append((score, entry))
     us_scored.sort(key=lambda pair: (pair[0], pair[1]["symbol"]))
     known_us = {entry["symbol"] for _s, entry in us_scored}
-    matches.extend(_us_match(entry) for _s, entry in us_scored[: limit - len(matches)])
+    # Excluding what the ADR pass already added. 「台積電」 matches TSM twice --
+    # once as 2330's ADR and once on its own Chinese alias -- and the picker
+    # showed the same ticker on two lines, the second with an empty detail so
+    # it read as a second, nameless instrument.
+    already_listed = {m.symbol for m in matches}
+    matches.extend(
+        _us_match(entry)
+        for _s, entry in us_scored[: limit - len(matches)]
+        if entry["symbol"] not in already_listed
+    )
+
+    # The exchanges' own directory, for everything the reviewed alias file does
+    # not carry. Without it 「Agilent」 and 「Zymeworks」 returned nothing at all,
+    # and 「Alcoa」 was offered as a five-letter ticker that is not listed
+    # anywhere -- a symbol manufactured out of the shape of the input.
+    #
+    # ASCII only, and not merely as an optimisation: an English company name
+    # cannot match a Chinese query, so scanning thirteen thousand rows for one
+    # would be pure cost on the commonest search this app serves.
+    if len(matches) < limit and text.isascii():
+        already = {m.symbol for m in matches}
+        listing_scored = []
+        for row in _us_listings():
+            if row.get("symbol") in already:
+                continue
+            score = _us_listing_score(row, text)
+            if score is not None:
+                listing_scored.append((score, row))
+        # Shorter names first within a score, for the reason the Taiwanese side
+        # learned it: 「Apple」 should reach Apple Inc. before it reaches a fund
+        # whose name merely contains the word.
+        listing_scored.sort(
+            key=lambda pair: (pair[0], len(pair[1].get("name", "")), pair[1]["symbol"])
+        )
+        known_us |= {row["symbol"] for _s, row in listing_scored}
+        matches.extend(_us_listing_match(row) for _s, row in listing_scored[: limit - len(matches)])
 
     # A bare code is unambiguous within the markets this app supports, but a
-    # US ticker we have no entry for is not something any table can confirm.
+    # US ticker that is in neither table is not something this app can confirm.
     # Offered separately and marked unverified rather than mixed in as if it
-    # had been looked up.
+    # had been looked up: a company listed after the directory was bundled is
+    # legitimately absent, and being unable to add a real stock is a worse
+    # failure than offering one that turns out not to price.
     if len(matches) < limit and text not in known_us and _US_TICKER.match(text):
         matches.append(
             SymbolMatch(
                 symbol=text,
                 name=text,
-                detail="美股代號（沒有對照表可以核對，送出後若抓不到報價就是打錯了）",
+                detail="不在目前的美股上市清單裡（可能是新上市，也可能是打錯了）",
                 market=MARKET_US,
                 data_source=DataSource.YFINANCE,
                 verified=False,
