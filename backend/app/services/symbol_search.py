@@ -221,6 +221,33 @@ def listings_generated_at() -> str | None:
         return None
 
 
+def is_taiwanese(symbol: str) -> bool:
+    """Whether this names a Taiwanese listing -- 2330.TW, 6488.TWO, 00632R.TW.
+
+    The suffix is what decides it, not the digits: a bare 2330 is not a
+    Taiwanese symbol, it is an ambiguous number that several markets answer to,
+    which is the whole reason looks_unpriceable() refuses it.
+    """
+    return bool(_TW_QUALIFIED.match(normalise(symbol)))
+
+
+def listing_for(symbol: str) -> dict | None:
+    """The bundled registry's row for a Taiwanese code, suffix optional.
+
+    None means the code is on neither board. Callers must not read that as
+    「invalid」 on its own -- the table is a snapshot and a company listed after
+    it was built is legitimately absent, which is why looks_unpriceable() is a
+    narrow shape check rather than a whitelist. It IS conclusive for a fake
+    feed deciding what a real one would have had a row for.
+    """
+    text = normalise(symbol)
+    qualified = _TW_QUALIFIED.match(text)
+    code = qualified.group(1) if qualified else text
+    if not _TW_CODE.match(code):
+        return None
+    return next((row for row in _listings() if row.get("code") == code), None)
+
+
 def normalise(raw: str) -> str:
     """The stored form of whatever was typed.
 
@@ -431,7 +458,7 @@ def looks_unpriceable(symbol: str) -> str | None:
         # The dangerous one. Yahoo resolves a bare 2330 to an unrelated
         # Japanese OTC company, so this would have priced -- just not the right
         # thing.
-        listing = next((row for row in _listings() if row.get("code") == text), None)
+        listing = listing_for(text)
         suffix = listing["symbol"] if listing else f"{text}.TW"
         return (
             f"台股代號要加上市場後綴，只寫「{text}」會被行情來源當成別的市場的股票。"
@@ -506,7 +533,7 @@ def resolve_incoming(raw: str, exchange: str | None = None) -> tuple[str | None,
         return f"{qualified.group(1)}.{qualified.group(2).upper()}", None
 
     if _TW_CODE.match(text):
-        row = next((r for r in _listings() if r.get("code") == text), None)
+        row = listing_for(text)
 
         if market in _TW_EXCHANGES:
             # The chart said which board it was on, so the suffix is known even

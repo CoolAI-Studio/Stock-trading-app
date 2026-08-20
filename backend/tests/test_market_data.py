@@ -84,8 +84,11 @@ def test_upsert_quotes_persists_to_db(db_session):
 class _OmitsUnknownProvider:
     """Returns quotes only for symbols it recognises, silently dropping the
     rest -- which is exactly what yfinance does for a delisted ticker, a typo,
-    or a Taiwan symbol missing its `.TW` suffix. MockProvider can't stand in
-    here because it invents a price for every symbol it's asked about.
+    or a Taiwan symbol missing its `.TW` suffix.
+
+    MockProvider now drops what it cannot price too, so it would cover the
+    omission itself; what it cannot do is record WHICH symbols each fetch
+    asked for, and the cache-behaviour tests below turn on exactly that.
     """
 
     data_source = DataSource.YFINANCE

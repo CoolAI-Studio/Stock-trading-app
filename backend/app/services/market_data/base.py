@@ -219,6 +219,11 @@ def currency_for(symbol: str, data_source: DataSource) -> str | None:
     text = (symbol or "").strip().upper()
     if not text:
         return None
+    # A company name typed in Chinese has no dot and no dash either, and the
+    # bare-ticker rule below would hand it "USD". Nothing in this app can price
+    # it, so the honest answer is that it has no currency.
+    if not text.isascii():
+        return None
 
     if data_source == DataSource.BINANCE:
         for asset in _CRYPTO_QUOTE_ASSETS:
