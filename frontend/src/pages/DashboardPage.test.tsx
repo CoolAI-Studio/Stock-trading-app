@@ -225,3 +225,85 @@ describe('用中文找股票並確認是不是同一家', () => {
     })
   })
 })
+
+// --- a symbol going into a URL ----------------------------------------------
+//
+// Symbols were interpolated into paths and query strings raw. Everything the
+// app can create today is ASCII, so it works -- but rows created before the
+// symbol validation existed can hold 「台積電」, and a `#` or `&` in a query
+// string does not fail, it silently truncates: `?symbols=A#B,AAPL` asks for
+// one symbol and gets an answer that looks perfectly normal.
+//
+// SymbolInput already encodes its query. These are the paths that did not.
+
+describe('代號進到網址裡', () => {
+  const LEGACY = { id: 1, symbol: '台積電', data_source: 'yfinance', created_at: '2026-08-19T00:00:00Z' }
+  const LEGACY_QUOTE: Quote = { ...QUOTE, symbol: '台積電' }
+
+  function mockWith(watchlist: unknown[], quotes: Quote[]) {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/watchlist') return watchlist as never
+      if (path === '/api/strategies') return [] as never
+      if (path === '/api/positions') return [] as never
+      if (path.startsWith('/api/orders')) return [] as never
+      if (path.startsWith('/api/market/quote')) return quotes as never
+      return [] as never
+    })
+  }
+
+  function quoteUrl(): string | undefined {
+    return vi
+      .mocked(api.get)
+      .mock.calls.map((call) => call[0] as string)
+      .find((path) => path.startsWith('/api/market/quote'))
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+    vi.mocked(api.post).mockResolvedValue({} as never)
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    mockWith([LEGACY], [LEGACY_QUOTE])
+  })
+
+  it('刪除一筆非 ASCII 的舊資料時要編碼', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '移除 台積電' }))
+
+    await waitFor(() =>
+      expect(api.delete).toHaveBeenCalledWith(`/api/watchlist/${encodeURIComponent('台積電')}`),
+    )
+  })
+
+  it('報價查詢的每個代號都要各自編碼，逗號才還是分隔符', async () => {
+    renderPage()
+
+    await waitFor(() =>
+      expect(quoteUrl()).toBe(`/api/market/quote?symbols=${encodeURIComponent('台積電')}`),
+    )
+  })
+
+  it('一般代號的網址不要被改得認不出來', async () => {
+    mockWith([{ ...LEGACY, symbol: 'AAPL' }], [QUOTE])
+    renderPage()
+
+    await waitFor(() => expect(quoteUrl()).toBe('/api/market/quote?symbols=AAPL'))
+  })
+
+  it('多個代號還是用逗號分隔，不是被編碼成一整串', async () => {
+    // encodeURIComponent escapes a comma, so encoding the joined string would
+    // turn the separator into %2C and the backend would see one long symbol.
+    mockWith(
+      [
+        { ...LEGACY, id: 1, symbol: 'AAPL' },
+        { ...LEGACY, id: 2, symbol: '2330.TW' },
+      ],
+      [QUOTE],
+    )
+    renderPage()
+
+    await waitFor(() => expect(quoteUrl()).toContain('AAPL,2330.TW'))
+  })
+})

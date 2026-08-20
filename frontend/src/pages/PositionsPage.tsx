@@ -25,7 +25,7 @@ function AdjustPositionForm({ position, onDone }: { position: Position; onDone: 
 
   const adjustMutation = useMutation({
     mutationFn: () =>
-      api.patch<Position>(`/api/positions/${position.symbol}`, {
+      api.patch<Position>(`/api/positions/${encodeURIComponent(position.symbol)}`, {
         quantity,
         avg_entry_price: avgEntryPrice,
       }),
@@ -90,7 +90,10 @@ function PositionRow({ position, riskOwner }: { position: Position; riskOwner: s
   const queryClient = useQueryClient()
 
   const flattenMutation = useMutation({
-    mutationFn: () => api.delete(`/api/positions/${position.symbol}`),
+    // Encoded: positions predating the symbol validation can hold a
+    // Chinese company name, and a symbol carrying a `#` or a `/`
+    // addresses a different resource entirely rather than failing.
+    mutationFn: () => api.delete(`/api/positions/${encodeURIComponent(position.symbol)}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['positions'] }),
   })
 
@@ -176,7 +179,7 @@ function NewPositionForm({ onDone }: { onDone: () => void }) {
 
   const createMutation = useMutation({
     mutationFn: () =>
-      api.patch<Position>(`/api/positions/${symbol.toUpperCase()}`, {
+      api.patch<Position>(`/api/positions/${encodeURIComponent(symbol.toUpperCase())}`, {
         quantity,
         avg_entry_price: avgEntryPrice,
       }),

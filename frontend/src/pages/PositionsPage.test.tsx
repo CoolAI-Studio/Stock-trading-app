@@ -196,3 +196,39 @@ describe('when an action fails', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('這檔還有未確認的委託')
   })
 })
+
+// --- a symbol going into a URL ----------------------------------------------
+//
+// `/api/positions/${symbol}` was interpolated raw. Positions predating the
+// symbol validation can hold a Chinese company name, and a symbol carrying a
+// `#` or a `/` addresses a different resource entirely rather than failing.
+
+describe('代號進到網址裡', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue([{ ...POSITION, symbol: '台積電' }] as never)
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  })
+
+  it('非 ASCII 的舊持倉，網址要編碼', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '出清' }))
+
+    await waitFor(() =>
+      expect(api.delete).toHaveBeenCalledWith(`/api/positions/${encodeURIComponent('台積電')}`),
+    )
+  })
+
+  it('一般代號還是原樣，網址不要變得認不出來', async () => {
+    vi.mocked(api.get).mockResolvedValue([POSITION] as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '出清' }))
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/positions/AAPL'))
+  })
+})
