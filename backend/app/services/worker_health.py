@@ -26,6 +26,15 @@ class HeartbeatSnapshot:
     # everything and return {}, so nothing raised and the probe stayed green
     # through an outage that had silenced every alert in the system.
     consecutive_empty_polls: int
+    # Per symbol, how long it has gone without a price -- seconds since its
+    # last good one, or since it was first asked for if it has never had one.
+    # Only symbols currently WITHOUT a price appear; a healthy one is absent
+    # rather than present with a zero.
+    #
+    # The count above cannot see this. It clears on any one good price, so
+    # nine working symbols hide the tenth that never resolves -- and every
+    # threshold on that tenth has silently stopped evaluating.
+    symbol_gap_sec: dict[str, float]
 
 
 class WorkerHeartbeat:
@@ -35,6 +44,8 @@ class WorkerHeartbeat:
         self._last_loop_at: float | None = None
         self._last_poll_at: float | None = None
         self._consecutive_empty_polls = 0
+        # symbol -> monotonic time it has been priceless since.
+        self._priceless_since: dict[str, float] = {}
 
     def mark_loop(self) -> None:
         """The loop reached the top of an iteration, so it is not wedged."""
@@ -57,6 +68,24 @@ class WorkerHeartbeat:
         """
         self._consecutive_empty_polls += 1
 
+    def mark_symbols(self, asked: set[str], answered: set[str]) -> None:
+        """Which symbols this poll asked for, and which came back with a price.
+
+        Called on every tick, including ticks that asked for nothing: symbols
+        the owner has stopped watching are forgotten here, and that is what
+        makes 「delete the bad row」 an actual fix rather than a permanently
+        angry probe.
+        """
+        now = self._clock()
+        for symbol in asked - answered:
+            # setdefault, so an ongoing gap keeps the time it started rather
+            # than resetting on every poll -- which would keep it forever
+            # under any threshold.
+            self._priceless_since.setdefault(symbol, now)
+        for symbol in list(self._priceless_since):
+            if symbol in answered or symbol not in asked:
+                del self._priceless_since[symbol]
+
     def snapshot(self) -> HeartbeatSnapshot:
         # The marks are written from the event loop thread and read from the
         # threadpool thread serving /healthz. Single float attribute reads and
@@ -69,6 +98,7 @@ class WorkerHeartbeat:
             last_loop_age_sec=None if self._last_loop_at is None else now - self._last_loop_at,
             last_poll_age_sec=None if self._last_poll_at is None else now - self._last_poll_at,
             consecutive_empty_polls=self._consecutive_empty_polls,
+            symbol_gap_sec={s: now - since for s, since in self._priceless_since.items()},
         )
 
 

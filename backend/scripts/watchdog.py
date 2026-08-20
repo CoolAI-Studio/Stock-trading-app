@@ -52,6 +52,7 @@ _MEANING = {
     "market_data": "抓不到行情 —— 沒有價格就不會有任何提醒。",
     "database": "連不上資料庫 —— 策略、持倉、通知設定全都讀不到。",
     "notifications": "通知功能被關掉了（NOTIFICATIONS_ENABLED）—— 策略照跑，但一則警告都不會送出。",
+    "symbols": "有代號一直抓不到報價 —— 這些代號上面的提醒等於停擺，其他代號不受影響。",
 }
 
 
@@ -90,7 +91,15 @@ def read_verdict(status_code: int | None, body: str | None) -> list[str]:
         # a deliberate configuration. The endpoint already drew those lines.
         if not isinstance(check, dict) or check.get("status") != "fail":
             continue
-        problems.append(_MEANING.get(name, f"{name} 檢查失敗。") + f"（{name}）")
+        sentence = _MEANING.get(name, f"{name} 檢查失敗。")
+        # The symbols check names what is broken, and the whole point of this
+        # email is that the owner should not have to open a dashboard at 3am
+        # to find out which of their rows it was. Read defensively: an older
+        # deployment answering a newer watchdog must still produce a report.
+        stale = check.get("stale_symbols")
+        if isinstance(stale, list) and stale:
+            sentence += "：" + "、".join(str(symbol) for symbol in stale)
+        problems.append(sentence + f"（{name}）")
 
     if not problems and status_code != 200:
         # It said nothing is wrong and still refused. Worth reporting rather

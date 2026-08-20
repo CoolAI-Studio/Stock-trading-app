@@ -81,11 +81,29 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
                 "status": _FAIL,
                 "consecutive_empty_polls": beat.consecutive_empty_polls,
             }
+
+        # And the count above still cannot see ONE dead symbol among healthy
+        # ones: a single good price clears the run. That is the likelier
+        # shape by far -- a delisted stock, a typo that survived the input
+        # checks, a name the feed stopped resolving -- and every alert on it
+        # has stopped while the dashboard and this probe both look fine.
+        #
+        # Named, not merely counted: the owner's fix is to correct or delete
+        # that row, and they cannot do either from 「something is wrong」.
+        stale = sorted(
+            symbol
+            for symbol, gap in beat.symbol_gap_sec.items()
+            if gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC
+        )
+        checks["symbols"] = {"status": _FAIL, "stale_symbols": stale} if stale else {"status": _OK}
     else:
         # An intentionally idle worker (local runs, the test suite) is a
         # configuration choice, not something to wake the owner over.
         checks["worker"] = {"status": _DISABLED}
         checks["market_data"] = {"status": _DISABLED}
+        # Nothing is polling, so no symbol can have a price. The worker check
+        # already says that; a second failure repeating it is noise.
+        checks["symbols"] = {"status": _DISABLED}
 
     # A muted notifier is not a healthy one FOR THIS PRODUCT. WORKER_ENABLED
     # off is a configuration choice somebody makes to run the app locally;

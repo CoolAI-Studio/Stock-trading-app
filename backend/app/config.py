@@ -83,6 +83,18 @@ class Settings(BaseSettings):
     # whenever the owner next notices no orders have appeared.
     HEALTH_MAX_EMPTY_POLLS: int = 20
 
+    # How long ONE symbol may go without a price before /healthz calls it
+    # dead. The empty-poll count above cannot see this: it clears on any one
+    # good price, so nine working symbols hide a tenth that never resolves --
+    # and every alert on that tenth has silently stopped.
+    #
+    # Well above the few minutes a quote is legitimately served from cache
+    # while refreshes fail (see _DEFAULT_STALE_LIMIT_SEC), so the two never
+    # argue, and above a market's normal quiet: a closed exchange still
+    # answers with its last close, so silence here means the symbol cannot be
+    # resolved at all rather than that nothing is trading.
+    HEALTH_MAX_SYMBOL_GAP_SEC: float = 900.0
+
     # This deployment's own public address, used to tell the owner what URL to
     # paste into TradingView. Not derivable from a request: the app sits
     # behind a proxy, so the Host header is whatever that proxy forwards.

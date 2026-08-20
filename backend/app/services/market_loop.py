@@ -384,6 +384,16 @@ def tick_once(
             else:
                 worker_health.heartbeat.mark_quotes_empty()
 
+        # Per symbol, not just per poll. `if quotes` above is satisfied by ONE
+        # price, so nine working symbols hid the tenth that never resolved.
+        # Called even when nothing was asked for, because that is how a symbol
+        # the owner has stopped watching gets forgotten -- deleting the bad
+        # row has to actually clear the alarm.
+        worker_health.heartbeat.mark_symbols(
+            {symbol for symbols in symbols_by_source.values() for symbol in symbols},
+            set(quotes),
+        )
+
         # One fetch per distinct symbol+timeframe, shared by every strategy
         # asking for it -- the history cache bounds this further still.
         bars_by_key: dict[tuple[DataSource, str, Timeframe], list[Bar]] = {}
