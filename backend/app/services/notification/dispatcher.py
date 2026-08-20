@@ -136,69 +136,46 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
             if sender is None:
                 continue
 
-            # Held, not dropped. The event that fires at 3am is often the one
-            # that mattered most, and the owner's alternative -- switching the
-            # channel off so it stops waking them -- is how the warnings stop
-            # arriving at all. Reuses the retry queue: the sweep delivers it
-            # once the window ends.
-            if quiet_hours.is_quiet(
-                channel.quiet_start_hour, channel.quiet_end_hour, owner_timezone
-            ):
-                due = quiet_hours.window_ends_at(
-                    channel.quiet_start_hour, channel.quiet_end_hour, owner_timezone
+            # Everything from here to the commit is wrapped. Only sender.send
+            # used to be, so a raise anywhere else -- the quiet-hours
+            # calculation, schedule_first_retry, either commit -- escaped the
+            # whole loop and the channels after this one were never attempted.
+            # Having several channels is meant to be what makes one failing
+            # survivable; that made one failing take the rest down with it.
+            try:
+                outcome = _deliver_to_channel(
+                    session, channel, event, message, order_id, user_id, owner_timezone
                 )
-                session.add(
-                    NotificationLog(
-                        user_id=user_id,
-                        channel_id=channel.id,
-                        order_id=order_id,
-                        event=event.type,
-                        status=NotificationStatus.FAILED,
-                        error=f"靜音時段，將在 {due.astimezone(UTC):%H:%M} UTC 之後送出",
-                        message=message,
-                        attempts=0,
-                        next_retry_at=due,
-                    )
+            except Exception as exc:
+                logger.exception("dispatch to channel %s crashed", channel.id)
+                # Recorded rather than swallowed: an invisible failure is the
+                # worse trade for this product. Queued for retry too, because
+                # this event fires once and a code fault is no reason to lose
+                # it for good.
+                log = NotificationLog(
+                    user_id=user_id,
+                    channel_id=channel.id,
+                    order_id=order_id,
+                    event=event.type,
+                    status=NotificationStatus.FAILED,
+                    error=f"送出時發生未預期的錯誤：{exc}"[:500],
+                    message=message,
                 )
+                retry.schedule_first_retry(log)
+                session.add(log)
                 session.commit()
-                result.deferred += 1
+                result.failed += 1
+                result.error = str(exc)
                 continue
 
-            try:
-                send_result = sender.send(channel.config_encrypted, message)
-            except Exception as exc:
-                logger.exception("notification send crashed for channel %s", channel.id)
-                ok, error = False, str(exc)
-            else:
-                ok, error = send_result.ok, send_result.error
-
-            log = NotificationLog(
-                user_id=user_id,
-                channel_id=channel.id,
-                order_id=order_id,
-                event=event.type,
-                status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
-                error=error,
-                # Kept even on success, so the row says what the owner was
-                # actually told rather than only that something was sent.
-                message=message,
-            )
-            if not ok:
-                # order.created and strategy.error fire once and never again,
-                # so without a due time here a ten-second provider outage
-                # loses them for good. services/notification/retry.py sweeps
-                # what this queues.
-                retry.schedule_first_retry(log)
-            session.add(log)
-            channel.last_sent_at = utcnow()
-            channel.last_error = error
-            session.commit()
-
-            if ok:
+            if outcome == "deferred":
+                result.deferred += 1
+            elif outcome == "sent":
                 result.delivered += 1
             else:
                 result.failed += 1
-                result.error = error
+                result.error = outcome
+            continue
 
         if result.delivered + result.failed + result.deferred == 0:
             # Channels exist, and every one of them filtered this event type
@@ -275,3 +252,80 @@ def _record_reaching_nobody(
         )
     )
     session.commit()
+
+
+def _deliver_to_channel(
+    session,
+    channel: NotificationChannel,
+    event: Event,
+    message: str,
+    order_id: int | None,
+    user_id: int,
+    owner_timezone: str | None,
+) -> str:
+    """Send one alert through one channel, and say what happened.
+
+    Returns "sent", "deferred", or the error string. Extracted so the caller
+    can wrap the WHOLE of it: previously only sender.send was inside a try, and
+    a raise anywhere else here -- the quiet-hours calculation, either commit,
+    schedule_first_retry -- escaped the per-channel loop and silently skipped
+    every channel after this one.
+    """
+    from app.services.notification import quiet_hours, retry
+
+    sender = SENDERS[channel.channel_type]
+
+    # Held, not dropped. The event that fires at 3am is often the one that
+    # mattered most, and the owner's alternative -- switching the channel off
+    # so it stops waking them -- is how the warnings stop arriving at all.
+    # Reuses the retry queue: the sweep delivers it once the window ends.
+    if quiet_hours.is_quiet(channel.quiet_start_hour, channel.quiet_end_hour, owner_timezone):
+        due = quiet_hours.window_ends_at(
+            channel.quiet_start_hour, channel.quiet_end_hour, owner_timezone
+        )
+        session.add(
+            NotificationLog(
+                user_id=user_id,
+                channel_id=channel.id,
+                order_id=order_id,
+                event=event.type,
+                status=NotificationStatus.FAILED,
+                error=f"靜音時段，將在 {due.astimezone(UTC):%H:%M} UTC 之後送出",
+                message=message,
+                attempts=0,
+                next_retry_at=due,
+            )
+        )
+        session.commit()
+        return "deferred"
+
+    try:
+        send_result = sender.send(channel.config_encrypted, message)
+    except Exception as exc:
+        logger.exception("notification send crashed for channel %s", channel.id)
+        ok, error = False, str(exc)
+    else:
+        ok, error = send_result.ok, send_result.error
+
+    log = NotificationLog(
+        user_id=user_id,
+        channel_id=channel.id,
+        order_id=order_id,
+        event=event.type,
+        status=NotificationStatus.SENT if ok else NotificationStatus.FAILED,
+        error=error,
+        # Kept even on success, so the row says what the owner was actually
+        # told rather than only that something was sent.
+        message=message,
+    )
+    if not ok:
+        # order.created and strategy.error fire once and never again, so
+        # without a due time here a ten-second provider outage loses them for
+        # good. services/notification/retry.py sweeps what this queues.
+        retry.schedule_first_retry(log)
+    session.add(log)
+    channel.last_sent_at = utcnow()
+    channel.last_error = error
+    session.commit()
+
+    return "sent" if ok else (error or "unknown error")
