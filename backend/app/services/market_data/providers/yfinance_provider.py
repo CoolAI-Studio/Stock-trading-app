@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 import yfinance as yf
 
 from app.models.enums import DataSource
-from app.services.market_data.base import Bar, Quote, Timeframe
+from app.services.market_data.base import Bar, Quote, Timeframe, currency_for
 
 # How far back to ask for each interval. Yahoo caps intraday history hard --
 # roughly 7 days of 1m, 60 days of anything else under an hour, 2 years of
@@ -41,6 +41,13 @@ class YFinanceProvider:
                 fast_info = yf.Ticker(symbol).fast_info
                 price = fast_info["lastPrice"]
                 prev_close = fast_info.get("previousClose") if hasattr(fast_info, "get") else None
+                # fast_info already carries it, so the poll pays nothing extra.
+                # Falling back to the symbol rather than to None: losing the
+                # currency entirely is worse than reading it off a suffix that
+                # defines it.
+                currency = getattr(fast_info, "currency", None) or currency_for(
+                    symbol, self.data_source
+                )
             except Exception:
                 # Carrying on is right -- one bad symbol must not stop the
                 # whole poll -- but until now this `continue` was also the
@@ -73,6 +80,7 @@ class YFinanceProvider:
                 prev_close=prev_close_dec,
                 change_pct=change_pct,
                 quote_time=now,
+                currency=currency,
             )
         return quotes
 

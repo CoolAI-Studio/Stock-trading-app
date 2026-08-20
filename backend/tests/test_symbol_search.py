@@ -296,10 +296,13 @@ def test_both_names_in_daily_use_work():
 
 def test_the_result_carries_the_name_the_price_feed_gave():
     """The owner has to be choosing against something the provider said, not
-    against a claim this repo makes about what 輝達 means."""
+    against a claim this repo makes about what 輝達 means.
+
+    It sits in `name`, the same slot the Taiwanese rows put 台積電 in, so a list
+    containing both reads as one list rather than two shapes."""
     match = next(m for m in search("輝達") if m.symbol == "NVDA")
 
-    assert "NVIDIA" in match.detail, match.detail
+    assert "NVIDIA" in match.name, match.name
 
 
 def test_a_us_alias_result_is_marked_verified():
@@ -318,7 +321,7 @@ def test_a_ticker_in_the_table_is_now_confirmed_rather_than_guessed():
 
     assert match.symbol == "AAPL"
     assert match.verified is True
-    assert "Apple" in match.detail
+    assert "Apple" in match.name
 
 
 def test_a_ticker_outside_the_table_is_still_offered_but_unconfirmed():
@@ -410,3 +413,71 @@ def test_a_lettered_code_normalises_and_resolves_from_a_webhook():
 
     assert symbol == "00632R.TW"
     assert note
+
+
+# --- the same company on two markets ----------------------------------------
+#
+# 「台積電」 was a registry hit, so search() answered 2330.TW and stopped -- the
+# US ADR never appeared at all. That made the one ambiguity that matters
+# unreachable rather than resolved: somebody holding TSM types the company's
+# name, gets the Taiwanese line, and sets 「跌破 220」 meaning US$220 against a
+# NT$2,375 stock. It never fires. Once. Ever. And the row looks healthy.
+#
+# So both are offered, each labelled with its market AND its currency -- the
+# two facts that tell them apart, since the provider's own name for both is
+# 「Taiwan Semiconductor Manufacturing」.
+
+
+def test_a_taiwanese_company_with_an_adr_offers_both():
+    symbols = _symbols("台積電")
+
+    assert "2330.TW" in symbols
+    assert "TSM" in symbols
+
+
+def test_the_taiwanese_line_comes_first():
+    """台積電 is a Taiwanese company. The ADR is the alternative, not the
+    default, and a dropdown read on a phone is decided by what is on top."""
+    assert _symbols("台積電")[0] == "2330.TW"
+
+
+def test_each_carries_its_own_currency():
+    """The disambiguator. Both are named 「台積電」 and both price; only the
+    currency says that 220 means two different things."""
+    tw = next(m for m in search("台積電") if m.symbol == "2330.TW")
+    adr = next(m for m in search("台積電") if m.symbol == "TSM")
+
+    assert tw.currency == "TWD"
+    assert adr.currency == "USD"
+
+
+def test_the_adr_row_says_it_is_an_adr():
+    """「美股」 alone does not explain why the same company is listed twice."""
+    adr = next(m for m in search("台積電") if m.symbol == "TSM")
+
+    assert "ADR" in adr.detail
+
+
+def test_the_other_adr_pairs_work_too():
+    for query, tw_symbol, adr in [
+        ("聯電", "2303.TW", "UMC"),
+        ("日月光投控", "3711.TW", "ASX"),
+        ("中華電", "2412.TW", "CHT"),
+    ]:
+        symbols = _symbols(query)
+        assert tw_symbol in symbols, query
+        assert adr in symbols, query
+
+
+def test_a_company_with_no_adr_is_not_given_one():
+    symbols = _symbols("環球晶")
+
+    assert symbols == ["6488.TWO"]
+
+
+def test_every_result_carries_a_currency():
+    """A row without one is a row the picker cannot label, which is how the
+    ambiguity got through in the first place."""
+    for query in ["台積電", "2330", "AAPL", "輝達", "BTCUSDT"]:
+        for match in search(query):
+            assert match.currency, f"{query} -> {match.symbol} has no currency"

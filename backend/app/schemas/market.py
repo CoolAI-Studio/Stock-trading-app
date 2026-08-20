@@ -12,3 +12,6 @@ class QuoteRead(BaseModel):
     change_pct: MoneyStr | None = None
     volume: MoneyStr | None = None
     quote_time: UtcDatetime | None = None
+    # So the screen can label the number instead of leaving the owner to
+    # remember which market this row came from.
+    currency: str | None = None

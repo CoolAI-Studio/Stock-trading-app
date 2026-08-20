@@ -164,6 +164,11 @@ class MarketDataService:
             row.change_pct = quote.change_pct
             row.volume = quote.volume
             row.quote_time = quote.quote_time
+            # Never overwrite a known currency with nothing: a provider that
+            # stops reporting it for one poll must not erase the label the
+            # screen is using.
+            if quote.currency:
+                row.currency = quote.currency
             row.fetched_at = utcnow()
         db.commit()
 

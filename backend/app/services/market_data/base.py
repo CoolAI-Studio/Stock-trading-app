@@ -16,6 +16,10 @@ class Quote:
     change_pct: Decimal | None = None
     volume: Decimal | None = None
     quote_time: datetime | None = None
+    # What the price is denominated in. None on rows written before this
+    # existed -- defaulting to a currency would relabel every one of them, and
+    # a wrong label is worse than a missing one.
+    currency: str | None = None
 
 
 class QuoteProvider(Protocol):
@@ -187,3 +191,48 @@ def closed_bars(bars: list[Bar], now: datetime | None = None) -> list[Bar]:
     now = now or datetime.now(UTC)
     last = bars[-1]
     return bars[:-1] if bar_end(last.timestamp, last.timeframe) > now else bars
+
+
+# Binance quote assets this app deals in, longest first so USDT is matched
+# before USDC's shorter neighbours and BTC does not swallow the tail of a
+# pair that ends in something longer.
+_CRYPTO_QUOTE_ASSETS = ("USDT", "USDC", "TWD", "ETH", "BTC")
+
+
+def currency_for(symbol: str, data_source: DataSource) -> str | None:
+    """The currency a symbol is quoted in, from the symbol itself.
+
+    DERIVED, NOT GUESSED. A .TW symbol is quoted in TWD by definition of the
+    market that suffix names -- this is not an inference about the instrument,
+    it is what the suffix means. Same for a Binance pair, whose quote asset is
+    literally the tail of its own name.
+
+    None for anything else, including markets this app does not model. Claiming
+    a currency for a .HK symbol would be the confident wrong answer the whole
+    symbol effort exists to avoid, and a symbol this app cannot price does not
+    need one.
+
+    Used as a fallback: a provider that reports its own currency is believed
+    first. yfinance's fast_info carries it and costs nothing extra, so the
+    five-second poll gets the real answer rather than this one.
+    """
+    text = (symbol or "").strip().upper()
+    if not text:
+        return None
+
+    if data_source == DataSource.BINANCE:
+        for asset in _CRYPTO_QUOTE_ASSETS:
+            if text.endswith(asset) and len(text) > len(asset):
+                return asset
+        return None
+
+    if text.endswith((".TW", ".TWO")):
+        return "TWD"
+    if "." not in text and "-" not in text:
+        # A bare ticker is a US listing everywhere else in this app -- see
+        # services/market_calendar.py, which classifies the same way.
+        return "USD"
+    # BRK-B and friends: still a US listing.
+    if "." not in text:
+        return "USD"
+    return None

@@ -32,6 +32,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.models.enums import DataSource
+from app.services.market_data.base import currency_for
 
 _DATA = Path(__file__).resolve().parent.parent / "data" / "tw_listings.json"
 # Chinese and common names for US-listed instruments. There is no registry to
@@ -80,6 +81,12 @@ class SymbolMatch:
     # looked up in a real listing table. The UI says so, because "we think
     # this might be a US ticker" and "this is 台積電" are different claims.
     verified: bool
+    # What a price for this symbol would be denominated in. Carried on the
+    # match itself because it is half of what separates 2330.TW from TSM --
+    # both answer 「台積電」, both price, and the provider's own name for both is
+    # "Taiwan Semiconductor Manufacturing". Only 「台股 · TWD」 versus
+    # 「美股 · USD」 tells the owner that 220 means two different things.
+    currency: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -115,16 +122,38 @@ def _us_aliases() -> list[dict]:
 def _us_match(entry: dict) -> SymbolMatch:
     return SymbolMatch(
         symbol=entry["symbol"],
-        name=entry["symbol"],
-        # The provider's own name, fetched when the table was built. This is
-        # the line that lets the owner tell 台積電 from 台積電ADR, or GOOGL from
-        # GOOG -- both price, and only the name says which is which.
-        detail=entry.get("name", ""),
+        # The provider's own name, fetched when the table was built -- the same
+        # slot the Taiwanese rows put 台積電 in, so a list of both reads as one
+        # list. It used to repeat the ticker here, which rendered as 「TSM TSM」
+        # and pushed the only human-readable identifier down into the detail
+        # line.
+        name=entry.get("name", entry["symbol"]),
+        detail="",
         market=MARKET_US,
         data_source=DataSource.YFINANCE,
         # Checked against the live feed at build time and reviewed, unlike a
         # bare ticker inferred from its shape.
         verified=True,
+        currency=currency_for(entry["symbol"], DataSource.YFINANCE),
+    )
+
+
+def _adr_match(entry: dict) -> SymbolMatch:
+    """The US line of a Taiwanese company, said to be exactly that.
+
+    「美股」 alone does not explain why the same company appears twice, and the
+    provider's name is identical for both -- so the row has to say ADR outright
+    or the owner has no way to read the difference.
+    """
+    base = _us_match(entry)
+    return SymbolMatch(
+        symbol=base.symbol,
+        name=base.name,
+        detail=f"{entry['adr_of']} 的美股 ADR，與台股掛牌是不同的標的",
+        market=base.market,
+        data_source=base.data_source,
+        verified=base.verified,
+        currency=base.currency,
     )
 
 
@@ -174,6 +203,7 @@ def _tw_match(row: dict, verified: bool = True) -> SymbolMatch:
         market=MARKET_TW,
         data_source=DataSource.YFINANCE,
         verified=verified,
+        currency=currency_for(row["symbol"], DataSource.YFINANCE),
     )
 
 
@@ -232,6 +262,7 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
                 market=MARKET_TW,
                 data_source=DataSource.YFINANCE,
                 verified=False,
+                currency=currency_for(wanted, DataSource.YFINANCE),
             )
         ]
 
@@ -243,6 +274,20 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
     scored.sort(key=lambda pair: (pair[0], pair[1].get("code", "")))
 
     matches = [_tw_match(row) for _score_, row in scored[:limit]]
+
+    # The US line of a Taiwanese company that has one. Offered right after its
+    # own Taiwanese row, because otherwise the ambiguity is unreachable rather
+    # than resolved: 「台積電」 is a registry hit, so search stopped there and
+    # somebody holding TSM never saw it. They would then set 「跌破 220」 meaning
+    # US$220 against a NT$2,375 stock, and it would never fire -- once, ever,
+    # while the row looked perfectly healthy.
+    tw_codes = {row.get("code") for _s, row in scored}
+    adr_entries = [
+        entry
+        for entry in _us_aliases()
+        if entry.get("adr_of") in tw_codes and entry["symbol"] not in {m.symbol for m in matches}
+    ]
+    matches.extend(_adr_match(entry) for entry in adr_entries[: limit - len(matches)])
 
     # US listings we have a reviewed name for. Ranked after the Taiwanese hits
     # so a Taiwanese company never gets pushed down by an alias.
@@ -268,6 +313,7 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
                 market=MARKET_US,
                 data_source=DataSource.YFINANCE,
                 verified=False,
+                currency=currency_for(text, DataSource.YFINANCE),
             )
         )
     if len(matches) < limit and _CRYPTO_PAIR.match(text):
@@ -279,6 +325,7 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
                 market=MARKET_CRYPTO,
                 data_source=DataSource.BINANCE,
                 verified=False,
+                currency=currency_for(text, DataSource.BINANCE),
             )
         )
 

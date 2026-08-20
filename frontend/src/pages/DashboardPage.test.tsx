@@ -82,6 +82,7 @@ const QUOTE: Quote = {
   change_pct: '0.84',
   volume: null,
   quote_time: null,
+  currency: 'USD',
 }
 
 function renderPage() {

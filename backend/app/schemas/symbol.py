@@ -21,6 +21,10 @@ class SymbolMatchRead(BaseModel):
     market: str
     data_source: DataSource
     verified: bool
+    # Half of what separates 2330.TW from TSM. Both answer 「台積電」, both price,
+    # and the provider names both "Taiwan Semiconductor Manufacturing" -- only
+    # 「台股 · TWD」 versus 「美股 · USD」 says that 220 means two different things.
+    currency: str | None = None
 
 
 class SymbolSearchResponse(BaseModel):

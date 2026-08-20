@@ -46,6 +46,14 @@ OUT = Path(__file__).resolve().parent.parent / "app" / "data" / "us_aliases.json
 # fetched name is written into the output for review. If the fetched name does
 # not describe the company the aliases name, the entry is wrong and the diff
 # shows it.
+# Which Taiwanese code each US line is the ADR of. Searching 「台積電」 has to
+# offer BOTH -- somebody holding TSM types the company's name, and if only the
+# Taiwanese line comes back they set a US-dollar threshold against a NT$2,375
+# stock and it never fires. Kept here rather than in tw_listings.json because
+# that file is regenerated wholesale from the exchanges' feeds, which know
+# nothing about US listings.
+ADR_OF: dict[str, str] = {"TSM": "2330", "UMC": "2303", "ASX": "3711", "CHT": "2412"}
+
 ALIASES: list[tuple[str, list[str]]] = [
     # Semiconductors -- what this owner actually watches
     ("NVDA", ["輝達", "英偉達", "輝達半導體"]),
@@ -132,7 +140,10 @@ def main() -> int:
             failed.append(f"{ticker}: no name or no price ({name!r}, {price!r})")
             continue
 
-        entries.append({"symbol": ticker, "name": name, "aliases": names})
+        entry = {"symbol": ticker, "name": name, "aliases": names}
+        if ticker in ADR_OF:
+            entry["adr_of"] = ADR_OF[ticker]
+        entries.append(entry)
         print(f"  {ticker:6s} {name}")
 
     if failed:

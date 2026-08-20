@@ -9,6 +9,7 @@ from app.models.market import MarketQuote
 from app.models.position import Position
 from app.models.user import User
 from app.schemas.position import PositionAdjust, PositionRead
+from app.services import symbol_search
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
@@ -92,13 +93,22 @@ def adjust_position(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_active_user),
 ) -> Position:
+    # This CREATES a position from the path parameter, and the market loop
+    # then polls it and checks its stop-loss. A company name here is a position
+    # that never prices and whose stop is never checked; a bare Taiwanese code
+    # is worse, because Yahoo prices it as an unrelated Japanese company and the
+    # stop IS checked, against the wrong company. Every other symbol entrance
+    # was taught to refuse both; this one was missed.
+    cleaned = symbol_search.normalise(symbol)
+    problem = symbol_search.looks_unpriceable(cleaned)
+    if problem:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
+
     position = (
-        db.query(Position)
-        .filter(Position.user_id == user.id, Position.symbol == symbol.upper())
-        .first()
+        db.query(Position).filter(Position.user_id == user.id, Position.symbol == cleaned).first()
     )
     if position is None:
-        position = Position(user_id=user.id, symbol=symbol.upper())
+        position = Position(user_id=user.id, symbol=cleaned)
         db.add(position)
 
     position.quantity = payload.quantity

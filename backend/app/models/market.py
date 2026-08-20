@@ -26,4 +26,10 @@ class MarketQuote(Base):
     change_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), default=None)
     volume: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), default=None)
     quote_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # What `price` is denominated in. A bare number was safe only while symbol
+    # search could emit .TW/.TWO and US tickers alone; now that a US ADR and
+    # its Taiwanese line can both answer 「台積電」, NT$2,375 and US$300 land in
+    # the same column and a threshold typed against one is silently wrong
+    # against the other. NULL on rows written before this existed.
+    currency: Mapped[str | None] = mapped_column(String(8), default=None)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

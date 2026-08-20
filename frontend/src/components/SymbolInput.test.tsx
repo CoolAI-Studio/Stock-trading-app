@@ -35,6 +35,7 @@ const TSMC: SymbolSearchResponse = {
       market: '台股',
       data_source: 'yfinance',
       verified: true,
+      currency: 'TWD',
     },
   ],
   listings_generated_at: '2026-08-19',
@@ -50,6 +51,7 @@ const AMBIGUOUS: SymbolSearchResponse = {
       market: '台股',
       data_source: 'yfinance',
       verified: true,
+      currency: 'TWD',
     },
     {
       symbol: '1102.TW',
@@ -58,6 +60,7 @@ const AMBIGUOUS: SymbolSearchResponse = {
       market: '台股',
       data_source: 'yfinance',
       verified: true,
+      currency: 'TWD',
     },
   ],
   listings_generated_at: '2026-08-19',
@@ -225,5 +228,81 @@ describe('查詢的節制', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalled())
     const url = vi.mocked(api.get).mock.calls.at(-1)?.[0] as string
     expect(url).toContain(encodeURIComponent('台積電'))
+  })
+})
+
+// --- telling two listings of the same company apart -------------------------
+//
+// 「台積電」 now returns BOTH 2330.TW and TSM. It has to, or the ambiguity is
+// unreachable: somebody holding the ADR types the company's name, gets only
+// the Taiwanese line, and sets 「跌破 220」 meaning US$220 against a NT$2,375
+// stock. It never fires -- once, ever -- and the row looks healthy.
+//
+// But offering both is only safe if they are distinguishable, and the two
+// things that distinguish them are the market and the currency. The provider's
+// own name is identical for both.
+
+describe('同一家公司的兩個掛牌', () => {
+  const BOTH: SymbolSearchResponse = {
+    query: '台積電',
+    matches: [
+      {
+        symbol: '2330.TW',
+        name: '台積電',
+        detail: '上市 · 台灣積體電路製造股份有限公司',
+        market: '台股',
+        data_source: 'yfinance',
+        verified: true,
+        currency: 'TWD',
+      },
+      {
+        symbol: 'TSM',
+        name: 'Taiwan Semiconductor Manufactur',
+        detail: '2330 的美股 ADR，與台股掛牌是不同的標的',
+        market: '美股',
+        data_source: 'yfinance',
+        verified: true,
+        currency: 'USD',
+      },
+    ],
+    listings_generated_at: '2026-08-20',
+  }
+
+  it('兩條都列出來', async () => {
+    vi.mocked(api.get).mockResolvedValue(BOTH as never)
+    const user = userEvent.setup()
+    show()
+
+    await user.type(screen.getByLabelText('代號'), '台積電')
+
+    const list = await screen.findByRole('listbox', { name: '搜尋結果' })
+    expect(within(list).getByText('2330.TW')).toBeInTheDocument()
+    expect(within(list).getByText('TSM')).toBeInTheDocument()
+  })
+
+  it('每一條都標出幣別 —— 那是唯一分得出 220 是哪個 220 的東西', async () => {
+    vi.mocked(api.get).mockResolvedValue(BOTH as never)
+    const user = userEvent.setup()
+    show()
+
+    await user.type(screen.getByLabelText('代號'), '台積電')
+
+    const list = await screen.findByRole('listbox', { name: '搜尋結果' })
+    expect(within(list).getByText(/台股.*TWD/)).toBeInTheDocument()
+    expect(within(list).getByText(/美股.*USD/)).toBeInTheDocument()
+  })
+
+  it('沒有幣別時只顯示市場，不要憑空補一個', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      ...BOTH,
+      matches: [{ ...BOTH.matches[0], currency: null }],
+    } as never)
+    const user = userEvent.setup()
+    show()
+
+    await user.type(screen.getByLabelText('代號'), '台積電')
+
+    const list = await screen.findByRole('listbox', { name: '搜尋結果' })
+    expect(within(list).getByText('台股')).toBeInTheDocument()
   })
 })

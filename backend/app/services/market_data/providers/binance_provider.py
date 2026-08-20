@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from app.models.enums import DataSource
-from app.services.market_data.base import Bar, Quote, Timeframe
+from app.services.market_data.base import Bar, Quote, Timeframe, currency_for
 
 _TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
 _KLINES_URL = "https://api.binance.com/api/v3/klines"
@@ -51,6 +51,9 @@ class BinanceProvider:
                     change_pct=change_pct,
                     volume=volume_dec,
                     quote_time=now,
+                    # The quote asset is literally the tail of the pair's own
+                    # name, so this is reading the symbol rather than guessing.
+                    currency=currency_for(symbol, self.data_source),
                 )
         return quotes
 

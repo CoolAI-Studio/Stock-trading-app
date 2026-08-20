@@ -158,7 +158,13 @@ export function SymbolInput({
                     <span className="flex items-baseline gap-2">
                       <span className="font-medium">{match.symbol}</span>
                       <span className="text-sm text-slate-300">{match.name}</span>
-                      <span className="ml-auto text-xs text-slate-500">{match.market}</span>
+                      {/* Market AND currency together. The provider's own name
+                          is identical for 2330.TW and TSM, so this pair is the
+                          only thing on the row that says 220 means two
+                          different numbers. */}
+                      <span className="ml-auto whitespace-nowrap text-xs text-slate-500">
+                        {match.currency ? `${match.market} · ${match.currency}` : match.market}
+                      </span>
                     </span>
                     <span className="block text-xs text-slate-500">
                       {match.detail}

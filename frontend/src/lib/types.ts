@@ -174,6 +174,11 @@ export interface Quote {
   change_pct: string | null
   volume: string | null
   quote_time: string | null
+  /** What `price` is denominated in. A bare number was safe only while the app
+   * could show .TW/.TWO and US tickers alone; now that a US ADR and its
+   * Taiwanese line can both answer 「台積電」, NT$2,375 and US$300 appear in the
+   * same column. null on rows quoted before this existed. */
+  currency: string | null
 }
 
 export interface RiskSettings {
@@ -501,6 +506,11 @@ export interface SymbolMatch {
   market: string
   data_source: DataSource
   verified: boolean
+  /** What a price for this symbol is denominated in. Half of what separates
+   * 2330.TW from TSM: both answer 「台積電」, both price, and the provider names
+   * both "Taiwan Semiconductor Manufacturing" -- only 台股·TWD vs 美股·USD says
+   * that 220 means two different things. */
+  currency: string | null
 }
 
 export interface SymbolSearchResponse {
