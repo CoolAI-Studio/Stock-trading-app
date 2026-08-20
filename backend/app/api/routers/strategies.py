@@ -55,6 +55,11 @@ def _validate(source_code: str, sample_prices: list[float] | None = None) -> Str
     detected = {
         "detected_name": loaded.name,
         "detected_symbol": loaded.symbol,
+        # Reported here rather than left to the save step. The editor printed
+        # 「偵測到：均線（2330）」 in green, which reads as approval; the refusal
+        # did happen, later, from a different field, with nothing connecting
+        # it to the symbol the code had chosen.
+        "symbol_problem": symbol_search.looks_unpriceable(loaded.symbol or ""),
         "entry_point": loaded.entry_point,
         # Left out for a tick strategy: it has no candles, and reporting the
         # default would read as a choice the code never made.
@@ -99,6 +104,7 @@ def _to_generate_result(
         source_code=source_code,
         detected_name=validation.detected_name,
         detected_symbol=validation.detected_symbol,
+        symbol_problem=validation.symbol_problem,
         # Carried through so the editor can say which candle the strategy
         # decided to work in: "周線" was the owner's word, and a strategy that
         # quietly came back daily reads identically in the source box.

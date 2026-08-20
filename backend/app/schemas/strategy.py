@@ -153,6 +153,13 @@ class StrategyValidateResult(BaseModel):
     error: str | None = None
     detected_name: str | None = None
     detected_symbol: str | None = None
+    # Why the symbol the code assigned to self.symbol can never produce a
+    # price, or None. Reported apart from `error` because the PYTHON is
+    # fine -- the editor printed 「偵測到：均線（2330）」 in green, which reads
+    # as approval, and the refusal only arrived at save time from a
+    # different field, with nothing connecting it to the symbol the AI
+    # chose.
+    symbol_problem: str | None = None
     # Which entry point the source turned out to use, "on_tick" or "on_bar".
     # Reported because the two read almost alike, and a strategy that quietly
     # got the wrong one looks exactly like a strategy that works.

@@ -324,6 +324,24 @@ def build_system_prompt() -> str:
     )
 
 
+# What a symbol this app can price actually looks like.
+#
+# Without this the instruction was 「挑一個合理的代號」 and nothing more, and for
+# a request written in Chinese 「合理的代號」 is 「台積電」 or 「2330」 -- the exact
+# two shapes the rest of the app refuses. 「台積電」 produces a strategy that
+# runs forever and never sees a price; a bare 「2330」 is worse, because Yahoo
+# resolves it to an unrelated Japanese company, so it prices and the strategy
+# trades signals off the wrong stock.
+_SYMBOL_FORMAT_RULE = (
+    "self.symbol 的格式規則（寫錯的話這個策略永遠抓不到報價，或抓到別家公司的價格）：\n"
+    "- 台股上市：四碼加 .TW，例如 2330.TW。只寫「2330」不可以。\n"
+    "- 台股上櫃：四碼加 .TWO，例如 6488.TWO。上櫃股票用 .TW 也抓不到。\n"
+    "- 美股：直接寫代號，例如 AAPL、TSLA。\n"
+    "- 加密貨幣：Binance 的交易對，例如 BTCUSDT。\n"
+    "- 絕對不要填中文公司名稱（例如「台積電」），那不是代號。"
+)
+
+
 def build_request_prompt(
     description: str,
     symbol: str | None,
@@ -335,6 +353,10 @@ def build_request_prompt(
         lines.append(f"self.symbol 必須設為：{symbol}")
     else:
         lines.append("使用者沒有指定標的，請依需求描述挑一個合理的代號填進 self.symbol。")
+    # Stated in BOTH branches. Told 「必須設為 2330.TW」 the model can still
+    # write 「2330」 into the literal, and then the strategy is about a
+    # different company than the row it gets saved on.
+    lines.append(_SYMBOL_FORMAT_RULE)
 
     # ask() is single-turn, so a question the model asked last round only
     # exists here if it is restated. Without the question the answer is

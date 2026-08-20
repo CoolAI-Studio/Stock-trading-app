@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StrategiesPage } from './StrategiesPage'
 import { ApiError, api } from '../lib/api'
-import type { RiskSettings, Strategy, StrategyAlert } from '../lib/types'
+import type { RiskSettings, Strategy, StrategyAlert, StrategyValidateResult } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
@@ -1144,5 +1144,92 @@ describe('why a strategy is quiet', () => {
 
     const row = (await screen.findByText(STRATEGY.name)).closest('tr') as HTMLElement
     expect(row).toHaveTextContent('12/30')
+  })
+})
+
+// --- the symbol the AI chose ------------------------------------------------
+//
+// build_request_prompt told the model 「挑一個合理的代號」 and never said what a
+// symbol looks like, so a request written in Chinese invited 「台積電」 or
+// 「2330」 -- the two shapes the rest of this app refuses. The prompt now
+// carries the format rule, and when the model gets it wrong anyway the editor
+// has to say so HERE rather than letting 「偵測到：均線（2330）」 stand in green
+// and surfacing the refusal at save time from a different field.
+
+describe('AI 挑的代號有問題時', () => {
+  function validationOf(overrides: Partial<StrategyValidateResult>) {
+    return {
+      ok: true,
+      error: null,
+      detected_name: '均線',
+      detected_symbol: '2330',
+      symbol_problem: '台股代號要加上市場後綴，只寫「2330」會被行情來源當成別的市場的股票。請改用 2330.TW。',
+      entry_point: 'on_tick',
+      timeframe: null,
+      sample_signals: ['HOLD'],
+      ...overrides,
+    } as StrategyValidateResult
+  }
+
+  it('程式碼裡的標的跟代號欄位不一樣時要講出來', async () => {
+    // The dangerous shape, because nothing else on screen is wrong: the 代號
+    // field holds a perfectly good 2330.TW and validates silently, while the
+    // code's own self.symbol says 「台積電」 and the summary reports it in
+    // green as though it were the thing being watched.
+    vi.mocked(api.post).mockResolvedValue(
+      validationOf({ detected_symbol: '台積電', symbol_problem: '「台積電」是公司名稱，不是代號。' }) as never,
+    )
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('股票代號'), '2330.TW')
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByRole('button', { name: '驗證' }))
+
+    expect(await screen.findByText(/self\.symbol/)).toBeInTheDocument()
+  })
+
+  it('兩邊一樣時不要說第二次 —— 代號欄位自己已經在警告了', async () => {
+    // prefill puts the code's symbol into an empty 代號 field, and that field
+    // warns about a bad symbol on its own. Printing the same sentence twice
+    // is how a warning stops being read.
+    vi.mocked(api.post).mockResolvedValue(validationOf({}) as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByRole('button', { name: '驗證' }))
+
+    await screen.findByText(/偵測到/)
+    expect(screen.queryByText(/self\.symbol/)).not.toBeInTheDocument()
+  })
+
+  it('程式碼本身沒問題這件事不要被蓋掉 —— 只是一個字串要改', async () => {
+    vi.mocked(api.post).mockResolvedValue(validationOf({}) as never)
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByRole('button', { name: '驗證' }))
+
+    expect(await screen.findByText(/均線/)).toBeInTheDocument()
+  })
+
+  it('代號沒問題時不要多嘴', async () => {
+    vi.mocked(api.post).mockResolvedValue(
+      validationOf({ detected_symbol: '2330.TW', symbol_problem: null }) as never,
+    )
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
+    await user.click(screen.getByRole('button', { name: '驗證' }))
+
+    await screen.findByText(/偵測到/)
+    expect(screen.queryByText(/self\.symbol/)).not.toBeInTheDocument()
   })
 })

@@ -87,6 +87,12 @@ export interface StrategyValidateResult {
   error: string | null
   detected_name: string | null
   detected_symbol: string | null
+  /** Why the symbol the code assigned to self.symbol can never produce a
+   * price, or null. Separate from `error` because the PYTHON is fine -- the
+   * editor printed 「偵測到：均線（2330）」 in green, which reads as approval, and
+   * the refusal only arrived at save time from a different field with nothing
+   * connecting it to the symbol the AI had chosen. */
+  symbol_problem: string | null
   /** "on_tick" (every quote) or "on_bar" (once per closed candle). The two
    * read almost alike in source, so the form says which one it turned out to
    * be rather than leaving it to be inferred. */

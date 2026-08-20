@@ -68,11 +68,36 @@ function detectionSummary(result: StrategyValidateResult): string {
   return detected
 }
 
-function ValidationSummary({ validation }: { validation: StrategyValidateResult }) {
+function ValidationSummary({
+  validation,
+  formSymbol,
+}: {
+  validation: StrategyValidateResult
+  formSymbol: string
+}) {
+  // The code's own self.symbol is a LABEL -- what actually gets polled is the
+  // 代號 field, which the form validates on its own. So when the two agree,
+  // the field is already saying this and repeating it here is noise.
+  //
+  // When they DISAGREE the field says nothing, because the field's value is
+  // fine. 「偵測到：均線（台積電）」 then sits there in green next to a perfectly
+  // valid 2330.TW, and the only thing on screen that is wrong is the one line
+  // nobody is being asked to look at.
+  const mismatched =
+    validation.symbol_problem && validation.detected_symbol !== formSymbol.trim()
   return (
-    <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
-      {validation.ok ? detectionSummary(validation) : validation.error}
-    </p>
+    <>
+      <p className={validation.ok ? 'text-emerald-400' : 'text-red-400'}>
+        {validation.ok ? detectionSummary(validation) : validation.error}
+      </p>
+      {mismatched && (
+        <p className="text-amber-400">
+          程式碼裡的 self.symbol 是「{validation.detected_symbol}」，這個代號抓不到報價。
+          實際輪詢的是上面的代號欄位，所以策略還是會跑，但程式碼裡的標的和它盯的
+          標的不是同一個。{validation.symbol_problem}
+        </p>
+      )}
+    </>
   )
 }
 
@@ -520,7 +545,7 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
         />
       </div>
 
-      {validation && <ValidationSummary validation={validation} />}
+      {validation && <ValidationSummary validation={validation} formSymbol={symbol} />}
       {saveError && <p className="text-red-400">{saveError}</p>}
 
       <div className="flex gap-2">
@@ -904,7 +929,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         />
       </div>
 
-      {validation && <ValidationSummary validation={validation} />}
+      {validation && <ValidationSummary validation={validation} formSymbol={symbol} />}
       {createError && <p className="text-red-400">{createError}</p>}
 
       {/* Both are locked while the AI writes: the answer is about to replace
