@@ -159,9 +159,14 @@ def test_a_vapid_fault_is_not_blamed_on_the_device(code):
 
     result = _fail_with(code)
     explanation = _permanent_explanation(ChannelType.WEB_PUSH, result.error or "")
+    gone = _permanent_explanation(ChannelType.WEB_PUSH, "HTTP 410")
 
-    assert "重新建立" not in explanation, explanation
-    assert "VAPID" in explanation or "伺服器" in explanation, explanation
+    # Pinning the meaning, not a substring: an earlier version of this test
+    # asserted 「重新建立」 was absent, which the correct message fails -- it says
+    # 「重新建立推播管道也不會好」, the opposite instruction.
+    assert explanation != gone, "a server fault must not read like a dead device"
+    assert "不是你的裝置" in explanation, explanation
+    assert "VAPID" in explanation, explanation
 
 
 def test_a_server_side_fault_still_stops_retrying():
