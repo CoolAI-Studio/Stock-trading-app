@@ -770,3 +770,52 @@ describe('測試按鈕的送達回報', () => {
     expect(api.get).not.toHaveBeenCalledWith('/api/notifications/logs/56')
   })
 })
+
+// --- an alert that reached nobody ------------------------------------------
+//
+// The ledger's most important row. Before it existed, an alert raised for
+// somebody with no enabled channel returned silently, so 發送紀錄 looked
+// identical to an afternoon on which nothing had happened -- and the owner
+// could not find the failure even by going and looking for it.
+
+describe('沒有送到任何管道的紀錄', () => {
+  const NOBODY_LOG: NotificationLog = {
+    id: 9,
+    channel_id: null,
+    order_id: 1,
+    event: 'order.created',
+    status: 'failed',
+    error: '沒有任何啟用中的通知管道，所以這則提醒沒有送到任何地方。',
+    created_at: '2026-08-20T01:00:00Z',
+    delivered_at: null,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(platform.currentPushAvailability).mockReturnValue({ kind: 'ready' })
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [] as never
+      if (path === '/api/notifications/logs') return [NOBODY_LOG] as never
+      return [] as never
+    })
+  })
+
+  it('管道欄位要講清楚是「沒有送到任何管道」，不能是空白或 #null', async () => {
+    renderPage()
+
+    expect(await screen.findByText('沒有送到任何管道')).toBeInTheDocument()
+  })
+
+  it('那一列要看得出來不對勁', async () => {
+    renderPage()
+
+    const cell = await screen.findByText('沒有送到任何管道')
+    expect(cell.className).toContain('red')
+  })
+
+  it('要把原因原樣顯示出來，那是使用者唯一的下一步', async () => {
+    renderPage()
+
+    expect(await screen.findByText(/沒有任何啟用中的通知管道/)).toBeInTheDocument()
+  })
+})

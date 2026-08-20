@@ -209,7 +209,10 @@ export interface NotificationChannel {
 
 export interface NotificationLog {
   id: number
-  channel_id: number
+  /** null when the alert reached NO channel at all -- nobody was told. Before
+   * that row existed, such an alert left no trace, so the ledger looked
+   * exactly like an afternoon on which nothing had happened. */
+  channel_id: number | null
   order_id: number | null
   event: string
   status: 'sent' | 'failed'

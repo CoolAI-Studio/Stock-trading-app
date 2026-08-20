@@ -445,8 +445,26 @@ def tick_once(
         if owns_session:
             session.close()
 
-    for event in events:
-        bus.publish(event)
+        # Published from the finally on purpose. These used to go out on a line
+        # AFTER the try, so any exception in the tick skipped them and the whole
+        # batch evaporated with one line on stderr.
+        #
+        # That was permanent, not merely late, for the one event that matters
+        # most: _record_strategy_error switches a strategy off and COMMITS
+        # that, then only appends 「策略已停用」 here. The next tick queries
+        # is_active.is_(True), so the strategy is no longer in it -- the error
+        # threshold is crossed exactly once in a strategy's life. The retry
+        # sweep cannot recover it either, because it resends existing
+        # NotificationLog rows and this alert never reached the dispatcher.
+        # The strategy stayed off, every future alert from it went with it, and
+        # nothing told the owner.
+        for event in events:
+            try:
+                bus.publish(event)
+            except Exception:
+                # One bad subscriber must not stop the rest of the batch.
+                logger.exception("publishing %s failed", event.type)
+
     return events
 
 

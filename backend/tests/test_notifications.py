@@ -265,7 +265,17 @@ def test_dispatcher_skips_disabled_channels(db_session):
         )
 
     mock_post.assert_not_called()
-    assert db_session.query(NotificationLog).count() == 0
+
+    # This assertion used to read `count() == 0`, which pinned the bug rather
+    # than the behaviour: an alert raised for somebody whose only channel is
+    # switched off left NO trace, so the ledger looked exactly like an
+    # afternoon on which nothing happened. Nothing is SENT -- that part was
+    # always right -- but the miss is now recorded, on a row with no channel.
+    # See tests/test_alerts_reaching_nobody.py.
+    rows = db_session.query(NotificationLog).all()
+    assert len(rows) == 1
+    assert rows[0].channel_id is None
+    assert rows[0].status == NotificationStatus.FAILED
 
 
 def test_dispatcher_respects_subscribed_events_filter(db_session):
@@ -288,6 +298,12 @@ def test_dispatcher_respects_subscribed_events_filter(db_session):
         )
 
     mock_post.assert_not_called()
+    # The filter is doing its job, but the alert still reached nobody, and that
+    # needs saying -- with a different message from "you have no channels",
+    # because the fix is different: tick this event on the channel you have.
+    row = db_session.query(NotificationLog).one()
+    assert row.channel_id is None
+    assert "事件" in (row.error or "")
 
 
 def test_dispatcher_sends_to_web_push_channel(db_session, monkeypatch):

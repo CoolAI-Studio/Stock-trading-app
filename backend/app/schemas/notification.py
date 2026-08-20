@@ -105,7 +105,8 @@ class NotificationLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    channel_id: int
+    # NULL when the alert reached no channel at all.
+    channel_id: int | None
     order_id: int | None
     event: str
     status: str

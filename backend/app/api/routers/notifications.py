@@ -147,6 +147,20 @@ def delete_channel(
     channel_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
 ) -> None:
     channel = _get_owned_channel(db, user, channel_id)
+    # Keep what this channel FAILED to deliver.
+    #
+    # The FK cascades, and the app's own repair advice for a dead push
+    # subscription is 「請在這台裝置上刪除後重新建立推播管道」. Following that
+    # instruction removed every log row for the channel -- including every
+    # FAILED row recording an alert that never arrived. The one action the app
+    # told the owner to take was the action that erased the proof of what had
+    # gone wrong.
+    #
+    # Done explicitly here as well as in the FK because SQLite does not enforce
+    # ondelete by default -- see the same note in api/routers/strategies.py.
+    db.query(NotificationLog).filter(NotificationLog.channel_id == channel.id).update(
+        {NotificationLog.channel_id: None}, synchronize_session=False
+    )
     db.delete(channel)
     db.commit()
 
@@ -156,6 +170,22 @@ def test_channel(
     channel_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
 ) -> ChannelTestResult:
     channel = _get_owned_channel(db, user, channel_id)
+
+    if not settings.NOTIFICATIONS_ENABLED:
+        # This button exists to answer "will my alerts arrive?". With the
+        # dispatcher switched off the answer is no -- but the button sent a
+        # real message anyway, reported success, and wrote a green 已送出 row,
+        # manufacturing evidence for the opposite of the truth on the one
+        # screen built to settle the question.
+        return ChannelTestResult(
+            ok=False,
+            error=(
+                "伺服器的 NOTIFICATIONS_ENABLED 設定是關閉的 —— 這個管道本身可能沒問題，"
+                "但真正的警告一則都不會送出。請先把伺服器的這個設定打開。"
+            ),
+            log_id=None,
+        )
+
     sender = SENDERS[channel.channel_type]
     test_message = "這是一則測試通知。看到這則訊息，代表這個管道可以送達。"
 
@@ -276,6 +306,19 @@ def delete_notification_log(
     )
     if log is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log entry not found")
+    if log.next_retry_at is not None:
+        # notification_logs IS the retry queue -- retry.py says so in its own
+        # header -- so deleting this row cancels a delivery the owner has not
+        # received yet. clear_notification_logs below already guards for
+        # exactly this; the single-row delete did not, and offered it as
+        # "remove from history".
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "這則通知還沒送出，正在等待重送 —— 刪掉它就等於取消這次通知。"
+                "等它送出（或送到放棄）之後就可以刪了。"
+            ),
+        )
     db.delete(log)
     db.commit()
 

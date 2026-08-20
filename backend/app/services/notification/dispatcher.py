@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,11 @@ from app.services.notification.telegram import TelegramSender
 from app.services.notification.webpush import WebPushSender
 
 logger = logging.getLogger("app.notifications")
+
+# How long one "reached nobody" row absorbs later misses. Long enough to bound
+# a five-second poll to 24 rows a day rather than 17,280, short enough that the
+# ledger still reflects what is happening now rather than this morning.
+_NOBODY_FOLD_WINDOW = timedelta(hours=1)
 
 SENDERS = {
     ChannelType.TELEGRAM: TelegramSender(),
@@ -111,10 +116,14 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
             )
             .all()
         )
+        message = _format_message(event)
+
         if not channels:
+            # An alert nobody was told about is this product's critical
+            # failure, and it used to leave nothing behind at all.
+            _record_reaching_nobody(session, user_id, event, message, has_channels=False)
             return result
 
-        message = _format_message(event)
         order_id = event.data.get("order_id")
         owner = session.get(User, user_id)
         owner_timezone = owner.timezone if owner else quiet_hours.DEFAULT_TIMEZONE
@@ -190,8 +199,79 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
             else:
                 result.failed += 1
                 result.error = error
+
+        if result.delivered + result.failed + result.deferred == 0:
+            # Channels exist, and every one of them filtered this event type
+            # out. Different cause from having no channel, so a different
+            # message: telling somebody to create a channel they already have
+            # sends them the wrong way.
+            _record_reaching_nobody(session, user_id, event, message, has_channels=True)
     finally:
         if owns_session:
             session.close()
 
     return result
+
+
+def _record_reaching_nobody(
+    session, user_id: int, event: Event, message: str, *, has_channels: bool
+) -> None:
+    """Leave a row saying this alert reached nobody.
+
+    DispatchResult's own docstring has always said that delivered == 0 is a
+    failure even when nothing raised. Nothing acted on it: the dispatcher
+    returned, and the 發送紀錄 ledger then looked exactly like an afternoon on
+    which nothing had happened. The owner could not find the failure even by
+    going and looking for it, which for an alerting product is worse than the
+    alert failing loudly.
+
+    channel_id is NULL because there is no channel involved -- that is the
+    whole point of the row. No retry is scheduled either: there is nothing to
+    retry it TO, and a due date would make the sweep pick it up forever.
+    """
+    # ONE ROW PER WINDOW, because alerts.py documents alert_interval_sec = 0 as
+    # "notify every time" and applies no cap of its own. With no channels that
+    # wrote a row on every poll -- 17,280 a day at the five-second default, on a
+    # free-tier database, burying the very row this exists to make visible.
+    #
+    # Folded rather than dropped: the count goes on `attempts`, so the ledger
+    # still distinguishes one missed alert from fifty.
+    recent = (
+        session.query(NotificationLog)
+        .filter(
+            NotificationLog.user_id == user_id,
+            NotificationLog.channel_id.is_(None),
+            NotificationLog.created_at >= utcnow() - _NOBODY_FOLD_WINDOW,
+        )
+        .order_by(NotificationLog.id.desc())
+        .first()
+    )
+
+    reason = (
+        "有啟用中的通知管道，但沒有任何一個訂閱了這個事件類型，所以這則提醒沒有送到任何地方。"
+        "請到「通知」頁，在其中一個管道勾選這個事件。"
+        if has_channels
+        else "沒有任何啟用中的通知管道，所以這則提醒沒有送到任何地方。"
+        "請到「通知」頁建立一個管道（Telegram、Email、LINE 或瀏覽器推播都可以）。"
+    )
+    if recent is not None:
+        recent.attempts += 1
+        recent.error = f"{reason}（這段期間共有 {recent.attempts} 則提醒沒有送到）"
+        session.commit()
+        return
+
+    session.add(
+        NotificationLog(
+            user_id=user_id,
+            channel_id=None,
+            order_id=event.data.get("order_id"),
+            event=event.type,
+            status=NotificationStatus.FAILED,
+            error=f"{reason}（這段期間共有 1 則提醒沒有送到）",
+            # Kept so the row says WHAT went unheard, not merely that something
+            # did -- otherwise the owner cannot tell whether it mattered.
+            message=message,
+            attempts=1,
+        )
+    )
+    session.commit()

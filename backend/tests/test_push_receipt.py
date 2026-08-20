@@ -30,8 +30,26 @@ human saw it. It proves the notification was displayed on the device.
 import json
 from unittest.mock import patch
 
+import pytest
+
 from app.models.enums import ChannelType
 from app.models.notification import NotificationChannel, NotificationLog
+
+
+@pytest.fixture(autouse=True)
+def _notifications_on(client, monkeypatch):
+    """conftest switches NOTIFICATIONS_ENABLED off for the whole suite so that
+    nothing sends for real. Every test in this file is ABOUT the 測試 button,
+    which now refuses to run while the notifier is muted (it used to report
+    success and manufacture evidence for the opposite of the truth), so the
+    flag has to be put back explicitly here.
+
+    Depends on `client` rather than `auth_client` for two reasons: conftest
+    does the muting inside `client`, so this has to be ordered after it -- and
+    `auth_client` attaches a bearer token to that same client, which would
+    quietly authenticate the one test here that must NOT be logged in."""
+    monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", True)
+
 
 SUBSCRIPTION = {
     "endpoint": "https://web.push.apple.com/abc",

@@ -1,6 +1,14 @@
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
+
+
+@pytest.fixture
+def notifications_on(client, monkeypatch):
+    """conftest mutes notifications suite-wide; the 測試 endpoint now refuses to
+    run while muted, so the tests that exercise it have to say so."""
+    monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", True)
 
 
 def test_create_telegram_channel_and_secret_is_never_returned(auth_client):
@@ -86,7 +94,7 @@ def test_delete_channel(auth_client):
     assert list_resp.json() == []
 
 
-def test_test_endpoint_sends_and_logs(auth_client):
+def test_test_endpoint_sends_and_logs(notifications_on, auth_client):
     create_resp = auth_client.post(
         "/api/notifications/channels",
         json={
@@ -147,7 +155,9 @@ def test_vapid_public_key_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_a_rejected_telegram_send_never_leaks_the_bot_token_through_the_api(auth_client):
+def test_a_rejected_telegram_send_never_leaks_the_bot_token_through_the_api(
+    notifications_on, auth_client
+):
     """A wrong/revoked bot token is the most likely Telegram failure there is,
     and httpx names the full request URL -- token included -- in the error it
     raises for it. That string is persisted in NotificationChannel.last_error

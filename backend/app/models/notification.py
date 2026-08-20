@@ -39,8 +39,18 @@ class NotificationLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    channel_id: Mapped[int] = mapped_column(
-        ForeignKey("notification_channels.id", ondelete="CASCADE")
+    # NULL means the alert reached NO channel at all -- see
+    # dispatcher._record_reaching_nobody. Before that row existed, an alert
+    # raised for somebody with no enabled channel simply returned, and the
+    # ledger then looked exactly like an afternoon when nothing happened. For
+    # an alerting product those two must never be indistinguishable.
+    # SET NULL, not CASCADE. The app tells the owner to delete a broken push
+    # channel and make a new one; cascading took every record of what that
+    # channel had failed to deliver with it, so the prescribed fix destroyed
+    # the evidence. A row with no channel is already a shape this table
+    # understands -- it is what an alert that reached nobody looks like.
+    channel_id: Mapped[int | None] = mapped_column(
+        ForeignKey("notification_channels.id", ondelete="SET NULL"), default=None
     )
     order_id: Mapped[int | None] = mapped_column(
         ForeignKey("orders.id", ondelete="SET NULL"), default=None

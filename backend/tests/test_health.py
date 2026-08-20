@@ -8,6 +8,18 @@ from app.db.session import get_db
 from app.main import app
 from app.services import market_loop, worker_health
 
+
+@pytest.fixture(autouse=True)
+def _notifications_on(client, monkeypatch):
+    """/healthz now reports a muted notifier as a failure -- for this product a
+    system that sends no alerts is not healthy.
+
+    Depends on `client` deliberately: conftest mutes notifications INSIDE that
+    fixture, so anything that does not order itself after it gets overwritten
+    and every test here sees a 503."""
+    monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", True)
+
+
 # A realistic Neon URL, planted where a driver error would carry it, so the
 # leak assertions below fail loudly if the endpoint ever echoes an exception.
 LEAKY_DSN = "postgresql://trader:hunter2@ep-cold-sun-123.neon.tech/trading"

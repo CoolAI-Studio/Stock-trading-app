@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
+from app.services.notification.base import SendResult
 from app.services.notification.dispatcher import SENDERS
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,10 @@ def retry_pending(db: Session) -> int:
         if not _still_worth_sending(db, log, now):
             continue
 
-        channel = db.get(NotificationChannel, log.channel_id)
+        # Same reason as in _still_worth_sending: a NULL channel_id means the
+        # alert reached nobody, and db.get(Model, None) is documented to start
+        # raising.
+        channel = None if log.channel_id is None else db.get(NotificationChannel, log.channel_id)
         sender = SENDERS.get(channel.channel_type) if channel else None
         if sender is None:
             log.next_retry_at = None
@@ -123,8 +127,16 @@ def retry_pending(db: Session) -> int:
             log.error = error
             log.next_retry_at = None
             channel.is_enabled = False
-            channel.last_error = _permanent_explanation(channel.channel_type, error)
+            explanation = _permanent_explanation(channel.channel_type, error)
+            channel.last_error = explanation
             logger.warning("disabling channel %s: %s is permanent", channel.id, error)
+            # Nothing must escape from here: a sweep that dies stops retrying
+            # every OTHER pending notification too, and the disable above has
+            # already happened.
+            try:
+                _announce_disabled_channel(db, channel, explanation)
+            except Exception:
+                logger.exception("could not announce that channel %s was disabled", channel.id)
         else:
             log.error = error
             log.next_retry_at = _next_due(log.attempts)
@@ -153,18 +165,49 @@ def _still_worth_sending(db: Session, log: NotificationLog, now) -> bool:
         db.commit()
         return False
 
-    # created_at is naive out of SQLite, so compare on the same footing.
-    age = now.replace(tzinfo=None) - log.created_at.replace(tzinfo=None)
+    # HOW LONG IT HAS BEEN OWED, not how long ago it was raised.
+    #
+    # These were the same thing until quiet hours arrived, and then they stopped
+    # being. quiet_hours.py promises 「Deferred, never dropped」 and defers by
+    # setting next_retry_at to the end of the window; the UI's own default
+    # window is 23:00-07:00, eight hours, against a six-hour _MAX_AGE. Measured
+    # from created_at, every alert raised in the first two hours of a normal
+    # night was discarded by this check before it was ever sent -- so the
+    # default configuration silently threw away exactly the alerts somebody
+    # sets quiet hours in order to receive politely rather than not at all.
+    #
+    # A held alert is not stale; it is waiting, on purpose, for a time the owner
+    # chose. The six-hour rule still applies in full to anything that has
+    # actually been failing -- see the test for a genuinely stale retry.
+    # created_at and next_retry_at are naive out of SQLite, so compare on one
+    # footing.
+    due_at = log.next_retry_at or log.created_at
+    reference = max(due_at.replace(tzinfo=None), log.created_at.replace(tzinfo=None))
+    age = now.replace(tzinfo=None) - reference
     if age > _MAX_AGE:
         log.next_retry_at = None
+        # Rewritten, because the row was left saying 「靜音時段，將在 07:00 UTC
+        # 之後送出」 after the sweep had given up on it -- the history page then
+        # showed a notification that was queued and would never arrive.
+        # Leads with the abandonment, and frames whatever was there before as
+        # a past state -- the row used to be left saying 「將在 07:00 UTC 之後
+        # 送出」, so the history page showed a notification that was queued and
+        # would never arrive. The original reason is kept after 「原因：」
+        # because it is the only diagnostic left.
+        hours = int(_MAX_AGE.total_seconds() // 3600)
+        log.error = f"超過 {hours} 小時仍未送出，已放棄，不會再重送。原因：{log.error or '不明'}"
         db.commit()
         logger.warning("notification %s expired unsent after %s", log.id, age)
         return False
 
-    channel = db.get(NotificationChannel, log.channel_id)
+    # channel_id is NULL on a "this alert reached nobody" row. There is no
+    # channel to retry to, and db.get(Model, None) warns today and is
+    # documented to raise in a future SQLAlchemy -- which would take the whole
+    # sweep down, and with it every OTHER pending notification.
+    channel = None if log.channel_id is None else db.get(NotificationChannel, log.channel_id)
     if channel is None or not channel.is_enabled:
-        # The owner turned it off, or deleted it. Either way they have stopped
-        # asking to be told this way.
+        # The owner turned it off, or deleted it, or there was never one. Either
+        # way nothing is owed here any more.
         log.next_retry_at = None
         db.commit()
         return False
@@ -227,3 +270,91 @@ def _permanent_explanation(channel_type: ChannelType, error: str) -> str:
     if channel_type == ChannelType.LINE:
         return f"LINE 拒絕了這個管道（{error}），已自動停用。請確認存取權杖。"
     return f"這個管道被對方拒絕（{error}），已自動停用。請重新設定後再啟用。"
+
+
+def _announce_disabled_channel(
+    db: Session, disabled: NotificationChannel, explanation: str
+) -> None:
+    """Tell the owner, through the channels that still work, that one stopped.
+
+    Until this existed the only record was `channel.last_error` -- a string on
+    a row visible on exactly one page. The owner had to already suspect
+    something and go looking, while every alert that channel would have carried
+    quietly failed to arrive. Having more than one channel is supposed to be
+    for exactly this.
+
+    BOUNDED ON PURPOSE. A notice is itself a notification, and that is the
+    shape of a loop: notice -> carried by B -> B fails permanently -> B
+    disabled -> notice about B -> ... So the notice is sent once, directly,
+    with no retry scheduled and no permanent-failure handling of its own. One
+    that fails is recorded and dropped.
+    """
+    survivors = (
+        db.query(NotificationChannel)
+        .filter(
+            NotificationChannel.user_id == disabled.user_id,
+            NotificationChannel.is_enabled.is_(True),
+            NotificationChannel.id != disabled.id,
+        )
+        .all()
+    )
+
+    text = f"通知管道「{disabled.label}」已自動停用。{explanation}"
+
+    if not survivors:
+        # No notice can reach anybody -- that is what "the last channel" means.
+        # Inventing a delivery mechanism here would be a lie; recording it
+        # where the owner sees it on their next visit is the honest thing.
+        db.add(
+            NotificationLog(
+                user_id=disabled.user_id,
+                channel_id=None,
+                event="channel.disabled",
+                status=NotificationStatus.FAILED,
+                error=(
+                    f"最後一個可用的通知管道「{disabled.label}」已自動停用，"
+                    "現在沒有任何方式可以通知你 —— 在你修好之前，所有提醒都收不到。"
+                    f"（停用原因：{explanation}）"
+                ),
+                message=text,
+                attempts=0,
+            )
+        )
+        db.commit()
+        return
+
+    for survivor in survivors:
+        _send_notice(db, survivor, text)
+
+
+def _send_notice(db: Session, channel: NotificationChannel, text: str) -> None:
+    """One notice, through one channel, once.
+
+    Kept separate from the policy above so the two can be reasoned about --
+    and tested -- apart: this function knows nothing about WHY it is sending.
+
+    Deliberately NOT queued for retry and NOT allowed to disable `channel` on
+    failure. One dead channel must not take the others down with it, one sweep
+    at a time, and a notice is not worth the loop risk that retrying it carries.
+    """
+    sender = SENDERS.get(channel.channel_type)
+    if sender is None:
+        return
+    try:
+        result = sender.send(channel.config_encrypted, text)
+    except Exception as exc:  # noqa: BLE001 -- one bad channel must not stop the rest
+        result = SendResult(ok=False, error=str(exc)[:500])
+
+    db.add(
+        NotificationLog(
+            user_id=channel.user_id,
+            channel_id=channel.id,
+            event="channel.disabled",
+            status=NotificationStatus.SENT if result.ok else NotificationStatus.FAILED,
+            error=result.error,
+            message=text,
+            attempts=1,
+            next_retry_at=None,
+        )
+    )
+    db.commit()

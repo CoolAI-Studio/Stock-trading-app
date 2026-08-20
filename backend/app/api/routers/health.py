@@ -87,6 +87,19 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         checks["worker"] = {"status": _DISABLED}
         checks["market_data"] = {"status": _DISABLED}
 
+    # A muted notifier is not a healthy one FOR THIS PRODUCT. WORKER_ENABLED
+    # off is a configuration choice somebody makes to run the app locally;
+    # NOTIFICATIONS_ENABLED off means every alert is discarded while everything
+    # else -- the worker, the polling, the strategies -- goes on looking
+    # perfectly well. Nothing anywhere surfaced it, and the 測試 button
+    # positively reported success. The external watchdog is the only thing that
+    # looks when nobody is looking, so this is what it needs to see.
+    checks["notifications"] = (
+        {"status": _OK}
+        if settings.NOTIFICATIONS_ENABLED
+        else {"status": _FAIL, "detail": "NOTIFICATIONS_ENABLED is off; no alert will be sent"}
+    )
+
     failing = any(check["status"] == _FAIL for check in checks.values())
     if failing:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

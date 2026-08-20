@@ -944,8 +944,13 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
     mutationFn: () => api.delete<{ deleted: number }>('/api/notifications/logs'),
     onSuccess: () => logQueryClient.invalidateQueries({ queryKey: ['notification-logs'] }),
   })
-  const labelFor = (channelId: number) =>
-    channels.find((c) => c.id === channelId)?.label ?? `#${channelId}`
+  // null means the alert reached no channel at all. Rendering that as an
+  // ordinary row with a blank name would hide the single most important thing
+  // this table can say.
+  const labelFor = (channelId: number | null) =>
+    channelId === null
+      ? '沒有送到任何管道'
+      : (channels.find((c) => c.id === channelId)?.label ?? `#${channelId}`)
 
   return (
     <div className="space-y-2">
@@ -986,7 +991,13 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
             <tbody>
               {logs.map((log) => (
                 <tr key={log.id} className="border-b border-slate-800 text-slate-300">
-                  <td className="py-2 pr-4 font-medium">{labelFor(log.channel_id)}</td>
+                  <td
+                    className={`py-2 pr-4 font-medium ${
+                      log.channel_id === null ? 'text-red-400' : ''
+                    }`}
+                  >
+                    {labelFor(log.channel_id)}
+                  </td>
                   <td className="py-2 pr-4">{EVENT_LABEL[log.event] ?? log.event}</td>
                   <td className={`py-2 pr-4 ${log.status === 'sent' ? 'text-emerald-400' : 'text-red-400'}`}>
                     {STATUS_LABEL[log.status]}

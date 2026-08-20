@@ -51,6 +51,7 @@ _MEANING = {
     "worker": "背景 worker 沒有在跑 —— 策略不會執行，提醒不會發出。",
     "market_data": "抓不到行情 —— 沒有價格就不會有任何提醒。",
     "database": "連不上資料庫 —— 策略、持倉、通知設定全都讀不到。",
+    "notifications": "通知功能被關掉了（NOTIFICATIONS_ENABLED）—— 策略照跑，但一則警告都不會送出。",
 }
 
 
