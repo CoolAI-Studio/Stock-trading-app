@@ -18,7 +18,12 @@ services:
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_SUBJECT
-        value: "mailto:you@example.com"
+        # Your own contact address, as a mailto: URI. It travels in the signed
+        # VAPID header on every push and exists so a push service can reach
+        # whoever operates the server. Deliberately NOT given a value here:
+        # shipping mailto:you@example.com meant every deployment sent a
+        # fictitious contact, and the app now warns about it on every start.
+        sync: false
       - key: TV_WEBHOOK_SECRET
         generateValue: true
       - key: CORS_ORIGINS

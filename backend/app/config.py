@@ -1,4 +1,5 @@
 import base64
+import logging
 import sys
 from functools import lru_cache
 
@@ -299,14 +300,27 @@ def _verify_vapid(s: Settings) -> None:
         )
 
     subject = (s.VAPID_SUBJECT or "").strip()
-    if subject in _VAPID_SUBJECT_PLACEHOLDERS:
-        raise RuntimeError(
-            f"VAPID_SUBJECT is still the placeholder {subject!r} -- refusing to start. "
-            "It is nobody's address, and a push service is entitled to reject a "
-            "contact it cannot use. Set it to your own mailto: address."
-        )
+
+    # NOT a URI at all: RFC 8292 requires mailto: or https:, so this is
+    # definitely wrong and definitely fixable. A bare email address looks right
+    # and is not, which is exactly what gets pasted in.
     if not subject.startswith(("mailto:", "https://")):
         raise RuntimeError(
             f"VAPID_SUBJECT must be a mailto: or https: URI (RFC 8292), got {subject!r} "
             "-- refusing to start. A bare email address looks right and is not."
+        )
+
+    # A syntactically valid placeholder is only PROBABLY wrong, and the
+    # difference matters. Whether a push service actually rejects a well-formed
+    # but fictitious mailto is not documented by Apple either way, so refusing
+    # to boot over it would risk taking the whole alerting system down for
+    # something that may be working fine -- the exact opposite of what this
+    # function is for. It gets said loudly instead, on every start.
+    if subject in _VAPID_SUBJECT_PLACEHOLDERS:
+        logging.getLogger("app.config").warning(
+            "VAPID_SUBJECT is still the placeholder %r. It is nobody's address, and a "
+            "push service is entitled to reject a contact it cannot use -- set it to "
+            "your own mailto: address. Not fatal: whether it is actually refused is "
+            "undocumented, and stopping the app over a maybe would be worse.",
+            subject,
         )

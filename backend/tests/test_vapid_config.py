@@ -40,6 +40,12 @@ REAL_SECRETS = {
     # otherwise be the thing that failed -- masking whatever this file is
     # actually asserting.
     "SECRET_ENCRYPTION_KEY": base64.urlsafe_b64encode(b"k" * 32).decode(),
+    # Settings' own default is deliberately a placeholder, so a test that
+    # supplies a real key pair and nothing else would be asserting the subject
+    # rule rather than whatever it says it is about. Local .env hid this and CI
+    # found it -- exactly the failure the "move .env aside before pushing" rule
+    # exists to catch.
+    "VAPID_SUBJECT": "mailto:owner@example.com",
 }
 
 
@@ -162,6 +168,7 @@ def test_a_valid_subject_is_accepted(subject):
 
 
 @pytest.mark.parametrize("subject", ["", "owner@example.com", "you@example.com", "not a uri"])
+# All four are not URIs at all -- that is the line: definitely wrong, so refused.
 def test_a_subject_that_is_not_a_uri_is_refused(subject):
     """RFC 8292 requires mailto: or https:. A bare address looks right and is
     not, which is exactly the kind of thing that gets pasted in."""
@@ -175,12 +182,18 @@ def test_a_subject_that_is_not_a_uri_is_refused(subject):
     assert "VAPID_SUBJECT" in str(exc.value)
 
 
-def test_the_shipped_placeholder_is_refused():
-    """render.yaml deploys mailto:you@example.com as-is, and it is nobody's
-    address. It has to fail at boot rather than at delivery."""
+def test_the_shipped_placeholder_warns_but_does_not_stop_the_app(caplog):
+    """A well-formed but fictitious address is only PROBABLY wrong.
+
+    Whether a push service actually refuses one is undocumented, and refusing
+    to boot over a maybe would take the whole alerting system down for
+    something that may be delivering fine -- the opposite of what this check is
+    for. An earlier version of this did raise, and render.yaml ships exactly
+    this value, so the next deploy would have failed to start.
+    """
     public, private = _pair()
 
-    with pytest.raises(RuntimeError):
+    with caplog.at_level("WARNING"):
         verify_required_secrets(
             _settings(
                 VAPID_PUBLIC_KEY=public,
@@ -188,6 +201,8 @@ def test_the_shipped_placeholder_is_refused():
                 VAPID_SUBJECT="mailto:you@example.com",
             )
         )
+
+    assert any("VAPID_SUBJECT" in record.message for record in caplog.records)
 
 
 def test_the_subject_is_only_checked_when_push_is_configured():
