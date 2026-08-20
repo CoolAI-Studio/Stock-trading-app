@@ -54,9 +54,7 @@ def _pair() -> tuple[str, str]:
     key = ec.generate_private_key(ec.SECP256R1())
     private = _b64(key.private_numbers().private_value.to_bytes(32, "big"))
     public = _b64(
-        key.public_key().public_bytes(
-            encoding=Encoding.X962, format=PublicFormat.UncompressedPoint
-        )
+        key.public_key().public_bytes(encoding=Encoding.X962, format=PublicFormat.UncompressedPoint)
     )
     return public, private
 
@@ -87,7 +85,7 @@ def test_a_mismatched_pair_refuses_to_start():
 
 
 def test_the_mismatch_message_says_which_two_values_disagree():
-    """"VAPID error" sends somebody to read code. Naming both variables and
+    """ "VAPID error" sends somebody to read code. Naming both variables and
     the script that regenerates them is the difference between a five-minute
     fix and an afternoon."""
     public, _ = _pair()
@@ -122,9 +120,7 @@ def test_padded_base64url_is_accepted():
     key = ec.generate_private_key(ec.SECP256R1())
     private = base64.urlsafe_b64encode(key.private_numbers().private_value.to_bytes(32, "big"))
     public = base64.urlsafe_b64encode(
-        key.public_key().public_bytes(
-            encoding=Encoding.X962, format=PublicFormat.UncompressedPoint
-        )
+        key.public_key().public_bytes(encoding=Encoding.X962, format=PublicFormat.UncompressedPoint)
     )
 
     verify_required_secrets(
