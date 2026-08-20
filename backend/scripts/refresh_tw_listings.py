@@ -27,6 +27,7 @@ with an empty one on the day an exchange changes its JSON.
 """
 
 import json
+import re
 import ssl
 import sys
 from datetime import UTC, datetime
@@ -39,6 +40,20 @@ OUT = Path(__file__).resolve().parent.parent / "app" / "data" / "tw_listings.jso
 
 TWSE_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
+
+# The two feeds above are COMPANY basic data, so ETFs -- which are funds, not
+# companies -- are absent from both. 0050, 0056 and 00878 are among the most
+# traded instruments in Taiwan, and without them a webhook naming one was
+# refused and the alert dropped.
+#
+# The daily-quote feeds carry every security that traded, ETFs included. They
+# also carry thousands of warrants (the TPEx one is over 90% warrants), which
+# is why only the ETF code shape is taken from them: every Taiwanese ETF code
+# begins 00, and no warrant does -- checked against the live feeds, 157 ETFs
+# matched and nothing else did.
+TWSE_QUOTES_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+TPEX_QUOTES_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+_ETF_CODE = re.compile(r"^00\d{2,4}$")
 
 # The two feeds carry the same information under different key names, which is
 # the only reason this mapping exists.
@@ -101,6 +116,36 @@ def _rows(raw: list[dict], keys: tuple[str, str, str], suffix: str) -> list[dict
     return out
 
 
+def _etf_rows(raw: list[dict], keys: tuple[str, str], suffix: str) -> list[dict]:
+    """The ETFs out of a daily-quote feed, and nothing else.
+
+    Only the 00-prefixed code shape is taken: it is every Taiwanese ETF and no
+    warrant, which matters because the TPEx quote feed is more than 90%
+    warrants and pulling those in would put ten thousand untradeable codes in
+    front of the owner.
+    """
+    code_key, name_key = keys
+    out = []
+    for row in raw:
+        code = str(row.get(code_key, "")).strip()
+        if not _ETF_CODE.match(code):
+            continue
+        name = str(row.get(name_key, "")).strip()
+        out.append(
+            {
+                "code": code,
+                "symbol": f"{code}.{suffix}",
+                "short_name": name,
+                # The quote feed carries one name only; there is no separate
+                # legal name to record, and inventing one would be worse than
+                # repeating what is there.
+                "full_name": name,
+                "board": "上市 ETF" if suffix == "TW" else "上櫃 ETF",
+            }
+        )
+    return out
+
+
 def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -108,6 +153,9 @@ def main() -> int:
 
     listed = _rows(_fetch(TWSE_URL), TWSE_KEYS, "TW")
     otc = _rows(_fetch(TPEX_URL), TPEX_KEYS, "TWO")
+
+    listed += _etf_rows(_fetch(TWSE_QUOTES_URL), ("Code", "Name"), "TW")
+    otc += _etf_rows(_fetch(TPEX_QUOTES_URL), ("SecuritiesCompanyCode", "CompanyName"), "TWO")
 
     for name, rows, floor in (
         ("TW", listed, MIN_EXPECTED["TW"]),

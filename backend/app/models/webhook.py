@@ -29,6 +29,12 @@ class TradingViewWebhookLog(Base):
         ForeignKey("orders.id", ondelete="SET NULL"), default=None
     )
     error: Mapped[str | None] = mapped_column(Text, default=None)
+    # A remark on a call that SUCCEEDED -- kept apart from `error`, which the
+    # UI shows in red. The case it exists for is a symbol that had to be
+    # canonicalised (TradingView's {{ticker}} sends 「2330」, never 「2330.TW」):
+    # doing that without saying so would be exactly the silent substitution
+    # this app refuses everywhere a human is present.
+    note: Mapped[str | None] = mapped_column(Text, default=None)
     # This alert carried no `id`, so it is only protected by the
     # identical-body window rather than being properly idempotent. Recorded so
     # the owner learns it from the page instead of from being replayed.

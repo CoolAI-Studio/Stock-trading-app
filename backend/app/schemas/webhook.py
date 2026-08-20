@@ -8,6 +8,11 @@ from app.schemas.common import UtcDatetime
 class TradingViewAlert(BaseModel):
     secret: str
     symbol: str
+    # TradingView's {{exchange}} placeholder, when the owner puts it in the
+    # alert message. Optional because every alert configured before it was
+    # asked for sends nothing -- and refusing those would drop every one of
+    # them, which is strictly worse than the ambiguity it guards against.
+    exchange: str | None = None
     action: str
     quantity: Decimal | None = None
     price: Decimal | None = None

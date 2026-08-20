@@ -249,3 +249,102 @@ def looks_unpriceable(symbol: str) -> str | None:
         )
 
     return None
+
+
+# TradingView's {{exchange}} placeholder, mapped to what this app can price.
+# Delayed feeds append _DL or _DLY to the exchange (TradingView's own docs say
+# so, and TWSE_DLY:2330 is a real symbol on their site) -- Taiwan's free data is
+# 15 minutes delayed, so the suffixed form is what the owner's charts actually
+# send. Matching only the bare names would miss every one of them.
+_TW_EXCHANGES = {"TWSE": "TW", "TPEX": "TWO"}
+_US_EXCHANGES = frozenset({"NASDAQ", "NYSE", "AMEX", "ARCA", "BATS", "OTC", "NYSEARCA"})
+_CRYPTO_EXCHANGES = frozenset({"BINANCE"})
+
+
+def _clean_exchange(raw: str | None) -> str:
+    text = (raw or "").strip().upper()
+    for suffix in ("_DLY", "_DL"):
+        if text.endswith(suffix):
+            return text[: -len(suffix)]
+    return text
+
+
+def resolve_incoming(raw: str, exchange: str | None = None) -> tuple[str | None, str | None]:
+    """Canonicalise a symbol arriving with NOBODY PRESENT to correct it.
+
+    Returns (symbol, note). `symbol` is None when it cannot be resolved --
+    which means refuse, not improvise. `note` is set only when the input was
+    changed, so a caller can record the adjustment; it is None when nothing
+    was touched, because a remark on every single alert would stop being read.
+
+    WHY THIS SUBSTITUTES WHERE search() REFUSES TO. Everywhere a human is
+    present the rule is "suggest, never substitute": show candidates and let
+    them choose. A TradingView webhook has nobody present, so the only choices
+    are to resolve or to drop the alert -- and dropping it is a missed alert,
+    which is this product's critical failure.
+
+    Resolving is safe HERE because for a purely numeric code it is a lookup
+    with a unique answer rather than a guess: the bundled registry holds every
+    Taiwanese code exactly once across both boards (pinned by a test), and
+    within the markets this app models a numeric string cannot be a US ticker
+    or a Binance pair. That is precisely what Yahoo gets wrong -- it searches
+    every market it knows, and answers a bare 2330 with a Japanese company.
+
+    A Chinese company name is NOT resolved, because it has no unique answer:
+    「台積」 matches several. That one is refused even with nobody present.
+    """
+    text = normalise(raw)
+    if not text:
+        return None, None
+
+    market = _clean_exchange(exchange)
+
+    # A market this app does not model. Refused BY NAME rather than resolved,
+    # because a four-digit Japanese or Hong Kong code sits in the same numeric
+    # band as a Taiwanese one -- TSE:4502 is Takeda and 4502 is also 健信 --
+    # so resolving it from the Taiwanese registry would price the wrong
+    # company and record a note claiming the mapping was correct. That is the
+    # Yahoo failure this registry exists to prevent, rebuilt from the inside.
+    if market and market not in _TW_EXCHANGES and market not in _US_EXCHANGES:
+        if market not in _CRYPTO_EXCHANGES:
+            return None, f"__unsupported__{market}"
+
+    qualified = _TW_QUALIFIED.match(text)
+    if qualified:
+        # Already the right shape. Upper-casing a suffix is not an adjustment
+        # worth remarking on.
+        return f"{qualified.group(1)}.{qualified.group(2).upper()}", None
+
+    if _TW_CODE.match(text):
+        row = next((r for r in _listings() if r.get("code") == text), None)
+
+        if market in _TW_EXCHANGES:
+            # The chart said which board it was on, so the suffix is known even
+            # for something the registry has not heard of yet -- a newly listed
+            # ETF, say. No assumption is being made, so no caveat is recorded.
+            symbol = row["symbol"] if row else f"{text}.{_TW_EXCHANGES[market]}"
+            name = row.get("short_name", "") if row else ""
+            return symbol, (
+                f"TradingView 送來的是「{text}」（{{{{ticker}}}} 不含交易所），"
+                f"依 {market} 對應到 {symbol}{f'（{name}）' if name else ''}。"
+            )
+
+        if row is None:
+            # Appending .TW anyway would manufacture a symbol that prices as
+            # nothing -- or, worse, as something else.
+            return None, None
+
+        # No exchange came with it, so this IS an assumption and the note has
+        # to read like one rather than as a statement of fact.
+        return row["symbol"], (
+            f"TradingView 送來的是「{text}」，訊息裡沒有帶 {{{{exchange}}}}，"
+            f"假設是台股圖表，依上市櫃清單對應到 {row['symbol']}"
+            f"（{row.get('short_name', '')}）。若這其實是日股或港股，"
+            "請在 TradingView 的警報訊息裡加上 exchange 欄位。"
+        )
+
+    if not text.isascii():
+        # No unique answer, and nobody present to pick.
+        return None, None
+
+    return text, None
