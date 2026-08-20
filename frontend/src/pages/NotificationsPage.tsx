@@ -17,7 +17,41 @@ import type {
   NotificationLog,
 } from '../lib/types'
 
-const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', failed: '失敗' }
+/** What a row's delivery actually means, in the owner's language.
+ *
+ * 「失敗」 used to cover four situations: waiting out quiet hours, between
+ * attempts, out of attempts, and attached to a channel that no longer exists.
+ * The page printed the same word for all four with the raw provider error
+ * underneath, so the one question worth asking about a failed alert -- 「所以它
+ * 還會來嗎？」 -- had no answer anywhere on the screen.
+ *
+ * The state itself is decided by the backend (NotificationLog.delivery_state)
+ * so that the retry rules have one definition rather than two.
+ */
+function deliveryLabel(log: NotificationLog): { text: string; tone: string } {
+  const due = log.next_retry_at ? new Date(log.next_retry_at).toLocaleTimeString() : null
+  switch (log.delivery_state) {
+    case 'sent':
+      return { text: '已送出', tone: 'text-emerald-400' }
+    case 'deferred':
+      // Not a failure. It is waiting, on purpose, for a time the owner chose --
+      // and reading it as a failure is how somebody concludes their quiet hours
+      // are eating alerts and switches them off.
+      return {
+        text: due ? `等待靜音時段結束（${due} 送出）` : '等待靜音時段結束',
+        tone: 'text-slate-400',
+      }
+    case 'retrying':
+      return {
+        text: due
+          ? `重試中（第 ${log.attempts}／${log.max_attempts} 次，${due} 再試）`
+          : `重試中（第 ${log.attempts}／${log.max_attempts} 次）`,
+        tone: 'text-amber-400',
+      }
+    case 'given_up':
+      return { text: '已放棄，不會再重送', tone: 'text-red-400' }
+  }
+}
 
 /** The SMTP settings, shaped the way the backend's EmailConfig reads them.
  *
@@ -999,10 +1033,15 @@ function NotificationLogs({ channels }: { channels: NotificationChannel[] }) {
                     {labelFor(log.channel_id)}
                   </td>
                   <td className="py-2 pr-4">{EVENT_LABEL[log.event] ?? log.event}</td>
-                  <td className={`py-2 pr-4 ${log.status === 'sent' ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {STATUS_LABEL[log.status]}
+                  <td className={`py-2 pr-4 ${deliveryLabel(log).tone}`}>
+                    {deliveryLabel(log).text}
                   </td>
-                  <td className="py-2 pr-4 text-red-400">{log.error ?? ''}</td>
+                  {/* Suppressed while a row is merely being held: the status
+                      cell already says so, and repeating it here in red is
+                      exactly what made a deliberate wait read as a failure. */}
+                  <td className="py-2 pr-4 text-red-400">
+                    {log.delivery_state === 'deferred' ? '' : (log.error ?? '')}
+                  </td>
                   <td className="py-2 pr-4 text-slate-500">
                     {new Date(log.created_at).toLocaleString()}
                   </td>

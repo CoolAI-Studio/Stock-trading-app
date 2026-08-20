@@ -228,6 +228,18 @@ export interface NotificationLog {
    * RFC 8030 §5 says a 2xx "does not indicate that the message was delivered
    * to the user agent" -- which is a far weaker claim than it reads as. */
   delivered_at: string | null
+  /** 「so is it still coming or not?」 -- the only question the owner actually
+   * asks about a failed alert. `status: 'failed'` was four situations wearing
+   * one word: held for quiet hours, between attempts, out of attempts, and
+   * 「the channel is gone, so nothing will happen」. Decided by the backend
+   * model so the page and the retry sweep cannot drift apart. */
+  delivery_state: 'sent' | 'deferred' | 'retrying' | 'given_up'
+  attempts: number
+  /** The ladder's length, from the server. 「第 3 次」 means nothing without
+   * 「共 5 次」, and a 5 hard-coded here is a second copy waiting to disagree. */
+  max_attempts: number
+  /** When the next send is due, or null when nothing more is owed. */
+  next_retry_at: string | null
 }
 
 /** POST /api/notifications/channels/{id}/test.

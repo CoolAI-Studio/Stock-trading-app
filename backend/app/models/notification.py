@@ -98,3 +98,35 @@ class NotificationLog(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    @property
+    def delivery_state(self) -> str:
+        """「so is it still coming or not?」 -- the only question the owner of an
+        alerting app actually asks about a failed notification.
+
+        FAILED was four situations wearing one word: held for quiet hours,
+        between attempts, out of attempts, and 「the channel is gone so nothing
+        will happen」. The API returned status and error, so the page printed
+        「失敗」 for all four.
+
+        Derived here rather than on the page so that there is ONE definition of
+        「still coming」. The rules live in services/notification/retry.py, and a
+        screen re-deriving them from raw columns is a second copy waiting to
+        disagree with the sweep.
+
+        NULL next_retry_at is the whole of 「nothing more will be tried」 on
+        purpose: it is reached by exhausting the ladder, by the owner disabling
+        the channel, by the row ageing past _MAX_AGE, and by a notice that was
+        never retryable. Four causes, one fact, and the fact is what matters.
+        """
+        if self.status == NotificationStatus.SENT:
+            return "sent"
+        if self.next_retry_at is None:
+            return "given_up"
+        # Nothing has been attempted yet, and something is scheduled: this is
+        # a quiet-hours hold, which is a deliberate wait rather than a
+        # failure. Reading it as one is how somebody concludes their quiet
+        # hours are eating alerts and switches them off.
+        if not self.attempts:
+            return "deferred"
+        return "retrying"

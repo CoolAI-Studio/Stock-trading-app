@@ -65,6 +65,10 @@ const LOG: NotificationLog = {
   error: null,
   created_at: '2026-08-16T00:00:00Z',
   delivered_at: null,
+  delivery_state: 'sent',
+  attempts: 1,
+  max_attempts: 5,
+  next_retry_at: null,
 }
 
 function renderPage() {
@@ -711,6 +715,10 @@ describe('測試按鈕的送達回報', () => {
       error: null,
       created_at: '2026-08-20T00:00:00Z',
       delivered_at: delivered,
+      delivery_state: 'sent' as const,
+      attempts: 1,
+      max_attempts: 5,
+      next_retry_at: null,
     }
   }
 
@@ -788,6 +796,12 @@ describe('沒有送到任何管道的紀錄', () => {
     error: '沒有任何啟用中的通知管道，所以這則提醒沒有送到任何地方。',
     created_at: '2026-08-20T01:00:00Z',
     delivered_at: null,
+    // Nowhere to send it and nothing scheduled: this is 「stopped」, and
+    // 「still retrying」 would be a lie in the worst possible direction.
+    delivery_state: 'given_up',
+    attempts: 0,
+    max_attempts: 5,
+    next_retry_at: null,
   }
 
   beforeEach(() => {
@@ -817,5 +831,99 @@ describe('沒有送到任何管道的紀錄', () => {
     renderPage()
 
     expect(await screen.findByText(/沒有任何啟用中的通知管道/)).toBeInTheDocument()
+  })
+})
+
+// --- 「失敗」 was four different situations wearing one word -------------------
+//
+// A failed row can be waiting out quiet hours, between attempts, out of
+// attempts, or attached to a channel that no longer exists. The page printed
+// 失敗 for all four and the raw provider error underneath. The owner of an
+// alerting app has exactly one question about a failed alert -- 「所以它還會來
+// 嗎？」 -- and that was the one thing the row did not say.
+
+describe('這則通知到底還會不會來', () => {
+  const base: NotificationLog = {
+    id: 9,
+    channel_id: 1,
+    order_id: null,
+    event: 'order.created',
+    status: 'failed',
+    error: 'Telegram timed out',
+    created_at: '2026-08-16T00:00:00Z',
+    delivered_at: null,
+    delivery_state: 'retrying',
+    attempts: 3,
+    max_attempts: 5,
+    next_retry_at: '2026-08-16T00:08:00Z',
+  }
+
+  function showLog(log: NotificationLog) {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [CHANNEL] as never
+      if (path === '/api/notifications/logs') return [log] as never
+      return [] as never
+    })
+    renderPage()
+  }
+
+  it('還在重試的說得出第幾次、還有幾次', async () => {
+    showLog(base)
+
+    const cell = await screen.findByText(/重試中/)
+    expect(cell).toHaveTextContent('3')
+    expect(cell).toHaveTextContent('5')
+  })
+
+  it('還在重試的說得出下次什麼時候 —— 使用者正在決定要不要現在去開券商 App', async () => {
+    showLog(base)
+
+    const cell = await screen.findByText(/重試中/)
+    // Rendered in the reader's own timezone, so pin the hour the browser
+    // would show rather than the UTC string.
+    const expected = new Date(base.next_retry_at!).toLocaleTimeString()
+    expect(cell.textContent).toContain(expected)
+  })
+
+  it('已經放棄的要說清楚不會再送了，不能跟還在重試的長一樣', async () => {
+    showLog({ ...base, delivery_state: 'given_up', attempts: 5, next_retry_at: null })
+
+    expect(await screen.findByText(/不會再/)).toBeInTheDocument()
+    expect(screen.queryByText(/重試中/)).not.toBeInTheDocument()
+  })
+
+  it('靜音時段是在等，不是失敗 —— 標成失敗會讓人以為靜音在吃掉提醒', async () => {
+    showLog({
+      ...base,
+      delivery_state: 'deferred',
+      attempts: 0,
+      error: '靜音時段，將在 07:00 UTC 之後送出',
+      next_retry_at: '2026-08-16T07:00:00Z',
+    })
+
+    expect(await screen.findByText(/等待靜音時段/)).toBeInTheDocument()
+    expect(screen.queryByText(/重試中/)).not.toBeInTheDocument()
+  })
+
+  it('靜音的那一列不要在錯誤欄再用紅字說一次同樣的事', async () => {
+    // The status cell already says it is waiting. Repeating it in the error
+    // column, in red, is precisely what made a deliberate hold read as a
+    // failure.
+    showLog({
+      ...base,
+      delivery_state: 'deferred',
+      attempts: 0,
+      error: '靜音時段，將在 07:00 UTC 之後送出',
+      next_retry_at: '2026-08-16T07:00:00Z',
+    })
+
+    await screen.findByText(/等待靜音時段/)
+    expect(screen.queryByText(/將在 07:00 UTC 之後送出/)).not.toBeInTheDocument()
+  })
+
+  it('送出去的還是送出去', async () => {
+    showLog({ ...base, status: 'sent', delivery_state: 'sent', error: null, next_retry_at: null })
+
+    expect(await screen.findByText('已送出')).toBeInTheDocument()
   })
 })

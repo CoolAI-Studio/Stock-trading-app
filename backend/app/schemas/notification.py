@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.models.enums import ChannelType
 from app.schemas.common import UtcDatetime
@@ -118,3 +118,23 @@ class NotificationLogRead(BaseModel):
     # receipt_token is deliberately NOT here: it is a bearer credential for one
     # confirmation, and a response the browser caches is the wrong place for it.
     delivered_at: UtcDatetime | None = None
+
+    # 「still coming」 or 「stopped」, decided by the model so the screen and the
+    # retry sweep cannot drift apart. See NotificationLog.delivery_state.
+    delivery_state: str
+    attempts: int
+    # When the next send is due. Present so the page can say 「08:12 再試」
+    # rather than only 「還在重試」 -- the owner reading this is deciding
+    # whether to go and open their broker app right now.
+    next_retry_at: UtcDatetime | None = None
+
+    @computed_field
+    @property
+    def max_attempts(self) -> int:
+        """「第 3 次」 means nothing without 「共 5 次」, and a 5 hard-coded into
+        the page is a second copy of the ladder waiting to drift."""
+        # Imported here rather than at module scope: retry pulls in the
+        # dispatcher, and the dispatcher pulls in schemas.
+        from app.services.notification.retry import MAX_ATTEMPTS
+
+        return MAX_ATTEMPTS
