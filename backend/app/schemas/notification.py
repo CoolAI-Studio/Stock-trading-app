@@ -88,6 +88,17 @@ class ChannelRead(BaseModel):
 class ChannelTestResult(BaseModel):
     ok: bool
     error: str | None = None
+    # Which log row to watch for a delivery receipt. `ok` only means the push
+    # service accepted the message -- RFC 8030 §5 says so in as many words --
+    # so the UI polls this row to find out whether the device ever confirmed
+    # displaying it.
+    log_id: int | None = None
+
+
+class PushReceipt(BaseModel):
+    """What the service worker posts back after it has shown a notification."""
+
+    token: str = Field(min_length=1, max_length=64)
 
 
 class NotificationLogRead(BaseModel):
@@ -100,3 +111,9 @@ class NotificationLogRead(BaseModel):
     status: str
     error: str | None
     created_at: UtcDatetime
+    # When the device confirmed it had displayed the notification, or null.
+    # `status == sent` only ever meant the push service accepted the message
+    # (RFC 8030 §5), which is a much weaker claim than it reads as.
+    # receipt_token is deliberately NOT here: it is a bearer credential for one
+    # confirmation, and a response the browser caches is the wrong place for it.
+    delivered_at: UtcDatetime | None = None

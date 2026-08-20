@@ -68,4 +68,23 @@ class NotificationLog(Base):
         DateTime(timezone=True), default=None, index=True
     )
 
+    # A single-use token carried inside the ENCRYPTED push payload, so the
+    # device can report back that it actually displayed the notification.
+    #
+    # Why this is safe to accept unauthenticated: RFC 8291 encrypts the payload
+    # end to end with keys only this subscription holds -- the push service
+    # itself cannot read it. So possession of the token IS proof that the
+    # intended device decrypted the message. Nobody else, including Apple, can
+    # forge a receipt.
+    #
+    # Cleared the moment it is used, so a replayed receipt does nothing.
+    receipt_token: Mapped[str | None] = mapped_column(
+        String(64), default=None, unique=True, index=True
+    )
+    # When the device said it had shown the notification. NULL means it never
+    # did -- which is the whole point: the push service accepting a message
+    # (RFC 8030 §5: "This does not indicate that the message was delivered to
+    # the user agent") was being reported to the owner as success.
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

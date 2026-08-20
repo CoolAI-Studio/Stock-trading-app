@@ -64,6 +64,7 @@ const LOG: NotificationLog = {
   status: 'sent',
   error: null,
   created_at: '2026-08-16T00:00:00Z',
+  delivered_at: null,
 }
 
 function renderPage() {
@@ -683,5 +684,89 @@ describe('刪除推播管道', () => {
 
     await waitFor(() => expect(api.delete).toHaveBeenCalled())
     expect(push.unsubscribeFromPush).not.toHaveBeenCalled()
+  })
+})
+
+// --- the test button has to tell the truth ----------------------------------
+//
+// It reported 已送出 whenever the push service returned 2xx. RFC 8030 §5 says
+// exactly what that means: "A 201 (Created) response indicates that the push
+// message was accepted... This does not indicate that the message was
+// delivered to the user agent." Apple returns 201 the moment it accepts a
+// message for later delivery, so the test passed with the phone switched off,
+// with notifications disabled for the web app, and with a subscription iOS had
+// already discarded. The one button whose whole job is to answer 「提醒到底會不
+// 會送到？」 answered yes when the answer was no.
+
+describe('測試按鈕的送達回報', () => {
+  const DEVICE_CHANNEL = { ...WEB_PUSH_CHANNEL, id: 2 }
+
+  function logRow(delivered: string | null) {
+    return {
+      id: 55,
+      channel_id: 2,
+      order_id: null,
+      event: 'test',
+      status: 'sent' as const,
+      error: null,
+      created_at: '2026-08-20T00:00:00Z',
+      delivered_at: delivered,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(platform.currentPushAvailability).mockReturnValue({ kind: 'ready' })
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [DEVICE_CHANNEL] as never
+      if (path === '/api/notifications/logs') return [] as never
+      if (path === '/api/notifications/logs/55') return logRow(null) as never
+      return [] as never
+    })
+    vi.mocked(api.post).mockResolvedValue({ ok: true, error: null, log_id: 55 } as never)
+  })
+
+  async function pressTest() {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('my-laptop')
+    await user.click(screen.getByRole('button', { name: '測試' }))
+  }
+
+  it('裝置回報收到了才說「已送達」', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels') return [DEVICE_CHANNEL] as never
+      if (path === '/api/notifications/logs') return [] as never
+      if (path === '/api/notifications/logs/55')
+        return logRow('2026-08-20T00:00:05Z') as never
+      return [] as never
+    })
+
+    await pressTest()
+
+    expect(await screen.findByText(/已送達/)).toBeInTheDocument()
+  })
+
+  it('推播服務收下了但裝置沒回報時，不能講成成功', async () => {
+    // The exact false pass this whole feature exists to remove.
+    await pressTest()
+
+    expect(await screen.findByText(/沒有回報/, {}, { timeout: 20000 })).toBeInTheDocument()
+  }, 30000)
+
+  it('沒回報時要列出可能的原因，不要只說失敗', async () => {
+    await pressTest()
+
+    const message = await screen.findByText(/沒有回報/, {}, { timeout: 20000 })
+    expect(message.textContent).toMatch(/通知|離線|失效/)
+  }, 30000)
+
+  it('送不出去時照舊講失敗，不要進入等待', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: false, error: 'HTTP 410', log_id: 56 } as never)
+
+    await pressTest()
+
+    expect(await screen.findByText(/失敗/)).toBeInTheDocument()
+    expect(api.get).not.toHaveBeenCalledWith('/api/notifications/logs/56')
   })
 })

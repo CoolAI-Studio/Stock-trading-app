@@ -215,6 +215,21 @@ export interface NotificationLog {
   status: 'sent' | 'failed'
   error: string | null
   created_at: string
+  /** When the device confirmed it displayed the notification, or null.
+   * `status: 'sent'` only ever meant the push service ACCEPTED the message --
+   * RFC 8030 §5 says a 2xx "does not indicate that the message was delivered
+   * to the user agent" -- which is a far weaker claim than it reads as. */
+  delivered_at: string | null
+}
+
+/** POST /api/notifications/channels/{id}/test.
+ *
+ * `ok` means the channel's transport accepted the message, nothing more. For
+ * web push, watch `log_id` for a delivery receipt from the device itself. */
+export interface ChannelTestResult {
+  ok: boolean
+  error: string | null
+  log_id: number | null
 }
 
 export interface BrokerCredential {

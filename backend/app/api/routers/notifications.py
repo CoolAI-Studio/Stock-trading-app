@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,7 @@ from app.schemas.notification import (
     EmailConfig,
     LineConfig,
     NotificationLogRead,
+    PushReceipt,
     TelegramConfig,
     WebPushConfig,
 )
@@ -155,8 +158,19 @@ def test_channel(
     channel = _get_owned_channel(db, user, channel_id)
     sender = SENDERS[channel.channel_type]
     test_message = "這是一則測試通知。看到這則訊息，代表這個管道可以送達。"
+
+    # Only web push can report back -- it is the only channel with a service
+    # worker on the other end. Minting a token for Telegram or email would
+    # leave the UI waiting for a confirmation that cannot arrive.
+    receipt_token = (
+        secrets.token_urlsafe(32) if channel.channel_type == ChannelType.WEB_PUSH else None
+    )
+
     try:
-        result = sender.send(channel.config_encrypted, test_message)
+        if receipt_token is not None:
+            result = sender.send(channel.config_encrypted, test_message, receipt_token)
+        else:
+            result = sender.send(channel.config_encrypted, test_message)
     except Exception as exc:  # noqa: BLE001 -- see below
         # The one button whose whole job is to tell the owner whether their
         # alerting works must never answer with a 500. An unhandled exception
@@ -164,20 +178,67 @@ def test_channel(
         # where the cause is the entire point.
         result = SendResult(ok=False, error=f"{type(exc).__name__}: {exc}"[:500])
 
-    db.add(
-        NotificationLog(
-            user_id=user.id,
-            channel_id=channel.id,
-            event="test",
-            status=NotificationStatus.SENT if result.ok else NotificationStatus.FAILED,
-            error=result.error,
-        )
+    log = NotificationLog(
+        user_id=user.id,
+        channel_id=channel.id,
+        event="test",
+        status=NotificationStatus.SENT if result.ok else NotificationStatus.FAILED,
+        error=result.error,
+        # A token on a send that never left would be redeemable by nothing.
+        receipt_token=receipt_token if result.ok else None,
     )
+    db.add(log)
     channel.last_sent_at = utcnow()
     channel.last_error = result.error
     db.commit()
+    db.refresh(log)
 
-    return ChannelTestResult(ok=result.ok, error=result.error)
+    # `ok` deliberately still means only "the push service accepted it" --
+    # RFC 8030 §5 says a 2xx "does not indicate that the message was delivered
+    # to the user agent". log_id is how the UI finds out what actually
+    # happened.
+    return ChannelTestResult(ok=result.ok, error=result.error, log_id=log.id)
+
+
+@router.post("/push/receipt", status_code=status.HTTP_204_NO_CONTENT)
+def push_receipt(payload: PushReceipt, db: Session = Depends(get_db)) -> Response:
+    """The service worker confirming it displayed a notification.
+
+    UNAUTHENTICATED ON PURPOSE. A service worker has no access to the app's
+    JWT, and it does not need one: RFC 8291 encrypts the push payload end to
+    end with keys only that subscription holds -- the push service itself
+    cannot read it -- so holding this token IS proof that the intended device
+    decrypted the message. Nobody else can forge a receipt, Apple included.
+
+    Always 204, whether or not the token matched. There is nothing the service
+    worker could do with a different answer, and saying "no such token" would
+    turn this into an oracle for guessing them.
+    """
+    log = db.query(NotificationLog).filter(NotificationLog.receipt_token == payload.token).first()
+    if log is not None and log.delivered_at is None:
+        log.delivered_at = utcnow()
+        # Single use: a captured receipt must not be replayable to make a
+        # later, undelivered alert look delivered.
+        log.receipt_token = None
+        db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/logs/{log_id}", response_model=NotificationLogRead)
+def get_log(
+    log_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_active_user)
+) -> NotificationLog:
+    """One row, so the UI can poll a specific send for its delivery receipt
+    rather than racing the whole log list."""
+    log = (
+        db.query(NotificationLog)
+        .filter(NotificationLog.id == log_id, NotificationLog.user_id == user.id)
+        .first()
+    )
+    if log is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log not found")
+    return log
 
 
 @router.get("/logs", response_model=list[NotificationLogRead])

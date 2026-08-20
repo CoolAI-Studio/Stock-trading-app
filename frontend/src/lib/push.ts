@@ -1,4 +1,14 @@
-const SW_URL = '/sw.js'
+/** The registration URL, carrying the API origin.
+ *
+ * public/sw.js is copied verbatim by Vite -- it is never compiled, so
+ * import.meta.env does not exist inside it and it has no other way to learn
+ * where the backend is. It needs that to post a delivery receipt back.
+ *
+ * The query string is part of the worker's identity: changing it registers a
+ * different worker, which is correct (a different backend IS a different
+ * worker) but means getRegistration() must be given the same URL.
+ */
+const SW_URL = `/sw.js?api=${encodeURIComponent(import.meta.env.VITE_API_BASE_URL ?? '')}`
 
 export interface PushSubscriptionConfig {
   endpoint: string

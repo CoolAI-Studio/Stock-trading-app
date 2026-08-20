@@ -10,7 +10,12 @@ import {
 } from '../lib/push'
 import { forgetPushChannel, rememberPushChannel } from '../lib/pushHealth'
 import { currentPushAvailability } from '../lib/platform'
-import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
+import type {
+  ChannelTestResult,
+  ChannelType,
+  NotificationChannel,
+  NotificationLog,
+} from '../lib/types'
 
 const STATUS_LABEL: Record<'sent' | 'failed', string> = { sent: '已送出', failed: '失敗' }
 
@@ -484,14 +489,68 @@ function EditChannelForm({ channel, onDone }: { channel: NotificationChannel; on
   )
 }
 
+// How long to wait for the device to confirm. Long enough for a phone to wake
+// on a slow connection, short enough that somebody standing at the screen gets
+// an answer. Silence after this is reported as silence -- never as success.
+const RECEIPT_WAIT_MS = 15000
+const RECEIPT_POLL_MS = 1000
+
+/** Polls one log row until the device confirms it displayed the notification.
+ *
+ * Returns false on timeout, and false is a real answer: it means the push
+ * service took the message and nothing on the device ever acknowledged it.
+ */
+async function waitForReceipt(logId: number): Promise<boolean> {
+  const deadline = Date.now() + RECEIPT_WAIT_MS
+  while (Date.now() < deadline) {
+    try {
+      const log = await api.get<NotificationLog>(`/api/notifications/logs/${logId}`)
+      if (log.delivered_at) return true
+    } catch {
+      // A dropped poll is not an answer. Keep trying until the deadline rather
+      // than reporting a failure the owner cannot act on.
+    }
+    await new Promise((resolve) => setTimeout(resolve, RECEIPT_POLL_MS))
+  }
+  return false
+}
+
 function ChannelRow({ channel }: { channel: NotificationChannel }) {
   const queryClient = useQueryClient()
   const [testResult, setTestResult] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
 
   const testMutation = useMutation({
-    mutationFn: () => api.post<{ ok: boolean; error: string | null }>(`/api/notifications/channels/${channel.id}/test`),
-    onSuccess: (result) => setTestResult(result.ok ? '已送出。' : `失敗：${result.error}`),
+    mutationFn: async () => {
+      const result = await api.post<ChannelTestResult>(
+        `/api/notifications/channels/${channel.id}/test`,
+      )
+      if (!result.ok) return { text: `失敗：${result.error}` }
+
+      // For every channel except web push, "the transport accepted it" is the
+      // most that can be known from here, and 已送出 says exactly that.
+      if (channel.channel_type !== 'web_push' || result.log_id === null) {
+        return { text: '已送出。' }
+      }
+
+      // For web push it is NOT enough. RFC 8030 §5: a 2xx "does not indicate
+      // that the message was delivered to the user agent". Apple returns 201
+      // the moment it accepts a message for later delivery, so this used to
+      // report success with the phone switched off, with notifications
+      // disabled for the web app, and with a subscription iOS had already
+      // discarded. The device itself posts a receipt back once it has
+      // displayed the notification; wait for that.
+      const delivered = await waitForReceipt(result.log_id)
+      return {
+        text: delivered
+          ? '已送達：這台裝置回報收到了。（這代表通知有顯示出來，不代表你已經看到。）'
+          : '推播服務收下了，但這台裝置沒有回報收到。可能是手機關掉了這個 app 的通知、' +
+            '目前離線，或這個訂閱已經失效 —— 先確認手機的通知設定，再把這個管道刪掉重建一次。',
+      }
+    },
+    onSuccess: (result) => setTestResult(result.text),
+    onError: (err) =>
+      setTestResult(`失敗：${err instanceof Error ? err.message : '無法送出測試通知'}`),
   })
 
   const deleteMutation = useMutation({

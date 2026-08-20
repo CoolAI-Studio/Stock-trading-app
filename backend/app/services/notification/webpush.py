@@ -42,7 +42,16 @@ class WebPushSender:
     # positive value regardless of provider.
     TTL_SECONDS = 3600
 
-    def send(self, config: dict, message: str) -> SendResult:
+    def send(self, config: dict, message: str, receipt_token: str | None = None) -> SendResult:
+        """`receipt_token` travels inside the encrypted payload so the service
+        worker can report back that it displayed the notification.
+
+        RFC 8030 §5 is explicit that a 2xx from the push service "does not
+        indicate that the message was delivered to the user agent", so without
+        this there is no way to tell a delivered alert from one the phone never
+        saw. Optional because the retry sweep re-sends alerts that were never
+        about confirming delivery.
+        """
         endpoint = config.get("endpoint")
         p256dh = config.get("p256dh")
         auth = config.get("auth")
@@ -53,10 +62,10 @@ class WebPushSender:
             return SendResult(ok=False, error="VAPID_PRIVATE_KEY is not configured")
 
         subscription_info = {"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}}
-        payload = json.dumps(
-            {"title": TITLE, "body": _fit(message)},
-            ensure_ascii=False,
-        )
+        body: dict[str, str] = {"title": TITLE, "body": _fit(message)}
+        if receipt_token:
+            body["receipt"] = receipt_token
+        payload = json.dumps(body, ensure_ascii=False)
         try:
             webpush(
                 subscription_info=subscription_info,

@@ -141,7 +141,10 @@ describe('subscribeToPush', () => {
   it('registers the service worker and returns the subscription config', async () => {
     const result = await subscribeToPush(VAPID)
 
-    expect(registerMock).toHaveBeenCalledWith('/sw.js')
+    // The api= query string is how the worker learns where the backend is:
+    // public/sw.js is copied verbatim by Vite, so import.meta.env does not
+    // exist inside it and it could not post a delivery receipt without this.
+    expect(registerMock).toHaveBeenCalledWith(expect.stringContaining('/sw.js?api='))
     expect(result).toEqual({
       endpoint: 'https://push.example.com/x',
       p256dh: 'p256dh-value',
@@ -213,7 +216,9 @@ describe('unsubscribeFromPush', () => {
 
     await unsubscribeFromPush()
 
-    expect(getRegistrationMock).toHaveBeenCalledWith('/sw.js')
+    // Same URL as register(), or it looks up a different worker and finds
+    // nothing to unsubscribe.
+    expect(getRegistrationMock).toHaveBeenCalledWith(expect.stringContaining('/sw.js?api='))
     expect(subscription.unsubscribe).toHaveBeenCalled()
   })
 
