@@ -19,6 +19,8 @@ legible afterwards instead of just quiet.
 """
 
 import logging
+import time
+from collections.abc import Callable
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
@@ -51,6 +53,20 @@ _MAX_AGE = timedelta(hours=6)
 # which is the same thread that checks stop-losses.
 _MAX_PER_SWEEP = 20
 
+# ...and a count is not a bound on time, which is what that sentence was
+# actually promising. Every sender here uses a 10 second network timeout, so
+# twenty rows that time out is 200 seconds inside one tick -- 200 seconds with
+# no price polled and no stop-loss checked. The sweep only runs when sends have
+# been failing, and a timeout is the commonest failure it exists to handle, so
+# that is the ordinary case rather than an exotic one.
+#
+# Comfortably above a full batch of healthy sends (twenty at a couple of
+# hundred milliseconds is a few seconds), so this never limits a sweep that is
+# going fine; the count cap still does that. Rows not reached keep their
+# past-due next_retry_at, which is already 「first in line next tick」 without
+# writing anything.
+_MAX_SWEEP_SEC = 20.0
+
 
 def schedule_first_retry(log: NotificationLog) -> None:
     """Called by the dispatcher when a first delivery fails."""
@@ -67,9 +83,14 @@ def _next_due(attempts: int):
     return utcnow() + timedelta(seconds=_BACKOFF_SEC[min(attempts - 1, len(_BACKOFF_SEC) - 1)])
 
 
-def retry_pending(db: Session) -> int:
-    """Send everything that is due. Returns how many got through this sweep."""
+def retry_pending(db: Session, clock: Callable[[], float] = time.monotonic) -> int:
+    """Send everything that is due, within a bounded slice of the tick.
+
+    Returns how many got through this sweep. `clock` is monotonic so a clock
+    correction on the host cannot end a sweep early or extend one forever.
+    """
     now = utcnow()
+    started_at = clock()
     due = (
         db.query(NotificationLog)
         .filter(
@@ -83,8 +104,25 @@ def retry_pending(db: Session) -> int:
     )
 
     delivered = 0
-    for log in due:
+    attempted = 0
+    for index, log in enumerate(due):
+        # Checked before each send rather than after, and never before the
+        # first: one send already costs more than a poll interval, so a budget
+        # that could veto the first attempt would let a queue sit untouched
+        # forever. Rows still in `due` are simply left as they are.
+        if attempted and (clock() - started_at) >= _MAX_SWEEP_SEC:
+            logger.warning(
+                "retry sweep cut short after %.1fs and %s sends; %s still due",
+                clock() - started_at,
+                attempted,
+                len(due) - index,
+            )
+            break
+
         if not _still_worth_sending(db, log, now):
+            # Deliberately not counted as an attempt: it costs a query, not a
+            # network round trip, and it clears the row's due time so it will
+            # not be seen again.
             continue
 
         # Same reason as in _still_worth_sending: a NULL channel_id means the
@@ -98,6 +136,7 @@ def retry_pending(db: Session) -> int:
             continue
 
         log.attempts += 1
+        attempted += 1
         try:
             result = sender.send(channel.config_encrypted, log.message)
         except Exception as exc:

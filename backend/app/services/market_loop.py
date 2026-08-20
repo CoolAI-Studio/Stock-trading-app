@@ -436,9 +436,11 @@ def tick_once(
 
         # Last, and deliberately inside the same try: a notification the owner
         # never received is this product's critical failure, so the sweep runs
-        # every poll rather than on a timer of its own. It is bounded (one
-        # indexed query, at most a handful of sends) so it cannot push the
-        # stop-loss checks above it off schedule.
+        # every poll rather than on a timer of its own. It is bounded by a
+        # wall-clock budget as well as a row count -- a count alone was not a
+        # bound on time, and twenty rows timing out at ten seconds each is
+        # three minutes of this thread not polling a price or checking a
+        # stop-loss (see notification/retry.py:_MAX_SWEEP_SEC).
         try:
             notification_retry.retry_pending(session)
             # Cheap: one indexed query, and it only does real work on the day a
