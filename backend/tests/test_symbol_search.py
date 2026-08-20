@@ -481,3 +481,78 @@ def test_every_result_carries_a_currency():
     for query in ["台積電", "2330", "AAPL", "輝達", "BTCUSDT"]:
         for match in search(query):
             assert match.currency, f"{query} -> {match.symbol} has no currency"
+
+
+# --- the name people actually use -------------------------------------------
+#
+# Three ways a real query returned nothing:
+#
+#   NICKNAMES. 「護國神山」 is 2330 to everyone in Taiwan and appears in no
+#   exchange registry, because registries carry legal names.
+#
+#   RENAMES. 2887 became 台新新光金 after the 2025 merger and 2883 became 凱基金,
+#   so somebody typing the name they have used for a decade is told the company
+#   does not exist. The registry is correct and current -- that is the problem:
+#   it only ever holds today's name.
+#
+#   CRYPTO. 「比特幣」 matched nothing at all; only BTCUSDT worked, which is the
+#   exchange's spelling, not anybody's.
+#
+# Kept as a reviewable list rather than fetched, because no machine-readable
+# source carries a nickname. Every target is pinned against the registry below,
+# so an alias pointing at a code that no longer lists fails here rather than in
+# somebody's watchlist.
+
+
+def test_a_nickname_finds_the_company():
+    assert "2330.TW" in _symbols("護國神山")
+
+
+def test_a_former_name_still_finds_the_company():
+    """2887 is 台新新光金 today. Somebody who has called it 台新金 since 2002 is
+    not wrong, and telling them it does not exist is the app's problem."""
+    assert "2887.TW" in _symbols("台新金")
+
+
+def test_the_other_rename_too():
+    assert "2883.TW" in _symbols("開發金")
+
+
+def test_the_current_name_keeps_working():
+    """Adding the old name must not displace the real one."""
+    assert "2887.TW" in _symbols("台新新光金")
+
+
+def test_a_spoken_long_form_finds_it():
+    assert "3045.TW" in _symbols("台灣大哥大")
+
+
+def test_crypto_has_chinese_names_too():
+    assert "BTCUSDT" in _symbols("比特幣")
+    assert "ETHUSDT" in _symbols("以太幣")
+
+
+def test_a_crypto_alias_is_labelled_as_crypto_with_its_quote_asset():
+    match = next(m for m in search("比特幣") if m.symbol == "BTCUSDT")
+
+    assert match.market == symbol_search.MARKET_CRYPTO
+    assert match.currency == "USDT"
+    assert match.data_source is DataSource.BINANCE
+
+
+def test_every_taiwanese_alias_points_at_a_code_that_still_lists():
+    """The check that keeps this list honest. An alias aimed at a delisted or
+    mistyped code would send somebody to a symbol that never prices, which is
+    the failure this whole module exists to prevent."""
+    codes = {row["code"] for row in symbol_search._listings()}
+
+    for alias, code in symbol_search.TW_ALIASES.items():
+        assert code in codes, f"{alias} -> {code} is not in the registry"
+
+
+def test_an_alias_result_says_which_company_it_landed_on():
+    """「護國神山」 has to come back as 台積電, or the owner cannot tell whether the
+    app understood them."""
+    match = next(m for m in search("護國神山") if m.symbol == "2330.TW")
+
+    assert match.name == "台積電"

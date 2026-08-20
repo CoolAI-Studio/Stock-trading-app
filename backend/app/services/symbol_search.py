@@ -59,6 +59,45 @@ _US_TICKER = re.compile(r"^[A-Z]{1,5}([.-][A-Z])?$")
 # Binance spot pairs. Quote assets this app actually deals in.
 _CRYPTO_PAIR = re.compile(r"^[A-Z0-9]{2,10}(USDT|USDC|BTC|ETH|TWD)$")
 
+# Names people use that no registry carries. Three kinds, all of which
+# returned nothing before this existed:
+#
+#   NICKNAMES -- 「護國神山」 is 2330 to everyone in Taiwan, and exchange
+#   registries hold legal names, not affectionate ones.
+#
+#   FORMER NAMES -- 2887 became 台新新光金 after the 2025 merger and 2883 became
+#   凱基金. The registry is correct and current, and that is precisely the
+#   problem: it only ever holds today's name, so somebody who has called it
+#   台新金 for twenty years is told the company does not exist.
+#
+#   SPOKEN LONG FORMS -- 台灣大哥大 is listed as 台灣大.
+#
+# Hand-curated because no machine-readable source carries a nickname. Kept
+# honest by a test that every target still appears in the registry: an alias
+# aimed at a delisted or mistyped code would send somebody to a symbol that
+# never prices, which is the failure this module exists to prevent.
+TW_ALIASES: dict[str, str] = {
+    "護國神山": "2330",
+    "台新金": "2887",  # renamed 台新新光金 in 2025
+    "開發金": "2883",  # renamed 凱基金
+    "中華開發": "2883",
+    "台灣大哥大": "3045",
+    "中國信託": "2891",
+    "台塑石化": "6505",
+    "鴻準": "2354",
+}
+
+# The exchange spells it BTCUSDT; nobody says that out loud.
+CRYPTO_ALIASES: dict[str, str] = {
+    "比特幣": "BTCUSDT",
+    "BTC": "BTCUSDT",
+    "以太幣": "ETHUSDT",
+    "乙太幣": "ETHUSDT",
+    "ETH": "ETHUSDT",
+    "狗狗幣": "DOGEUSDT",
+    "索拉納": "SOLUSDT",
+}
+
 MARKET_TW = "台股"
 MARKET_US = "美股"
 MARKET_CRYPTO = "加密貨幣"
@@ -266,8 +305,16 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
             )
         ]
 
+    # A nickname or a former name resolves to its code, and then the ordinary
+    # scoring takes over -- so 「護國神山」 comes back as 台積電, not as a bare
+    # number the owner has to recognise.
+    aliased = TW_ALIASES.get(text)
+
     scored: list[tuple[int, dict]] = []
     for row in _listings():
+        if aliased is not None and row.get("code") == aliased:
+            scored.append((0, row))
+            continue
         score = _score(row, text)
         if score is not None:
             scored.append((score, row))
@@ -316,6 +363,22 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
                 currency=currency_for(text, DataSource.YFINANCE),
             )
         )
+    pair = CRYPTO_ALIASES.get(text)
+    if pair and pair not in {m.symbol for m in matches}:
+        matches.insert(
+            0,
+            SymbolMatch(
+                symbol=pair,
+                name=text,
+                detail="Binance 交易對",
+                market=MARKET_CRYPTO,
+                data_source=DataSource.BINANCE,
+                # From a reviewed list rather than the shape of the input.
+                verified=True,
+                currency=currency_for(pair, DataSource.BINANCE),
+            ),
+        )
+
     if len(matches) < limit and _CRYPTO_PAIR.match(text):
         matches.append(
             SymbolMatch(

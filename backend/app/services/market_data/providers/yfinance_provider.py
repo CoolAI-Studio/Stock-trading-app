@@ -34,7 +34,6 @@ class YFinanceProvider:
         if not symbols:
             return {}
 
-        now = datetime.now(UTC)
         quotes: dict[str, Quote] = {}
         for symbol in symbols:
             try:
@@ -79,7 +78,16 @@ class YFinanceProvider:
                 price=price_dec,
                 prev_close=prev_close_dec,
                 change_pct=change_pct,
-                quote_time=now,
+                # NOT datetime.now(). fast_info carries no temporal field at
+                # all -- currency, day_high, last_price and so on, nothing
+                # about when the trade happened -- and filling it with our own
+                # clock made every price look current, including the final
+                # close of a stock delisted years ago. `quote_time` is the one
+                # field built to reveal staleness (see schemas/position.py),
+                # and a fabricated value guaranteed it never could.
+                # `fetched_at` has always recorded when WE asked, and
+                # positions.py already falls back to it.
+                quote_time=None,
                 currency=currency,
             )
         return quotes

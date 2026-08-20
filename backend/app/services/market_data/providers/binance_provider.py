@@ -27,7 +27,6 @@ class BinanceProvider:
     data_source = DataSource.BINANCE
 
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
-        now = datetime.now(UTC)
         quotes: dict[str, Quote] = {}
         with httpx.Client(timeout=10.0) as http_client:
             for symbol in symbols:
@@ -38,6 +37,12 @@ class BinanceProvider:
                     price_dec = Decimal(str(data["lastPrice"]))
                 except (httpx.HTTPError, KeyError, InvalidOperation, ValueError):
                     continue
+
+                # The exchange's own answer to "when was this". Unlike
+                # yfinance's fast_info, Binance supplies one -- so this is the
+                # provider that can actually populate the staleness field
+                # rather than stamping our clock on it.
+                closed_at = _close_time(data.get("closeTime"))
 
                 prev_close_dec = self._safe_decimal(data.get("prevClosePrice"))
                 change_pct = self._safe_decimal(data.get("priceChangePercent"))
@@ -50,7 +55,7 @@ class BinanceProvider:
                     prev_close=prev_close_dec,
                     change_pct=change_pct,
                     volume=volume_dec,
-                    quote_time=now,
+                    quote_time=closed_at,
                     # The quote asset is literally the tail of the pair's own
                     # name, so this is reading the symbol rather than guessing.
                     currency=currency_for(symbol, self.data_source),
@@ -103,3 +108,16 @@ class BinanceProvider:
             return Decimal(str(value))
         except InvalidOperation:
             return None
+
+
+def _close_time(raw: object) -> datetime | None:
+    """Binance's millisecond epoch, or None.
+
+    None rather than our own clock when it is missing or malformed: an absent
+    answer is honest, and a wrong one hides exactly what this field exists to
+    show. One bad field must not cost the price alongside it.
+    """
+    try:
+        return datetime.fromtimestamp(int(raw) / 1000, tz=UTC)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
