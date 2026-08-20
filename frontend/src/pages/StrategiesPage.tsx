@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
+import { SymbolInput } from '../components/SymbolInput'
 import { Pager } from '../components/Pager'
 import { StrategyScorecard } from '../components/StrategyScorecard'
 import { ExportButton } from '../components/ExportButton'
@@ -475,17 +476,12 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
-      <div>
-        <label htmlFor={`edit-strategy-symbol-${strategy.id}`} className="text-sm text-slate-400">
-          股票代號
-        </label>
-        <input
-          id={`edit-strategy-symbol-${strategy.id}`}
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
-        />
-      </div>
+      <SymbolInput
+        id={`edit-strategy-symbol-${strategy.id}`}
+        label="股票代號"
+        value={symbol}
+        onChange={setSymbol}
+      />
       <TradingFields
         idPrefix={`edit-strategy-${strategy.id}`}
         quantity={quantity}
@@ -877,17 +873,9 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
         />
       </div>
-      <div>
-        <label htmlFor="strategy-symbol" className="text-sm text-slate-400">
-          股票代號
-        </label>
-        <input
-          id="strategy-symbol"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1"
-        />
-      </div>
+      {/* A strategy is what actually produces alerts, so a symbol that cannot
+          price here is a strategy that runs forever and never fires. */}
+      <SymbolInput id="strategy-symbol" label="股票代號" value={symbol} onChange={setSymbol} />
       <TradingFields
         idPrefix="strategy"
         quantity={quantity}

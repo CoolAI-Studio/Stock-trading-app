@@ -20,6 +20,7 @@ from app.schemas.notification import (
     TelegramConfig,
     WebPushConfig,
 )
+from app.services.notification.base import SendResult
 from app.services.notification.dispatcher import SENDERS
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -63,6 +64,8 @@ def _validate_config(channel_type: ChannelType, config: dict) -> dict:
 def _to_read(channel: NotificationChannel) -> ChannelRead:
     read = ChannelRead.model_validate(channel)
     read.config_preview = _preview(channel.channel_type, channel.config_encrypted)
+    if channel.channel_type == ChannelType.WEB_PUSH:
+        read.push_endpoint = (channel.config_encrypted or {}).get("endpoint")
     return read
 
 
@@ -151,8 +154,15 @@ def test_channel(
 ) -> ChannelTestResult:
     channel = _get_owned_channel(db, user, channel_id)
     sender = SENDERS[channel.channel_type]
-    test_message = "This is a test notification from your trading app."
-    result = sender.send(channel.config_encrypted, test_message)
+    test_message = "這是一則測試通知。看到這則訊息，代表這個管道可以送達。"
+    try:
+        result = sender.send(channel.config_encrypted, test_message)
+    except Exception as exc:  # noqa: BLE001 -- see below
+        # The one button whose whole job is to tell the owner whether their
+        # alerting works must never answer with a 500. An unhandled exception
+        # here rendered as a bare "失敗（500）" with no cause, on the screen
+        # where the cause is the entire point.
+        result = SendResult(ok=False, error=f"{type(exc).__name__}: {exc}"[:500])
 
     db.add(
         NotificationLog(

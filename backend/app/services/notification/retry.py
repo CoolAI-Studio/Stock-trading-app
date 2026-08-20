@@ -173,10 +173,28 @@ def _still_worth_sending(db: Session, log: NotificationLog, now) -> bool:
 
 
 # Codes that mean "this will never work again", as opposed to the timeouts and
-# 5xx that clear on their own. 404/410 is a push subscription the browser
-# rotated; 401/403 is a revoked token; 400 from Telegram is a chat id that no
-# longer resolves. Matched on the "HTTP <code>" prefix every sender now emits.
-_PERMANENT_CODES = ("HTTP 400", "HTTP 401", "HTTP 403", "HTTP 404", "HTTP 410")
+# 5xx that clear on their own. Matched on the "HTTP <code>" prefix every sender
+# now emits.
+#
+# THE SPLIT MATTERS, and getting it wrong destroyed working subscriptions. For
+# web push, 404 and 410 mean the DEVICE's subscription is gone -- recreating it
+# on the phone is exactly the right advice. But Apple answers 403
+# (VapidPkHashMismatch) and 400 (BadJwtToken) when the credentials THIS SERVER
+# signed with are wrong: a key pair that no longer matches, a malformed
+# subject. Both were lumped together, so a server-side misconfiguration
+# switched the channel off and told the owner to delete and re-create it on
+# their phone -- which cannot help, and throws away the one working part while
+# they try.
+_DEVICE_GONE_CODES = ("HTTP 404", "HTTP 410")
+# Wrong credentials on our side. Retrying cannot fix them either, so the
+# channel still stops; only the explanation differs.
+_SERVER_FAULT_CODES = ("HTTP 400", "HTTP 401", "HTTP 403")
+# The payload was too big for the push service. webpush.MAX_BODY_CHARS is the
+# belt; this is the braces, so an oversized alert is not retried five times in
+# silence and then dropped.
+_TOO_LARGE_CODES = ("HTTP 413",)
+
+_PERMANENT_CODES = _DEVICE_GONE_CODES + _SERVER_FAULT_CODES + _TOO_LARGE_CODES
 
 
 def _is_permanent(error: str | None) -> bool:
@@ -186,6 +204,20 @@ def _is_permanent(error: str | None) -> bool:
 def _permanent_explanation(channel_type: ChannelType, error: str) -> str:
     """What the owner should actually do. A raw status code is not that."""
     if channel_type == ChannelType.WEB_PUSH:
+        if error.startswith(_SERVER_FAULT_CODES):
+            return (
+                f"推播服務拒絕了伺服器的憑證（{error}），這個管道已自動停用。"
+                "這不是你的裝置的問題，重新建立推播管道也不會好 —— "
+                "是伺服器上的 VAPID 金鑰設定有問題（多半是 VAPID_PUBLIC_KEY 與 "
+                "VAPID_PRIVATE_KEY 不是同一對，或 VAPID_SUBJECT 不是合法的 "
+                "mailto: 位址）。請先修正伺服器設定，再重新啟用這個管道。"
+            )
+        if error.startswith(_TOO_LARGE_CODES):
+            return (
+                f"這則通知的內容太長，推播服務不收（{error}），這個管道已自動停用。"
+                "內容長度已經有上限保護，會出現這個錯誤通常代表推播服務的限制改了。"
+                "重新啟用即可，若持續發生請回報。"
+            )
         return (
             f"瀏覽器的推播訂閱已失效（{error}），這個管道已自動停用。"
             "請在這台裝置上刪除後重新建立推播管道。"

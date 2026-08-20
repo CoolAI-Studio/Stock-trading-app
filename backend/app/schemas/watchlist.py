@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import DataSource
 from app.schemas.common import UtcDatetime
+from app.services import symbol_search
 
 
 class WatchlistItemCreate(BaseModel):
@@ -11,11 +12,22 @@ class WatchlistItemCreate(BaseModel):
     @field_validator("symbol")
     @classmethod
     def _normalise(cls, value: str) -> str:
-        """Uppercased and trimmed, because that is what the providers expect
-        and a lowercase ticker silently resolves to nothing at all."""
-        cleaned = value.strip().upper()
+        """Trimmed, upper-cased, and refused outright when it cannot ever
+        produce a price.
+
+        The refusal is the important half. `.upper()` is a no-op on Chinese, so
+        「台積電」 used to sail through, get stored, and then be asked for on every
+        poll -- no quote, no row on the dashboard, no error anywhere, and no
+        alert from a watchlist entry that looked perfectly fine. A bare 「2330」
+        was worse: Yahoo resolves it to an unrelated Japanese OTC company, so
+        it priced, and the owner would have been watching the wrong stock.
+        """
+        cleaned = symbol_search.normalise(value)
         if not cleaned:
-            raise ValueError("symbol cannot be blank")
+            raise ValueError("請輸入股票代號。")
+        problem = symbol_search.looks_unpriceable(cleaned)
+        if problem:
+            raise ValueError(problem)
         return cleaned
 
 

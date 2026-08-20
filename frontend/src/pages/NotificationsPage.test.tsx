@@ -15,6 +15,7 @@ vi.mock('../lib/api', () => ({
 vi.mock('../lib/push', () => ({
   isPushSupported: vi.fn(() => true),
   requestPushPermission: vi.fn(async () => 'granted' as NotificationPermission),
+  currentSubscriptionEndpoint: vi.fn(async () => null as string | null),
   subscribeToPush: vi.fn(),
   unsubscribeFromPush: vi.fn(),
 }))
@@ -38,6 +39,7 @@ const CHANNEL: NotificationChannel = {
   last_sent_at: null,
   last_error: null,
   config_preview: 'telegram: bot_token=****abcd, chat_id=999',
+  push_endpoint: null,
 }
 
 const WEB_PUSH_CHANNEL: NotificationChannel = {
@@ -51,6 +53,7 @@ const WEB_PUSH_CHANNEL: NotificationChannel = {
   last_sent_at: null,
   last_error: null,
   config_preview: 'web_push: endpoint=https://push.example.com/x',
+  push_endpoint: 'https://push.example.com/x',
 }
 
 const LOG: NotificationLog = {
@@ -211,12 +214,15 @@ describe('NotificationsPage', () => {
     )
   })
 
-  it('unsubscribes the browser push subscription when deleting a web push channel', async () => {
+  it('unsubscribes the browser push subscription when the deleted row IS this device', async () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/notifications/channels') return [WEB_PUSH_CHANNEL] as never
       if (path === '/api/notifications/logs') return [] as never
       return [] as never
     })
+    // The row has to BE this device now; unsubscribing on any web_push row was
+    // the bug, because it disconnects whichever browser is doing the deleting.
+    vi.mocked(push.currentSubscriptionEndpoint).mockResolvedValue(WEB_PUSH_CHANNEL.push_endpoint)
     vi.mocked(api.delete).mockResolvedValue(undefined as never)
     const user = userEvent.setup()
     renderPage()
@@ -598,5 +604,84 @@ describe('推播權限的取得時機', () => {
 
     await waitFor(() => expect(push.subscribeToPush).toHaveBeenCalledWith('vapid-key'))
     expect(api.post).toHaveBeenCalled()
+  })
+})
+
+
+// --- deleting a push channel must not disconnect a different device ----------
+//
+// unsubscribeFromPush() acts on whatever subscription THIS browser holds. The
+// delete used to call it for any web_push row, so tidying a stale "iPhone" row
+// away from a laptop unsubscribed the laptop -- whose own row stayed in the
+// list looking perfectly healthy and never delivered again. It also ran before
+// the DELETE, so a failed request left the device disconnected with the row
+// still there.
+
+describe('刪除推播管道', () => {
+  const THIS_DEVICE = 'https://push.example.com/this-device'
+  const OTHER_DEVICE = 'https://push.example.com/other-device'
+
+  function channel(id: number, endpoint: string) {
+    return { ...WEB_PUSH_CHANNEL, id, label: `device-${id}`, push_endpoint: endpoint }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // DeleteButton guards with window.confirm, which jsdom does not implement.
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(platform.currentPushAvailability).mockReturnValue({ kind: 'ready' })
+    vi.mocked(push.currentSubscriptionEndpoint).mockResolvedValue(THIS_DEVICE)
+    vi.mocked(api.delete).mockResolvedValue(undefined as never)
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/notifications/channels')
+        return [channel(1, THIS_DEVICE), channel(2, OTHER_DEVICE)] as never
+      return [] as never
+    })
+  })
+
+  async function remove(label: string) {
+    const user = userEvent.setup()
+    renderPage()
+    const row = (await screen.findByText(label)).closest('tr') as HTMLElement
+    await user.click(within(row).getByRole('button', { name: '刪除' }))
+  }
+
+  it('刪掉別台裝置的管道時，不要動到自己這台的訂閱', async () => {
+    await remove('device-2')
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/notifications/channels/2'))
+    expect(push.unsubscribeFromPush).not.toHaveBeenCalled()
+  })
+
+  it('刪掉自己這台的管道時才解除訂閱', async () => {
+    await remove('device-1')
+
+    await waitFor(() => expect(push.unsubscribeFromPush).toHaveBeenCalled())
+  })
+
+  it('先刪伺服器上的資料，成功了才解除訂閱', async () => {
+    // Reversed, a failed DELETE leaves a row that looks healthy and can never
+    // deliver -- the worst of both outcomes.
+    const order: string[] = []
+    vi.mocked(api.delete).mockImplementation(async () => {
+      order.push('delete')
+      return undefined as never
+    })
+    vi.mocked(push.unsubscribeFromPush).mockImplementation(async () => {
+      order.push('unsubscribe')
+    })
+
+    await remove('device-1')
+
+    await waitFor(() => expect(order).toEqual(['delete', 'unsubscribe']))
+  })
+
+  it('伺服器刪除失敗就完全不要解除訂閱', async () => {
+    vi.mocked(api.delete).mockRejectedValue(new Error('nope'))
+
+    await remove('device-1')
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalled())
+    expect(push.unsubscribeFromPush).not.toHaveBeenCalled()
   })
 })

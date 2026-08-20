@@ -2,7 +2,12 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DeleteButton } from '../components/DeleteButton'
 import { ApiError, api } from '../lib/api'
-import { requestPushPermission, subscribeToPush, unsubscribeFromPush } from '../lib/push'
+import {
+  currentSubscriptionEndpoint,
+  requestPushPermission,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from '../lib/push'
 import { currentPushAvailability } from '../lib/platform'
 import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
 
@@ -490,8 +495,21 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      if (channel.channel_type === 'web_push') await unsubscribeFromPush()
-      return api.delete(`/api/notifications/channels/${channel.id}`)
+      // Whose subscription is this row? unsubscribeFromPush() can only act on
+      // the browser doing the asking, so deleting any web_push row used to
+      // disconnect THIS device -- tidy a stale iPhone row away from a laptop
+      // and the laptop stopped receiving, while its own row sat in the list
+      // looking healthy.
+      const mine =
+        channel.channel_type === 'web_push' &&
+        channel.push_endpoint !== null &&
+        channel.push_endpoint === (await currentSubscriptionEndpoint())
+
+      // Server first, deliberately. Unsubscribing before the row is gone means
+      // a failed DELETE leaves a channel that can never deliver and gives no
+      // sign of it -- the worst of both outcomes.
+      await api.delete(`/api/notifications/channels/${channel.id}`)
+      if (mine) await unsubscribeFromPush()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notification-channels'] }),
   })

@@ -64,6 +64,14 @@ def _session_for(symbol: str, data_source: DataSource) -> _Session | None:
     if upper.endswith((".TW", ".TWO")):
         return _TAIWAN
     if "." not in upper:
+        if upper.isdigit():
+            # An all-numeric symbol is a Taiwanese code that lost its suffix,
+            # never a US ticker. Treating it as US made it 閉市 for the entire
+            # Taiwan session, so a strategy on it never ran and its stop-loss
+            # was never checked -- during exactly the hours that mattered.
+            # Schema validation now refuses to store one of these at all; this
+            # is the defence for rows that predate that.
+            return _TAIWAN
         # Bare tickers are US listings by convention here; every other market
         # yfinance serves carries a suffix (.HK, .T, .L) this does not model,
         # and those fall through to "cannot tell".

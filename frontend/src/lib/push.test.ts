@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  currentSubscriptionEndpoint,
   isPushSupported,
   requestPushPermission,
   subscribeToPush,
@@ -23,15 +24,25 @@ import {
  * passed.
  */
 
-function mockSubscription(endpoint = 'https://push.example.com/x') {
+const VAPID = 'BCFiiE5pxNqJyHn6QEeewWKjMVfko4jbGnPX6kcmbZzyxnbdLjnQClrwCygjbO5f1zgjHx90FkiQKyaJE-hGYdI'
+const OTHER_VAPID = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U'
+
+/** The bytes a browser stores alongside a subscription, so a test can build one
+ * that either does or does not match the key being subscribed with. */
+function keyBytes(base64: string): Uint8Array {
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+  const raw = atob(padded.replace(/-/g, '+').replace(/_/g, '/'))
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0))
+}
+
+function mockSubscription(endpoint = 'https://push.example.com/x', vapid: string | null = VAPID) {
   return {
     endpoint,
+    options: vapid === null ? {} : { applicationServerKey: keyBytes(vapid).buffer },
     toJSON: () => ({ endpoint, keys: { p256dh: 'p256dh-value', auth: 'auth-value' } }),
     unsubscribe: vi.fn().mockResolvedValue(true),
   }
 }
-
-const VAPID = 'BCFiiE5pxNqJyHn6QEeewWKjMVfko4jbGnPX6kcmbZzyxnbdLjnQClrwCygjbO5f1zgjHx90FkiQKyaJE-hGYdI'
 
 describe('isPushSupported', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -209,5 +220,106 @@ describe('unsubscribeFromPush', () => {
   it('does nothing when push is unsupported', async () => {
     vi.stubGlobal('navigator', {})
     await expect(unsubscribeFromPush()).resolves.toBeUndefined()
+  })
+})
+
+
+// --- a rotated or mismatched VAPID key ---------------------------------------
+//
+// The browser stores the applicationServerKey with the subscription and will
+// not change it. Reusing whatever subscription exists -- without checking that
+// key -- means that after the server's VAPID pair is ever regenerated, Apple
+// answers 403 VapidPkHashMismatch to every push, forever, and no amount of
+// pressing 建立 in the app produces a working one. Silent and permanent.
+
+describe('subscribeToPush 與 VAPID 金鑰', () => {
+  let registerMock: ReturnType<typeof vi.fn>
+  let subscribeMock: ReturnType<typeof vi.fn>
+  let getSubscriptionMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    subscribeMock = vi.fn().mockResolvedValue(mockSubscription('https://push.example.com/fresh'))
+    getSubscriptionMock = vi.fn().mockResolvedValue(null)
+    registerMock = vi.fn().mockResolvedValue({
+      pushManager: { subscribe: subscribeMock, getSubscription: getSubscriptionMock },
+    })
+    vi.stubGlobal('navigator', {
+      serviceWorker: { register: registerMock, ready: Promise.resolve() },
+    })
+    vi.stubGlobal('window', { PushManager: {}, Notification: {} })
+    vi.stubGlobal('Notification', { permission: 'granted', requestPermission: vi.fn() })
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('沿用金鑰相同的既有訂閱', async () => {
+    getSubscriptionMock.mockResolvedValue(mockSubscription('https://push.example.com/kept', VAPID))
+
+    const result = await subscribeToPush(VAPID)
+
+    expect(subscribeMock).not.toHaveBeenCalled()
+    expect(result.endpoint).toBe('https://push.example.com/kept')
+  })
+
+  it('金鑰換過了就丟掉舊訂閱重新申請，否則永遠是 403', async () => {
+    const stale = mockSubscription('https://push.example.com/stale', OTHER_VAPID)
+    getSubscriptionMock.mockResolvedValue(stale)
+
+    const result = await subscribeToPush(VAPID)
+
+    expect(stale.unsubscribe).toHaveBeenCalled()
+    expect(subscribeMock).toHaveBeenCalled()
+    expect(result.endpoint).toBe('https://push.example.com/fresh')
+  })
+
+  it('看不到既有訂閱用的是哪把金鑰時，重新申請而不是賭它相同', async () => {
+    // Cannot confirm it matches. Re-subscribing costs one round trip; guessing
+    // wrong costs every future alert.
+    const unknown = mockSubscription('https://push.example.com/unknown', null)
+    getSubscriptionMock.mockResolvedValue(unknown)
+
+    await subscribeToPush(VAPID)
+
+    expect(subscribeMock).toHaveBeenCalled()
+  })
+})
+
+// --- which device am I? -------------------------------------------------------
+
+describe('currentSubscriptionEndpoint', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('回報這台瀏覽器目前的訂閱位址', async () => {
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: vi.fn().mockResolvedValue({
+          pushManager: {
+            getSubscription: vi.fn().mockResolvedValue(mockSubscription('https://push.example.com/me')),
+          },
+        }),
+      },
+    })
+    vi.stubGlobal('window', { PushManager: {}, Notification: {} })
+
+    await expect(currentSubscriptionEndpoint()).resolves.toBe('https://push.example.com/me')
+  })
+
+  it('沒有訂閱就回 null，不要拋例外', async () => {
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: vi.fn().mockResolvedValue({
+          pushManager: { getSubscription: vi.fn().mockResolvedValue(null) },
+        }),
+      },
+    })
+    vi.stubGlobal('window', { PushManager: {}, Notification: {} })
+
+    await expect(currentSubscriptionEndpoint()).resolves.toBeNull()
+  })
+
+  it('不支援推播的瀏覽器回 null', async () => {
+    vi.stubGlobal('navigator', {})
+    vi.stubGlobal('window', {})
+    await expect(currentSubscriptionEndpoint()).resolves.toBeNull()
   })
 })

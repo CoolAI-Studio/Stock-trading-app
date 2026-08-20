@@ -1,9 +1,10 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
+from app.services import symbol_search
 
 
 class StrategyRiskOverrides(BaseModel):
@@ -25,6 +26,25 @@ class StrategyRiskOverrides(BaseModel):
     alert_interval_sec: int | None = Field(default=None, ge=0)
 
 
+def _clean_symbol(value: str | None) -> str | None:
+    """Shared by create and update so the two cannot drift apart.
+
+    There was no normaliser at all here: whitespace and case were stored
+    verbatim, so 「 aapl 」 and 「AAPL」 became two different strategies polling
+    two different (one non-existent) symbols. And 「台積電」 was accepted, which
+    produced a strategy that ran forever and never saw a single price.
+    """
+    if value is None:
+        return None
+    cleaned = symbol_search.normalise(value)
+    if not cleaned:
+        raise ValueError("請輸入股票代號。")
+    problem = symbol_search.looks_unpriceable(cleaned)
+    if problem:
+        raise ValueError(problem)
+    return cleaned
+
+
 class StrategyCreate(StrategyRiskOverrides):
     name: str = Field(min_length=1, max_length=120)
     symbol: str = Field(min_length=1, max_length=32)
@@ -33,6 +53,11 @@ class StrategyCreate(StrategyRiskOverrides):
     default_quantity: Decimal = Decimal(1)
     warmup_bars: int = Field(default=30, ge=0)
     alert_only: bool = False
+
+    @field_validator("symbol")
+    @classmethod
+    def _check_symbol(cls, value: str) -> str:
+        return _clean_symbol(value) or value
 
 
 class StrategyUpdate(StrategyRiskOverrides):
@@ -43,6 +68,11 @@ class StrategyUpdate(StrategyRiskOverrides):
     default_quantity: Decimal | None = None
     warmup_bars: int | None = Field(default=None, ge=0)
     alert_only: bool | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def _check_symbol(cls, value: str | None) -> str | None:
+        return _clean_symbol(value)
 
 
 class StrategyRead(BaseModel):

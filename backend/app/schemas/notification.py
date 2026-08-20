@@ -74,6 +74,15 @@ class ChannelRead(BaseModel):
     # part of this model, so there is no field a bug could accidentally
     # serialize a raw secret through.
     config_preview: str = ""
+    # web_push only, and populated by the router for the same reason. The
+    # endpoint is not a secret the way p256dh/auth are -- nothing can be
+    # delivered with it alone, since a push must be encrypted with those keys
+    # and signed with the server's VAPID pair -- and the browser needs it to
+    # answer one question it cannot otherwise answer: is this row THIS device?
+    # Without it, deleting a channel unsubscribed whichever browser happened
+    # to be doing the deleting, so tidying up a stale iPhone row from a laptop
+    # silently killed the laptop.
+    push_endpoint: str | None = None
 
 
 class ChannelTestResult(BaseModel):

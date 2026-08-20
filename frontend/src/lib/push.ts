@@ -72,16 +72,33 @@ export async function subscribeToPush(vapidPublicKey: string): Promise<PushSubsc
   const registration = await navigator.serviceWorker.register(SW_URL)
   await navigator.serviceWorker.ready
 
-  // Reuse whatever this device already has. Subscribing blind returns the same
-  // endpoint when the key matches, so a second channel created from one device
-  // would carry a duplicate endpoint -- and every alert would then arrive
-  // twice, which is how somebody starts ignoring them.
-  const existing = await registration.pushManager.getSubscription()
+  const wanted = urlBase64ToUint8Array(vapidPublicKey)
+
+  // Reuse whatever this device already has -- but only if it was created with
+  // the SAME server key.
+  //
+  // Reuse matters because subscribing blind hands back the existing endpoint
+  // anyway, so a second channel made on one device would carry a duplicate
+  // endpoint and every alert would arrive twice, which is how somebody starts
+  // ignoring them.
+  //
+  // Checking the key matters more. The browser stores applicationServerKey
+  // with the subscription and never changes it, so once the server's VAPID
+  // pair is regenerated, an old subscription makes Apple answer 403
+  // VapidPkHashMismatch to every push -- forever, silently, with no way to
+  // recover from inside the app because pressing 建立 would just hand back the
+  // same dead subscription again.
+  let existing = await registration.pushManager.getSubscription()
+  if (existing && !usesKey(existing, wanted)) {
+    await existing.unsubscribe()
+    existing = null
+  }
+
   const subscription =
     existing ??
     (await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
+      applicationServerKey: wanted as BufferSource,
     }))
 
   const json = subscription.toJSON()
@@ -90,6 +107,30 @@ export async function subscribeToPush(vapidPublicKey: string): Promise<PushSubsc
     p256dh: json.keys?.p256dh ?? '',
     auth: json.keys?.auth ?? '',
   }
+}
+
+/** Whether an existing subscription was created with this exact server key.
+ *
+ * Returns false when the browser does not expose `options` -- re-subscribing
+ * costs one round trip, whereas guessing wrong costs every future alert. */
+function usesKey(subscription: PushSubscription, wanted: Uint8Array): boolean {
+  const actual = subscription.options?.applicationServerKey
+  if (!actual) return false
+  const bytes = new Uint8Array(actual as ArrayBuffer)
+  if (bytes.length !== wanted.length) return false
+  return bytes.every((byte, i) => byte === wanted[i])
+}
+
+/** The endpoint this browser is currently subscribed with, or null.
+ *
+ * Callers need it to tell "this device" from "some other device the account
+ * also has": deleting a channel used to unsubscribe whatever browser happened
+ * to be doing the deleting, which killed a working phone from a laptop. */
+export async function currentSubscriptionEndpoint(): Promise<string | null> {
+  if (!isPushSupported()) return null
+  const registration = await navigator.serviceWorker.getRegistration(SW_URL)
+  const subscription = await registration?.pushManager.getSubscription()
+  return subscription?.endpoint ?? null
 }
 
 export async function unsubscribeFromPush(): Promise<void> {

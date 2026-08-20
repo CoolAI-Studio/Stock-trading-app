@@ -201,6 +201,10 @@ export interface NotificationChannel {
   last_sent_at: string | null
   last_error: string | null
   config_preview: string
+  /** web_push only. Not a secret on its own -- delivery also needs the
+   * subscription's p256dh/auth keys and the server's VAPID signature -- and it
+   * is the only way the browser can tell whether a row is THIS device. */
+  push_endpoint: string | null
 }
 
 export interface NotificationLog {
@@ -463,4 +467,29 @@ export interface Account {
   timezone: string
   last_login_at: string | null
   previous_login_at: string | null
+}
+
+/** One candidate from GET /api/symbols/search.
+ *
+ * `verified` carries the honesty: a Taiwanese listing came out of the
+ * exchanges' own registry, while a US ticker is inferred from the shape of
+ * what was typed because there is no bundled table to check it against.
+ * Presenting both with equal confidence is how somebody ends up watching a
+ * symbol that will never price. */
+export interface SymbolMatch {
+  symbol: string
+  name: string
+  detail: string
+  market: string
+  data_source: DataSource
+  verified: boolean
+}
+
+export interface SymbolSearchResponse {
+  query: string
+  matches: SymbolMatch[]
+  /** When the bundled Taiwanese listing table was built. A company that listed
+   * after this date is legitimately absent -- a different problem from a typo,
+   * and it deserves a different message. */
+  listings_generated_at: string | null
 }
