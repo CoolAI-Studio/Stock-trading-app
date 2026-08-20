@@ -34,10 +34,22 @@ from pathlib import Path
 from app.models.enums import DataSource
 
 _DATA = Path(__file__).resolve().parent.parent / "data" / "tw_listings.json"
+# Chinese and common names for US-listed instruments. There is no registry to
+# fetch for these -- Yahoo's search answers HTTP 400 to any query containing
+# Chinese, and its quote endpoint answers 401 without a crumb -- so this is a
+# curated list. It is not a guess: scripts/refresh_us_aliases.py fetches every
+# ticker and writes the PROVIDER'S OWN name into the file, so a wrong entry is
+# visible in review and the owner always picks against a name the price feed
+# supplied rather than a claim this repo makes.
+_US_DATA = Path(__file__).resolve().parent.parent / "data" / "us_aliases.json"
 
 # What a Taiwanese stock code looks like, with or without its board suffix.
-_TW_CODE = re.compile(r"^\d{4,6}$")
-_TW_QUALIFIED = re.compile(r"^(\d{4,6})\.(TW|TWO)$", re.IGNORECASE)
+# The optional trailing letter is the ETF class marker -- 00631L is 元大台灣50
+# 正2, 00632R is the inverse. Without it here, looks_unpriceable() waved a bare
+# 00632R through as if it might price, and it became a watchlist row that could
+# never fire.
+_TW_CODE = re.compile(r"^\d{4,6}[A-Z]?$")
+_TW_QUALIFIED = re.compile(r"^(\d{4,6}[A-Z]?)\.(TW|TWO)$", re.IGNORECASE)
 # Yahoo's US tickers: letters, sometimes a dot or hyphen class marker
 # (BRK.B, BF-B). Deliberately narrow -- anything else is not offered as a US
 # guess, because offering a wrong market is how somebody ends up watching the
@@ -85,6 +97,51 @@ def _listings() -> list[dict]:
         return rows if isinstance(rows, list) else []
     except (OSError, json.JSONDecodeError, AttributeError):
         return []
+
+
+@lru_cache(maxsize=1)
+def _us_aliases() -> list[dict]:
+    """The bundled US name table, read once. Absent means the search simply
+    loses Chinese names for US stocks -- never an error on the page somebody is
+    using to add one."""
+    try:
+        payload = json.loads(_US_DATA.read_text(encoding="utf-8"))
+        rows = payload.get("entries", [])
+        return rows if isinstance(rows, list) else []
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return []
+
+
+def _us_match(entry: dict) -> SymbolMatch:
+    return SymbolMatch(
+        symbol=entry["symbol"],
+        name=entry["symbol"],
+        # The provider's own name, fetched when the table was built. This is
+        # the line that lets the owner tell 台積電 from 台積電ADR, or GOOGL from
+        # GOOG -- both price, and only the name says which is which.
+        detail=entry.get("name", ""),
+        market=MARKET_US,
+        data_source=DataSource.YFINANCE,
+        # Checked against the live feed at build time and reviewed, unlike a
+        # bare ticker inferred from its shape.
+        verified=True,
+    )
+
+
+def _us_score(entry: dict, query: str) -> int | None:
+    """Lower is better; None is no match. Ranked below the Taiwanese hits on
+    purpose -- 台積電 is a Taiwanese company first, and a dropdown read on a
+    phone is decided by what is at the top."""
+    if query == entry["symbol"]:
+        return 0
+    aliases = entry.get("aliases", [])
+    if query in aliases:
+        return 1
+    if any(query in alias for alias in aliases):
+        return 2
+    if query and query.upper() in entry.get("name", "").upper():
+        return 3
+    return None
 
 
 def listings_generated_at() -> str | None:
@@ -187,10 +244,22 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
 
     matches = [_tw_match(row) for _score_, row in scored[:limit]]
 
+    # US listings we have a reviewed name for. Ranked after the Taiwanese hits
+    # so a Taiwanese company never gets pushed down by an alias.
+    us_scored = []
+    for entry in _us_aliases():
+        score = _us_score(entry, text)
+        if score is not None:
+            us_scored.append((score, entry))
+    us_scored.sort(key=lambda pair: (pair[0], pair[1]["symbol"]))
+    known_us = {entry["symbol"] for _s, entry in us_scored}
+    matches.extend(_us_match(entry) for _s, entry in us_scored[: limit - len(matches)])
+
     # A bare code is unambiguous within the markets this app supports, but a
-    # US ticker is not something the table can confirm. Offered separately and
-    # marked unverified rather than mixed in as if it were looked up.
-    if len(matches) < limit and _US_TICKER.match(text):
+    # US ticker we have no entry for is not something any table can confirm.
+    # Offered separately and marked unverified rather than mixed in as if it
+    # had been looked up.
+    if len(matches) < limit and text not in known_us and _US_TICKER.match(text):
         matches.append(
             SymbolMatch(
                 symbol=text,

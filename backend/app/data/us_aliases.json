@@ -1,0 +1,393 @@
+{
+ "generated_at": "2026-08-20",
+ "note": "手動整理的中文／俗名對照，每一筆的 name 欄位是建表時由行情來源回傳的，不是人寫的 —— 覆核時請看 name 是否真的是 aliases 指的那家公司。",
+ "entries": [
+  {
+   "symbol": "AAPL",
+   "name": "Apple Inc.",
+   "aliases": [
+    "蘋果",
+    "蘋果公司"
+   ]
+  },
+  {
+   "symbol": "ADBE",
+   "name": "Adobe Inc.",
+   "aliases": [
+    "奧多比"
+   ]
+  },
+  {
+   "symbol": "AMAT",
+   "name": "Applied Materials, Inc.",
+   "aliases": [
+    "應用材料"
+   ]
+  },
+  {
+   "symbol": "AMD",
+   "name": "Advanced Micro Devices, Inc.",
+   "aliases": [
+    "超微",
+    "超微半導體"
+   ]
+  },
+  {
+   "symbol": "AMZN",
+   "name": "Amazon.com, Inc.",
+   "aliases": [
+    "亞馬遜"
+   ]
+  },
+  {
+   "symbol": "ARM",
+   "name": "Arm Holdings plc",
+   "aliases": [
+    "安謀"
+   ]
+  },
+  {
+   "symbol": "ASML",
+   "name": "ASML Holding N.V. - New York Re",
+   "aliases": [
+    "艾司摩爾",
+    "阿斯麥"
+   ]
+  },
+  {
+   "symbol": "ASX",
+   "name": "ASE Technology Holding Co., Ltd",
+   "aliases": [
+    "日月光ADR"
+   ]
+  },
+  {
+   "symbol": "AVGO",
+   "name": "Broadcom Inc.",
+   "aliases": [
+    "博通"
+   ]
+  },
+  {
+   "symbol": "BA",
+   "name": "Boeing Company (The)",
+   "aliases": [
+    "波音"
+   ]
+  },
+  {
+   "symbol": "BAC",
+   "name": "Bank of America Corporation",
+   "aliases": [
+    "美國銀行"
+   ]
+  },
+  {
+   "symbol": "BRK-B",
+   "name": "Berkshire Hathaway Inc. New",
+   "aliases": [
+    "波克夏",
+    "巴菲特"
+   ]
+  },
+  {
+   "symbol": "CHT",
+   "name": "Chunghwa Telecom Co., Ltd.",
+   "aliases": [
+    "中華電ADR"
+   ]
+  },
+  {
+   "symbol": "COST",
+   "name": "Costco Wholesale Corporation",
+   "aliases": [
+    "好市多"
+   ]
+  },
+  {
+   "symbol": "CRM",
+   "name": "Salesforce, Inc.",
+   "aliases": [
+    "賽富時"
+   ]
+  },
+  {
+   "symbol": "CVX",
+   "name": "Chevron Corporation",
+   "aliases": [
+    "雪佛龍"
+   ]
+  },
+  {
+   "symbol": "DIS",
+   "name": "Walt Disney Company (The)",
+   "aliases": [
+    "迪士尼"
+   ]
+  },
+  {
+   "symbol": "GOOGL",
+   "name": "Alphabet Inc.",
+   "aliases": [
+    "谷歌",
+    "字母",
+    "Alphabet"
+   ]
+  },
+  {
+   "symbol": "INTC",
+   "name": "Intel Corporation",
+   "aliases": [
+    "英特爾"
+   ]
+  },
+  {
+   "symbol": "JNJ",
+   "name": "Johnson & Johnson",
+   "aliases": [
+    "嬌生"
+   ]
+  },
+  {
+   "symbol": "JPM",
+   "name": "JP Morgan Chase & Co.",
+   "aliases": [
+    "摩根大通"
+   ]
+  },
+  {
+   "symbol": "KO",
+   "name": "Coca-Cola Company (The)",
+   "aliases": [
+    "可口可樂"
+   ]
+  },
+  {
+   "symbol": "LLY",
+   "name": "Eli Lilly and Company",
+   "aliases": [
+    "禮來"
+   ]
+  },
+  {
+   "symbol": "MA",
+   "name": "Mastercard Incorporated",
+   "aliases": [
+    "萬事達卡"
+   ]
+  },
+  {
+   "symbol": "MCD",
+   "name": "McDonald's Corporation",
+   "aliases": [
+    "麥當勞"
+   ]
+  },
+  {
+   "symbol": "META",
+   "name": "Meta Platforms, Inc.",
+   "aliases": [
+    "臉書",
+    "Meta"
+   ]
+  },
+  {
+   "symbol": "MSFT",
+   "name": "Microsoft Corporation",
+   "aliases": [
+    "微軟"
+   ]
+  },
+  {
+   "symbol": "MU",
+   "name": "Micron Technology, Inc.",
+   "aliases": [
+    "美光"
+   ]
+  },
+  {
+   "symbol": "NFLX",
+   "name": "Netflix, Inc.",
+   "aliases": [
+    "網飛"
+   ]
+  },
+  {
+   "symbol": "NKE",
+   "name": "Nike, Inc.",
+   "aliases": [
+    "耐吉",
+    "Nike"
+   ]
+  },
+  {
+   "symbol": "NVDA",
+   "name": "NVIDIA Corporation",
+   "aliases": [
+    "輝達",
+    "英偉達",
+    "輝達半導體"
+   ]
+  },
+  {
+   "symbol": "NVO",
+   "name": "Novo Nordisk A/S",
+   "aliases": [
+    "諾和諾德"
+   ]
+  },
+  {
+   "symbol": "ORCL",
+   "name": "Oracle Corporation",
+   "aliases": [
+    "甲骨文"
+   ]
+  },
+  {
+   "symbol": "PFE",
+   "name": "Pfizer, Inc.",
+   "aliases": [
+    "輝瑞"
+   ]
+  },
+  {
+   "symbol": "PLTR",
+   "name": "Palantir Technologies Inc.",
+   "aliases": [
+    "帕蘭泰爾"
+   ]
+  },
+  {
+   "symbol": "QCOM",
+   "name": "QUALCOMM Incorporated",
+   "aliases": [
+    "高通"
+   ]
+  },
+  {
+   "symbol": "QQQ",
+   "name": "Invesco QQQ Trust, Series 1",
+   "aliases": [
+    "納斯達克100",
+    "那斯達克100"
+   ]
+  },
+  {
+   "symbol": "SBUX",
+   "name": "Starbucks Corporation",
+   "aliases": [
+    "星巴克"
+   ]
+  },
+  {
+   "symbol": "SOXX",
+   "name": "iShares PHLX SOX Semiconductor",
+   "aliases": [
+    "費城半導體ETF"
+   ]
+  },
+  {
+   "symbol": "SPY",
+   "name": "State Street SPDR S&P 500 ETF T",
+   "aliases": [
+    "標普500",
+    "S&P500"
+   ]
+  },
+  {
+   "symbol": "TLT",
+   "name": "iShares 20+ Year Treasury Bond",
+   "aliases": [
+    "美債20年",
+    "20年期美債"
+   ]
+  },
+  {
+   "symbol": "TQQQ",
+   "name": "ProShares UltraPro QQQ",
+   "aliases": [
+    "三倍做多納斯達克"
+   ]
+  },
+  {
+   "symbol": "TSLA",
+   "name": "Tesla, Inc.",
+   "aliases": [
+    "特斯拉"
+   ]
+  },
+  {
+   "symbol": "TSM",
+   "name": "Taiwan Semiconductor Manufactur",
+   "aliases": [
+    "台積電ADR",
+    "台積電美股"
+   ]
+  },
+  {
+   "symbol": "TXN",
+   "name": "Texas Instruments Incorporated",
+   "aliases": [
+    "德州儀器"
+   ]
+  },
+  {
+   "symbol": "UMC",
+   "name": "United Microelectronics Corpora",
+   "aliases": [
+    "聯電ADR"
+   ]
+  },
+  {
+   "symbol": "UNH",
+   "name": "UnitedHealth Group Incorporated",
+   "aliases": [
+    "聯合健康"
+   ]
+  },
+  {
+   "symbol": "V",
+   "name": "Visa Inc.",
+   "aliases": [
+    "Visa",
+    "威士卡"
+   ]
+  },
+  {
+   "symbol": "VOO",
+   "name": "Vanguard S&P 500 ETF",
+   "aliases": [
+    "VOO",
+    "先鋒標普500"
+   ]
+  },
+  {
+   "symbol": "VT",
+   "name": "Vanguard Total World Stock Inde",
+   "aliases": [
+    "全世界股票"
+   ]
+  },
+  {
+   "symbol": "VTI",
+   "name": "Vanguard Morningstar Total Stoc",
+   "aliases": [
+    "全美股"
+   ]
+  },
+  {
+   "symbol": "WMT",
+   "name": "Walmart Inc.",
+   "aliases": [
+    "沃爾瑪"
+   ]
+  },
+  {
+   "symbol": "XOM",
+   "name": "ExxonMobil Holdings Corporation",
+   "aliases": [
+    "埃克森美孚"
+   ]
+  }
+ ]
+}

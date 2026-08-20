@@ -53,7 +53,11 @@ TPEX_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 # matched and nothing else did.
 TWSE_QUOTES_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 TPEX_QUOTES_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
-_ETF_CODE = re.compile(r"^00\d{2,4}$")
+# The trailing letter is not decoration: L is 正向槓桿, R is 反向, U/K are
+# futures-based or other structures. Written without it at first, this dropped
+# 94 tradable codes -- including 00631L and 00632R, two of the most traded ETFs
+# in Taiwan, and all ten 主動式 ETFs listed in 2025.
+_ETF_CODE = re.compile(r"^00\d{2,4}[A-Z]?$")
 
 # The two feeds carry the same information under different key names, which is
 # the only reason this mapping exists.

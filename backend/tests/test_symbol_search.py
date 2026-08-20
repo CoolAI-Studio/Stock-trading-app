@@ -95,13 +95,15 @@ def test_a_partial_chinese_name_still_finds_it():
     assert "2330.TW" in _symbols("台積")
 
 
-def test_a_us_ticker_is_offered_but_marked_as_unconfirmed():
-    """There is no bundled table for US listings, so this is a guess from the
-    shape of the input. Saying so is the difference between a suggestion and a
-    claim."""
-    matches = search("AAPL")
+def test_a_us_ticker_with_no_entry_is_offered_but_marked_as_unconfirmed():
+    """Written with AAPL originally, when there was no US table at all and
+    every US ticker was a guess from the shape of the input. AAPL is now in
+    app/data/us_aliases.json and genuinely confirmed, so the case this test is
+    about needs a ticker the table has never heard of. Saying "unconfirmed" is
+    still the difference between a suggestion and a claim."""
+    matches = search("ZZZZ")
 
-    assert matches[0].symbol == "AAPL"
+    assert matches[0].symbol == "ZZZZ"
     assert matches[0].verified is False
     assert matches[0].data_source is DataSource.YFINANCE
 
@@ -265,3 +267,146 @@ def test_a_strategy_cannot_be_created_on_a_company_name_either(auth_client):
     )
 
     assert resp.status_code == 422
+
+
+# --- US stocks by the name a Taiwanese investor uses ------------------------
+#
+# The TW registry comes from the exchanges' own data. For US listings there is
+# no equivalent to fetch: Yahoo's search answers HTTP 400 to any query with
+# Chinese in it, and its quote endpoint answers 401 without a crumb. So 「輝達」
+# and 「蘋果」 -- which is how the owner thinks of these companies -- returned
+# nothing at all, and the only way in was to already know the ticker.
+#
+# app/data/us_aliases.json is a hand-curated list, but nothing ships on that
+# assertion alone: scripts/refresh_us_aliases.py fetches every ticker and writes
+# the PROVIDER'S OWN name into the file, so a wrong entry is visible in review
+# and the owner always chooses against a name the price feed supplied.
+
+
+def test_a_chinese_name_finds_a_us_stock():
+    assert "NVDA" in _symbols("輝達")
+
+
+def test_both_names_in_daily_use_work():
+    """「輝達」 and 「英偉達」 are both current. Picking one would leave the other
+    person with nothing, which is the failure this whole feature is about."""
+    assert "NVDA" in _symbols("輝達")
+    assert "NVDA" in _symbols("英偉達")
+
+
+def test_the_result_carries_the_name_the_price_feed_gave():
+    """The owner has to be choosing against something the provider said, not
+    against a claim this repo makes about what 輝達 means."""
+    match = next(m for m in search("輝達") if m.symbol == "NVDA")
+
+    assert "NVIDIA" in match.detail, match.detail
+
+
+def test_a_us_alias_result_is_marked_verified():
+    """Unlike a bare ticker guessed from its shape, this one was checked
+    against the live feed when the table was built."""
+    match = next(m for m in search("蘋果") if m.symbol == "AAPL")
+
+    assert match.verified is True
+    assert match.market == symbol_search.MARKET_US
+
+
+def test_a_ticker_in_the_table_is_now_confirmed_rather_than_guessed():
+    """AAPL used to come back as an unverified shape-based guess. It is in the
+    table, so the app can say which company it is."""
+    match = search("AAPL")[0]
+
+    assert match.symbol == "AAPL"
+    assert match.verified is True
+    assert "Apple" in match.detail
+
+
+def test_a_ticker_outside_the_table_is_still_offered_but_unconfirmed():
+    """The table is deliberately small -- what people actually search for, not
+    the whole US market. Everything else must still work by ticker."""
+    match = search("ZZZZ")[0]
+
+    assert match.symbol == "ZZZZ"
+    assert match.verified is False
+
+
+def test_the_taiwanese_line_and_the_us_adr_are_both_offered_and_distinguishable():
+    """2317.TW is 246 TWD and HNHPF is 15 USD; both are Hon Hai and both price.
+    Where the app knows of two, it must show both with their markets rather
+    than pick -- 「台積電ADR」 is a different instrument from 台積電."""
+    tw = next(m for m in search("台積電") if m.symbol == "2330.TW")
+    us = next(m for m in search("台積電ADR") if m.symbol == "TSM")
+
+    assert tw.market == symbol_search.MARKET_TW
+    assert us.market == symbol_search.MARKET_US
+
+
+def test_a_taiwanese_name_does_not_get_buried_under_us_aliases():
+    """台積電 is a Taiwanese company first. Ordering matters more than
+    completeness in a dropdown somebody reads on a phone."""
+    assert _symbols("台積電")[0] == "2330.TW"
+
+
+def test_the_us_table_is_actually_bundled():
+    entries = symbol_search._us_aliases()
+
+    assert len(entries) > 40, f"only {len(entries)}; is app/data/us_aliases.json present?"
+    assert all(e.get("name") for e in entries), "every entry must carry the fetched name"
+
+
+def test_a_missing_us_table_degrades_instead_of_raising(monkeypatch, tmp_path):
+    symbol_search._us_aliases.cache_clear()
+    monkeypatch.setattr(symbol_search, "_US_DATA", tmp_path / "nope.json")
+    try:
+        assert symbol_search._us_aliases() == []
+        assert search("AAPL")[0].symbol == "AAPL"
+    finally:
+        symbol_search._us_aliases.cache_clear()
+
+
+# --- ETFs whose code carries a board letter ---------------------------------
+#
+# The ETF filter was written as ^00\d{2,4}$, which silently dropped 94 tradable
+# TWSE codes -- among them 元大台灣50正2 (00631L) and 元大台灣50反1 (00632R), two
+# of the most traded ETFs in Taiwan, and all ten 主動式 ETFs launched in 2025
+# (00400A-00410A).
+#
+# The compounding part is what made it dangerous rather than merely incomplete:
+# search() found nothing AND looks_unpriceable() waved the bare code through,
+# so the app accepted 00632R, stored it, and could never price it. A watchlist
+# row that looks perfectly healthy and never fires -- exactly what this module's
+# docstring says it exists to prevent.
+
+
+def test_a_leveraged_etf_is_in_the_table():
+    assert _symbols("00631L")[0] == "00631L.TW"
+
+
+def test_an_inverse_etf_is_in_the_table():
+    assert _symbols("00632R")[0] == "00632R.TW"
+
+
+def test_the_active_etfs_are_in_the_table():
+    """Ten of these listed in 2025 and the filter dropped every one."""
+    assert _symbols("00400A")[0] == "00400A.TW"
+
+
+def test_a_lettered_code_is_no_longer_waved_through_unpriceable():
+    """The bare form cannot price. Returning None here is what let it become a
+    watchlist row that never alerts."""
+    reason = symbol_search.looks_unpriceable("00632R")
+
+    assert reason
+    assert "00632R.TW" in reason, reason
+
+
+def test_the_qualified_lettered_symbol_is_accepted():
+    assert symbol_search.looks_unpriceable("00632R.TW") is None
+
+
+def test_a_lettered_code_normalises_and_resolves_from_a_webhook():
+    """{{ticker}} on a TWSE:00632R chart sends 「00632R」."""
+    symbol, note = symbol_search.resolve_incoming("00632r")
+
+    assert symbol == "00632R.TW"
+    assert note

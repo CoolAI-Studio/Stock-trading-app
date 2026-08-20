@@ -6,6 +6,76 @@
  },
  "listings": [
   {
+   "code": "00400A",
+   "symbol": "00400A.TW",
+   "short_name": "主動國泰動能高息",
+   "full_name": "主動國泰動能高息",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00401A",
+   "symbol": "00401A.TW",
+   "short_name": "主動摩根台灣鑫收",
+   "full_name": "主動摩根台灣鑫收",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00402A",
+   "symbol": "00402A.TW",
+   "short_name": "主動安聯美國科技",
+   "full_name": "主動安聯美國科技",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00403A",
+   "symbol": "00403A.TW",
+   "short_name": "主動統一升級50",
+   "full_name": "主動統一升級50",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00404A",
+   "symbol": "00404A.TW",
+   "short_name": "主動聯博動能50",
+   "full_name": "主動聯博動能50",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00405A",
+   "symbol": "00405A.TW",
+   "short_name": "主動富邦台灣龍耀",
+   "full_name": "主動富邦台灣龍耀",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00406A",
+   "symbol": "00406A.TW",
+   "short_name": "主動中信台灣收益",
+   "full_name": "主動中信台灣收益",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00407A",
+   "symbol": "00407A.TW",
+   "short_name": "主動凱基台灣",
+   "full_name": "主動凱基台灣",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00408A",
+   "symbol": "00408A.TW",
+   "short_name": "主動第一金優股息",
+   "full_name": "主動第一金優股息",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00410A",
+   "symbol": "00410A.TW",
+   "short_name": "主動永豐科技趨勢",
+   "full_name": "主動永豐科技趨勢",
+   "board": "上市 ETF"
+  },
+  {
    "code": "0050",
    "symbol": "0050.TW",
    "short_name": "元大台灣50",
@@ -111,10 +181,73 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00625K",
+   "symbol": "00625K.TW",
+   "short_name": "富邦上証+R",
+   "full_name": "富邦上証+R",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00631L",
+   "symbol": "00631L.TW",
+   "short_name": "元大台灣50正2",
+   "full_name": "元大台灣50正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00632R",
+   "symbol": "00632R.TW",
+   "short_name": "元大台灣50反1",
+   "full_name": "元大台灣50反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00633L",
+   "symbol": "00633L.TW",
+   "short_name": "富邦上証正2",
+   "full_name": "富邦上証正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00634R",
+   "symbol": "00634R.TW",
+   "short_name": "富邦上証反1",
+   "full_name": "富邦上証反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00635U",
+   "symbol": "00635U.TW",
+   "short_name": "期元大S&P黃金",
+   "full_name": "期元大S&P黃金",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00636",
    "symbol": "00636.TW",
    "short_name": "國泰中國A50",
    "full_name": "國泰中國A50",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00636K",
+   "symbol": "00636K.TW",
+   "short_name": "國泰中國A50+U",
+   "full_name": "國泰中國A50+U",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00637L",
+   "symbol": "00637L.TW",
+   "short_name": "元大滬深300正2",
+   "full_name": "元大滬深300正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00638R",
+   "symbol": "00638R.TW",
+   "short_name": "元大滬深300反1",
+   "full_name": "元大滬深300反1",
    "board": "上市 ETF"
   },
   {
@@ -125,10 +258,38 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00640L",
+   "symbol": "00640L.TW",
+   "short_name": "富邦日本正2",
+   "full_name": "富邦日本正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00641R",
+   "symbol": "00641R.TW",
+   "short_name": "富邦日本反1",
+   "full_name": "富邦日本反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00642U",
+   "symbol": "00642U.TW",
+   "short_name": "期元大S&P石油",
+   "full_name": "期元大S&P石油",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00643",
    "symbol": "00643.TW",
    "short_name": "群益深証中小",
    "full_name": "群益深証中小",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00643K",
+   "symbol": "00643K.TW",
+   "short_name": "群益深証中小+R",
+   "full_name": "群益深証中小+R",
    "board": "上市 ETF"
   },
   {
@@ -146,6 +307,34 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00647L",
+   "symbol": "00647L.TW",
+   "short_name": "元大S&P500正2",
+   "full_name": "元大S&P500正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00648R",
+   "symbol": "00648R.TW",
+   "short_name": "元大S&P500反1",
+   "full_name": "元大S&P500反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00650L",
+   "symbol": "00650L.TW",
+   "short_name": "復華香港正2",
+   "full_name": "復華香港正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00651R",
+   "symbol": "00651R.TW",
+   "short_name": "復華香港反1",
+   "full_name": "復華香港反1",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00652",
    "symbol": "00652.TW",
    "short_name": "富邦印度",
@@ -153,10 +342,45 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00653L",
+   "symbol": "00653L.TW",
+   "short_name": "富邦印度正2",
+   "full_name": "富邦印度正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00654R",
+   "symbol": "00654R.TW",
+   "short_name": "富邦印度反1",
+   "full_name": "富邦印度反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00655L",
+   "symbol": "00655L.TW",
+   "short_name": "國泰中國A50正2",
+   "full_name": "國泰中國A50正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00656R",
+   "symbol": "00656R.TW",
+   "short_name": "國泰中國A50反1",
+   "full_name": "國泰中國A50反1",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00657",
    "symbol": "00657.TW",
    "short_name": "國泰日經225",
    "full_name": "國泰日經225",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00657K",
+   "symbol": "00657K.TW",
+   "short_name": "國泰日經225+U",
+   "full_name": "國泰日經225+U",
    "board": "上市 ETF"
   },
   {
@@ -181,6 +405,34 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00663L",
+   "symbol": "00663L.TW",
+   "short_name": "國泰臺灣加權正2",
+   "full_name": "國泰臺灣加權正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00664R",
+   "symbol": "00664R.TW",
+   "short_name": "國泰臺灣加權反1",
+   "full_name": "國泰臺灣加權反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00665L",
+   "symbol": "00665L.TW",
+   "short_name": "富邦恒生國企正2",
+   "full_name": "富邦恒生國企正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00666R",
+   "symbol": "00666R.TW",
+   "short_name": "富邦恒生國企反1",
+   "full_name": "富邦恒生國企反1",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00668",
    "symbol": "00668.TW",
    "short_name": "國泰美國道瓊",
@@ -188,10 +440,150 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00668K",
+   "symbol": "00668K.TW",
+   "short_name": "國泰美國道瓊+U",
+   "full_name": "國泰美國道瓊+U",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00669R",
+   "symbol": "00669R.TW",
+   "short_name": "國泰美國道瓊反1",
+   "full_name": "國泰美國道瓊反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00670L",
+   "symbol": "00670L.TW",
+   "short_name": "富邦NASDAQ正2",
+   "full_name": "富邦NASDAQ正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00671R",
+   "symbol": "00671R.TW",
+   "short_name": "富邦NASDAQ反1",
+   "full_name": "富邦NASDAQ反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00673R",
+   "symbol": "00673R.TW",
+   "short_name": "期元大S&P原油反1",
+   "full_name": "期元大S&P原油反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00674R",
+   "symbol": "00674R.TW",
+   "short_name": "期元大S&P黃金反1",
+   "full_name": "期元大S&P黃金反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00675L",
+   "symbol": "00675L.TW",
+   "short_name": "富邦臺灣加權正2",
+   "full_name": "富邦臺灣加權正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00676R",
+   "symbol": "00676R.TW",
+   "short_name": "富邦臺灣加權反1",
+   "full_name": "富邦臺灣加權反1",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00678",
    "symbol": "00678.TW",
    "short_name": "群益那斯達克生技",
    "full_name": "群益那斯達克生技",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00679B",
+   "symbol": "00679B.TWO",
+   "short_name": "元大美債20年",
+   "full_name": "元大美債20年",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00680L",
+   "symbol": "00680L.TW",
+   "short_name": "元大美債20正2",
+   "full_name": "元大美債20正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00681R",
+   "symbol": "00681R.TW",
+   "short_name": "元大美債20反1",
+   "full_name": "元大美債20反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00682U",
+   "symbol": "00682U.TW",
+   "short_name": "期元大美元指數",
+   "full_name": "期元大美元指數",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00683L",
+   "symbol": "00683L.TW",
+   "short_name": "期元大美元指正2",
+   "full_name": "期元大美元指正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00684R",
+   "symbol": "00684R.TW",
+   "short_name": "期元大美元指反1",
+   "full_name": "期元大美元指反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00685L",
+   "symbol": "00685L.TW",
+   "short_name": "群益臺灣加權正2",
+   "full_name": "群益臺灣加權正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00686R",
+   "symbol": "00686R.TW",
+   "short_name": "群益臺灣加權反1",
+   "full_name": "群益臺灣加權反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00687B",
+   "symbol": "00687B.TWO",
+   "short_name": "國泰20年美債",
+   "full_name": "國泰20年美債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00687C",
+   "symbol": "00687C.TWO",
+   "short_name": "國泰20年美債+櫃U",
+   "full_name": "國泰20年美債+櫃U",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00688L",
+   "symbol": "00688L.TW",
+   "short_name": "國泰20年美債正2",
+   "full_name": "國泰20年美債正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00689R",
+   "symbol": "00689R.TW",
+   "short_name": "國泰20年美債反1",
+   "full_name": "國泰20年美債反1",
    "board": "上市 ETF"
   },
   {
@@ -207,6 +599,41 @@
    "short_name": "富邦公司治理",
    "full_name": "富邦公司治理",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00693U",
+   "symbol": "00693U.TW",
+   "short_name": "期街口S&P黃豆",
+   "full_name": "期街口S&P黃豆",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00694B",
+   "symbol": "00694B.TWO",
+   "short_name": "富邦美債1-3",
+   "full_name": "富邦美債1-3",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00695B",
+   "symbol": "00695B.TWO",
+   "short_name": "富邦美債7-10",
+   "full_name": "富邦美債7-10",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00696B",
+   "symbol": "00696B.TWO",
+   "short_name": "富邦美債20年",
+   "full_name": "富邦美債20年",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00697B",
+   "symbol": "00697B.TWO",
+   "short_name": "元大美債7-10",
+   "full_name": "元大美債7-10",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00700",
@@ -237,10 +664,45 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00706L",
+   "symbol": "00706L.TW",
+   "short_name": "期元大S&P日圓正2",
+   "full_name": "期元大S&P日圓正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00707R",
+   "symbol": "00707R.TW",
+   "short_name": "期元大S&P日圓反1",
+   "full_name": "期元大S&P日圓反1",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00708L",
+   "symbol": "00708L.TW",
+   "short_name": "期元大S&P黃金正2",
+   "full_name": "期元大S&P黃金正2",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00709",
    "symbol": "00709.TW",
    "short_name": "富邦歐洲",
    "full_name": "富邦歐洲",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00710B",
+   "symbol": "00710B.TW",
+   "short_name": "復華彭博非投等債",
+   "full_name": "復華彭博非投等債",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00711B",
+   "symbol": "00711B.TW",
+   "short_name": "復華彭博新興債",
+   "full_name": "復華彭博新興債",
    "board": "上市 ETF"
   },
   {
@@ -265,11 +727,74 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00715L",
+   "symbol": "00715L.TW",
+   "short_name": "期街口布蘭特正2",
+   "full_name": "期街口布蘭特正2",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00717",
    "symbol": "00717.TW",
    "short_name": "富邦美國特別股",
    "full_name": "富邦美國特別股",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00719B",
+   "symbol": "00719B.TWO",
+   "short_name": "元大美債1-3",
+   "full_name": "元大美債1-3",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00720B",
+   "symbol": "00720B.TWO",
+   "short_name": "元大投資級公司債",
+   "full_name": "元大投資級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00722B",
+   "symbol": "00722B.TWO",
+   "short_name": "群益投資級電信債",
+   "full_name": "群益投資級電信債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00723B",
+   "symbol": "00723B.TWO",
+   "short_name": "群益投資級科技債",
+   "full_name": "群益投資級科技債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00724B",
+   "symbol": "00724B.TWO",
+   "short_name": "群益投資級金融債",
+   "full_name": "群益投資級金融債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00725B",
+   "symbol": "00725B.TWO",
+   "short_name": "國泰投資級公司債",
+   "full_name": "國泰投資級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00726B",
+   "symbol": "00726B.TWO",
+   "short_name": "國泰新興投等債",
+   "full_name": "國泰新興投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00727B",
+   "symbol": "00727B.TWO",
+   "short_name": "國泰優選非投等債",
+   "full_name": "國泰優選非投等債",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00728",
@@ -300,6 +825,13 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00734B",
+   "symbol": "00734B.TWO",
+   "short_name": "台新JPM新興債",
+   "full_name": "台新JPM新興債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00735",
    "symbol": "00735.TW",
    "short_name": "國泰臺韓科技",
@@ -321,11 +853,60 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00738U",
+   "symbol": "00738U.TW",
+   "short_name": "期元大道瓊白銀",
+   "full_name": "期元大道瓊白銀",
+   "board": "上市 ETF"
+  },
+  {
    "code": "00739",
    "symbol": "00739.TW",
    "short_name": "元大MSCI A股",
    "full_name": "元大MSCI A股",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00740B",
+   "symbol": "00740B.TWO",
+   "short_name": "富邦全球投等債",
+   "full_name": "富邦全球投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00741B",
+   "symbol": "00741B.TWO",
+   "short_name": "富邦全球非投等債",
+   "full_name": "富邦全球非投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00746B",
+   "symbol": "00746B.TWO",
+   "short_name": "富邦A級公司債",
+   "full_name": "富邦A級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00749B",
+   "symbol": "00749B.TWO",
+   "short_name": "凱基新興債10+",
+   "full_name": "凱基新興債10+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00750B",
+   "symbol": "00750B.TWO",
+   "short_name": "凱基科技債10+",
+   "full_name": "凱基科技債10+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00751B",
+   "symbol": "00751B.TWO",
+   "short_name": "元大AAA至A公司債",
+   "full_name": "元大AAA至A公司債",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00752",
@@ -335,6 +916,34 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00753L",
+   "symbol": "00753L.TW",
+   "short_name": "中信中國50正2",
+   "full_name": "中信中國50正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00754B",
+   "symbol": "00754B.TWO",
+   "short_name": "群益AAA-AA公司債",
+   "full_name": "群益AAA-AA公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00755B",
+   "symbol": "00755B.TWO",
+   "short_name": "群益投資級公用債",
+   "full_name": "群益投資級公用債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00756B",
+   "symbol": "00756B.TWO",
+   "short_name": "群益投等新興公債",
+   "full_name": "群益投等新興公債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00757",
    "symbol": "00757.TW",
    "short_name": "統一FANG+",
@@ -342,11 +951,60 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00758B",
+   "symbol": "00758B.TWO",
+   "short_name": "復華能源債",
+   "full_name": "復華能源債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00759B",
+   "symbol": "00759B.TWO",
+   "short_name": "復華製藥債",
+   "full_name": "復華製藥債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00760B",
+   "symbol": "00760B.TWO",
+   "short_name": "復華新興企業債",
+   "full_name": "復華新興企業債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00761B",
+   "symbol": "00761B.TWO",
+   "short_name": "國泰A級公司債",
+   "full_name": "國泰A級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00762",
    "symbol": "00762.TW",
    "short_name": "元大全球AI",
    "full_name": "元大全球AI",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00763U",
+   "symbol": "00763U.TW",
+   "short_name": "期街口道瓊銅",
+   "full_name": "期街口道瓊銅",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00764B",
+   "symbol": "00764B.TWO",
+   "short_name": "群益25年美債",
+   "full_name": "群益25年美債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00768B",
+   "symbol": "00768B.TWO",
+   "short_name": "復華20年美債",
+   "full_name": "復華20年美債",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00770",
@@ -363,6 +1021,69 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00772B",
+   "symbol": "00772B.TWO",
+   "short_name": "中信高評級公司債",
+   "full_name": "中信高評級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00773B",
+   "symbol": "00773B.TWO",
+   "short_name": "中信優先金融債",
+   "full_name": "中信優先金融債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00775B",
+   "symbol": "00775B.TW",
+   "short_name": "台新投等債15+",
+   "full_name": "台新投等債15+",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00777B",
+   "symbol": "00777B.TWO",
+   "short_name": "凱基AAA至A公司債",
+   "full_name": "凱基AAA至A公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00778B",
+   "symbol": "00778B.TWO",
+   "short_name": "凱基金融債20+",
+   "full_name": "凱基金融債20+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00779B",
+   "symbol": "00779B.TWO",
+   "short_name": "凱基美債25+",
+   "full_name": "凱基美債25+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00780B",
+   "symbol": "00780B.TWO",
+   "short_name": "國泰A級金融債",
+   "full_name": "國泰A級金融債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00781B",
+   "symbol": "00781B.TWO",
+   "short_name": "國泰A級科技債",
+   "full_name": "國泰A級科技債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00782B",
+   "symbol": "00782B.TWO",
+   "short_name": "國泰A級公用債",
+   "full_name": "國泰A級公用債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00783",
    "symbol": "00783.TW",
    "short_name": "富邦中証500",
@@ -370,11 +1091,158 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00785B",
+   "symbol": "00785B.TWO",
+   "short_name": "富邦金融投等債",
+   "full_name": "富邦金融投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00786B",
+   "symbol": "00786B.TWO",
+   "short_name": "元大10年IG銀行債",
+   "full_name": "元大10年IG銀行債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00787B",
+   "symbol": "00787B.TWO",
+   "short_name": "元大10年IG醫療債",
+   "full_name": "元大10年IG醫療債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00788B",
+   "symbol": "00788B.TWO",
+   "short_name": "元大10年IG電能債",
+   "full_name": "元大10年IG電能債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00789B",
+   "symbol": "00789B.TWO",
+   "short_name": "復華公司債A3",
+   "full_name": "復華公司債A3",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00791B",
+   "symbol": "00791B.TWO",
+   "short_name": "復華信用債1-5",
+   "full_name": "復華信用債1-5",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00792B",
+   "symbol": "00792B.TWO",
+   "short_name": "群益A級公司債",
+   "full_name": "群益A級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00793B",
+   "symbol": "00793B.TWO",
+   "short_name": "群益AAA-A醫療債",
+   "full_name": "群益AAA-A醫療債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00795B",
+   "symbol": "00795B.TWO",
+   "short_name": "中信美國公債20年",
+   "full_name": "中信美國公債20年",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00799B",
+   "symbol": "00799B.TWO",
+   "short_name": "國泰A級醫療債",
+   "full_name": "國泰A級醫療債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00830",
    "symbol": "00830.TW",
    "short_name": "國泰費城半導體",
    "full_name": "國泰費城半導體",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00834B",
+   "symbol": "00834B.TWO",
+   "short_name": "第一金金融債10+",
+   "full_name": "第一金金融債10+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00836B",
+   "symbol": "00836B.TWO",
+   "short_name": "永豐10年A公司債",
+   "full_name": "永豐10年A公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00840B",
+   "symbol": "00840B.TWO",
+   "short_name": "凱基IG精選15+",
+   "full_name": "凱基IG精選15+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00841B",
+   "symbol": "00841B.TWO",
+   "short_name": "凱基AAA-AA公司債",
+   "full_name": "凱基AAA-AA公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00842B",
+   "symbol": "00842B.TWO",
+   "short_name": "台新美元銀行債",
+   "full_name": "台新美元銀行債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00844B",
+   "symbol": "00844B.TWO",
+   "short_name": "台新15年IG金融債",
+   "full_name": "台新15年IG金融債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00845B",
+   "symbol": "00845B.TWO",
+   "short_name": "富邦新興投等債",
+   "full_name": "富邦新興投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00846B",
+   "symbol": "00846B.TWO",
+   "short_name": "富邦歐洲銀行債",
+   "full_name": "富邦歐洲銀行債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00847B",
+   "symbol": "00847B.TWO",
+   "short_name": "中信美國市政債",
+   "full_name": "中信美國市政債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00848B",
+   "symbol": "00848B.TWO",
+   "short_name": "中信新興亞洲債",
+   "full_name": "中信新興亞洲債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00849B",
+   "symbol": "00849B.TWO",
+   "short_name": "中信EM主權債0-5",
+   "full_name": "中信EM主權債0-5",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00850",
@@ -391,10 +1259,52 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00852L",
+   "symbol": "00852L.TW",
+   "short_name": "國泰美國道瓊正2",
+   "full_name": "國泰美國道瓊正2",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00853B",
+   "symbol": "00853B.TWO",
+   "short_name": "統一美債10年Aa-A",
+   "full_name": "統一美債10年Aa-A",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00856B",
+   "symbol": "00856B.TWO",
+   "short_name": "永豐1-3年美公債",
+   "full_name": "永豐1-3年美公債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00857B",
+   "symbol": "00857B.TWO",
+   "short_name": "永豐20年美公債",
+   "full_name": "永豐20年美公債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00858",
    "symbol": "00858.TWO",
    "short_name": "永豐美國500大",
    "full_name": "永豐美國500大",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00859B",
+   "symbol": "00859B.TWO",
+   "short_name": "群益0-1年美債",
+   "full_name": "群益0-1年美債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00860B",
+   "symbol": "00860B.TWO",
+   "short_name": "群益1-5Y投資級債",
+   "full_name": "群益1-5Y投資級債",
    "board": "上櫃 ETF"
   },
   {
@@ -403,6 +1313,48 @@
    "short_name": "元大全球未來通訊",
    "full_name": "元大全球未來通訊",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00862B",
+   "symbol": "00862B.TWO",
+   "short_name": "中信投資級公司債",
+   "full_name": "中信投資級公司債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00863B",
+   "symbol": "00863B.TWO",
+   "short_name": "中信全球電信債",
+   "full_name": "中信全球電信債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00864B",
+   "symbol": "00864B.TWO",
+   "short_name": "中信美國公債0-1",
+   "full_name": "中信美國公債0-1",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00865B",
+   "symbol": "00865B.TW",
+   "short_name": "國泰US短期公債",
+   "full_name": "國泰US短期公債",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00867B",
+   "symbol": "00867B.TWO",
+   "short_name": "台新A-BBB電信債",
+   "full_name": "台新A-BBB電信債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00870B",
+   "symbol": "00870B.TWO",
+   "short_name": "元大15年EM主權債",
+   "full_name": "元大15年EM主權債",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00875",
@@ -447,6 +1399,13 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00884B",
+   "symbol": "00884B.TWO",
+   "short_name": "中信低碳新興債",
+   "full_name": "中信低碳新興債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00885",
    "symbol": "00885.TW",
    "short_name": "富邦越南",
@@ -472,6 +1431,13 @@
    "symbol": "00888.TWO",
    "short_name": "永豐台灣ESG",
    "full_name": "永豐台灣ESG",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00890B",
+   "symbol": "00890B.TWO",
+   "short_name": "凱基ESG BBB債15+",
+   "full_name": "凱基ESG BBB債15+",
    "board": "上櫃 ETF"
   },
   {
@@ -734,11 +1700,25 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00931B",
+   "symbol": "00931B.TWO",
+   "short_name": "統一美債20年",
+   "full_name": "統一美債20年",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00932",
    "symbol": "00932.TW",
    "short_name": "兆豐永續高息等權",
    "full_name": "兆豐永續高息等權",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00933B",
+   "symbol": "00933B.TWO",
+   "short_name": "國泰10Y+金融債",
+   "full_name": "國泰10Y+金融債",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00934",
@@ -760,6 +1740,13 @@
    "short_name": "台新永續高息中小",
    "full_name": "台新永續高息中小",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00937B",
+   "symbol": "00937B.TWO",
+   "short_name": "群益ESG投等債20+",
+   "full_name": "群益ESG投等債20+",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00938",
@@ -790,6 +1777,13 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00942B",
+   "symbol": "00942B.TWO",
+   "short_name": "台新美A公司債20+",
+   "full_name": "台新美A公司債20+",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00943",
    "symbol": "00943.TW",
    "short_name": "兆豐電子高息等權",
@@ -801,6 +1795,13 @@
    "symbol": "00944.TW",
    "short_name": "野村趨勢動能高息",
    "full_name": "野村趨勢動能高息",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00945B",
+   "symbol": "00945B.TW",
+   "short_name": "凱基美國非投等債",
+   "full_name": "凱基美國非投等債",
    "board": "上市 ETF"
   },
   {
@@ -818,11 +1819,25 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00948B",
+   "symbol": "00948B.TWO",
+   "short_name": "中信優息投資級債",
+   "full_name": "中信優息投資級債",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "00949",
    "symbol": "00949.TW",
    "short_name": "復華日本龍頭",
    "full_name": "復華日本龍頭",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00950B",
+   "symbol": "00950B.TWO",
+   "short_name": "凱基A級公司債",
+   "full_name": "凱基A級公司債",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00951",
@@ -836,6 +1851,13 @@
    "symbol": "00952.TW",
    "short_name": "凱基台灣AI50",
    "full_name": "凱基台灣AI50",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00953B",
+   "symbol": "00953B.TW",
+   "short_name": "群益優選非投等債",
+   "full_name": "群益優選非投等債",
    "board": "上市 ETF"
   },
   {
@@ -858,6 +1880,27 @@
    "short_name": "中信日經高股息",
    "full_name": "中信日經高股息",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00957B",
+   "symbol": "00957B.TWO",
+   "short_name": "兆豐US優選投等債",
+   "full_name": "兆豐US優選投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00958B",
+   "symbol": "00958B.TWO",
+   "short_name": "永豐ESG銀行債15+",
+   "full_name": "永豐ESG銀行債15+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00959B",
+   "symbol": "00959B.TWO",
+   "short_name": "大華投等美債15Y+",
+   "full_name": "大華投等美債15Y+",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00960",
@@ -900,6 +1943,41 @@
    "short_name": "元大航太防衛科技",
    "full_name": "元大航太防衛科技",
    "board": "上市 ETF"
+  },
+  {
+   "code": "00966B",
+   "symbol": "00966B.TWO",
+   "short_name": "統一ESG投等債15+",
+   "full_name": "統一ESG投等債15+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00967B",
+   "symbol": "00967B.TWO",
+   "short_name": "元大優息美債",
+   "full_name": "元大優息美債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00968B",
+   "symbol": "00968B.TWO",
+   "short_name": "元大優息投等債",
+   "full_name": "元大優息投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00969B",
+   "symbol": "00969B.TWO",
+   "short_name": "元大零息超長美債",
+   "full_name": "元大零息超長美債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00970B",
+   "symbol": "00970B.TWO",
+   "short_name": "台新BBB投等債20+",
+   "full_name": "台新BBB投等債20+",
+   "board": "上櫃 ETF"
   },
   {
    "code": "00971",
@@ -986,6 +2064,34 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00980A",
+   "symbol": "00980A.TW",
+   "short_name": "主動野村臺灣優選",
+   "full_name": "主動野村臺灣優選",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00980B",
+   "symbol": "00980B.TWO",
+   "short_name": "台新特選IG債10+",
+   "full_name": "台新特選IG債10+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00980D",
+   "symbol": "00980D.TWO",
+   "short_name": "主動聯博投等入息",
+   "full_name": "主動聯博投等入息",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00980T",
+   "symbol": "00980T.TWO",
+   "short_name": "平衡凱基美國TOP",
+   "full_name": "平衡凱基美國TOP",
+   "board": "上櫃 ETF"
+  },
+  {
    "code": "009810",
    "symbol": "009810.TW",
    "short_name": "玉山全球藍籌100",
@@ -1056,6 +2162,34 @@
    "board": "上市 ETF"
   },
   {
+   "code": "00981A",
+   "symbol": "00981A.TW",
+   "short_name": "主動統一台股增長",
+   "full_name": "主動統一台股增長",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00981B",
+   "symbol": "00981B.TWO",
+   "short_name": "第一金優選非投債",
+   "full_name": "第一金優選非投債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00981D",
+   "symbol": "00981D.TWO",
+   "short_name": "主動中信非投等債",
+   "full_name": "主動中信非投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00981T",
+   "symbol": "00981T.TW",
+   "short_name": "平衡凱基雙核收息",
+   "full_name": "平衡凱基雙核收息",
+   "board": "上市 ETF"
+  },
+  {
    "code": "009820",
    "symbol": "009820.TW",
    "short_name": "元大納斯達克精選",
@@ -1102,6 +2236,244 @@
    "symbol": "009826.TW",
    "short_name": "貝萊德世界股票",
    "full_name": "貝萊德世界股票",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00982A",
+   "symbol": "00982A.TW",
+   "short_name": "主動群益台灣強棒",
+   "full_name": "主動群益台灣強棒",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00982B",
+   "symbol": "00982B.TWO",
+   "short_name": "FT投資級債20+",
+   "full_name": "FT投資級債20+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00982D",
+   "symbol": "00982D.TW",
+   "short_name": "主動富邦動態入息",
+   "full_name": "主動富邦動態入息",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00982T",
+   "symbol": "00982T.TW",
+   "short_name": "平衡兆豐台美動能",
+   "full_name": "平衡兆豐台美動能",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00983A",
+   "symbol": "00983A.TW",
+   "short_name": "主動中信ARK創新",
+   "full_name": "主動中信ARK創新",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00983B",
+   "symbol": "00983B.TWO",
+   "short_name": "大華優利美公債20",
+   "full_name": "大華優利美公債20",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00983D",
+   "symbol": "00983D.TW",
+   "short_name": "主動富邦複合收益",
+   "full_name": "主動富邦複合收益",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00984A",
+   "symbol": "00984A.TW",
+   "short_name": "主動安聯台灣高息",
+   "full_name": "主動安聯台灣高息",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00984B",
+   "symbol": "00984B.TWO",
+   "short_name": "大華優利美A債15",
+   "full_name": "大華優利美A債15",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00984D",
+   "symbol": "00984D.TW",
+   "short_name": "主動聯博全球非投",
+   "full_name": "主動聯博全球非投",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00985A",
+   "symbol": "00985A.TW",
+   "short_name": "主動野村台灣50",
+   "full_name": "主動野村台灣50",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00985B",
+   "symbol": "00985B.TW",
+   "short_name": "群益ESG投等債0-5",
+   "full_name": "群益ESG投等債0-5",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00985D",
+   "symbol": "00985D.TWO",
+   "short_name": "主動貝萊德優投等",
+   "full_name": "主動貝萊德優投等",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00986A",
+   "symbol": "00986A.TW",
+   "short_name": "主動台新龍頭成長",
+   "full_name": "主動台新龍頭成長",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00986B",
+   "symbol": "00986B.TWO",
+   "short_name": "FT金融債10+",
+   "full_name": "FT金融債10+",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00986D",
+   "symbol": "00986D.TWO",
+   "short_name": "主動復華金融債息",
+   "full_name": "主動復華金融債息",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00987A",
+   "symbol": "00987A.TW",
+   "short_name": "主動台新優勢成長",
+   "full_name": "主動台新優勢成長",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00987B",
+   "symbol": "00987B.TWO",
+   "short_name": "野村10+澳洲公債",
+   "full_name": "野村10+澳洲公債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00988A",
+   "symbol": "00988A.TW",
+   "short_name": "主動統一全球創新",
+   "full_name": "主動統一全球創新",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00988B",
+   "symbol": "00988B.TWO",
+   "short_name": "玉山嚴選非投債",
+   "full_name": "玉山嚴選非投債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00989A",
+   "symbol": "00989A.TW",
+   "short_name": "主動摩根美國科技",
+   "full_name": "主動摩根美國科技",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00989B",
+   "symbol": "00989B.TWO",
+   "short_name": "台新美國非投等債",
+   "full_name": "台新美國非投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00990A",
+   "symbol": "00990A.TW",
+   "short_name": "主動元大AI新經濟",
+   "full_name": "主動元大AI新經濟",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00990B",
+   "symbol": "00990B.TWO",
+   "short_name": "國泰收益非投等債",
+   "full_name": "國泰收益非投等債",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00991A",
+   "symbol": "00991A.TW",
+   "short_name": "主動復華未來50",
+   "full_name": "主動復華未來50",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00991B",
+   "symbol": "00991B.TW",
+   "short_name": "貝萊德A級公司債",
+   "full_name": "貝萊德A級公司債",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00992A",
+   "symbol": "00992A.TW",
+   "short_name": "主動群益科技創新",
+   "full_name": "主動群益科技創新",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00993A",
+   "symbol": "00993A.TW",
+   "short_name": "主動安聯台灣",
+   "full_name": "主動安聯台灣",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00994A",
+   "symbol": "00994A.TW",
+   "short_name": "主動第一金台股優",
+   "full_name": "主動第一金台股優",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00995A",
+   "symbol": "00995A.TW",
+   "short_name": "主動中信台灣卓越",
+   "full_name": "主動中信台灣卓越",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00996A",
+   "symbol": "00996A.TW",
+   "short_name": "主動兆豐台灣豐收",
+   "full_name": "主動兆豐台灣豐收",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00997A",
+   "symbol": "00997A.TW",
+   "short_name": "主動群益美國增長",
+   "full_name": "主動群益美國增長",
+   "board": "上市 ETF"
+  },
+  {
+   "code": "00998A",
+   "symbol": "00998A.TWO",
+   "short_name": "主動復華金融股息",
+   "full_name": "主動復華金融股息",
+   "board": "上櫃 ETF"
+  },
+  {
+   "code": "00999A",
+   "symbol": "00999A.TW",
+   "short_name": "主動野村臺灣高息",
+   "full_name": "主動野村臺灣高息",
    "board": "上市 ETF"
   },
   {

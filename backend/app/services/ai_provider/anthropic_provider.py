@@ -21,7 +21,13 @@ class AnthropicProvider:
             )
 
         try:
-            client = anthropic.Anthropic(api_key=settings.AI_API_KEY)
+            # Timeout and retry bound stated explicitly. The SDK's defaults
+            # are ten minutes and two retries, so an unreachable host would
+            # hold a threadpool thread for half an hour -- the same shape as
+            # pywebpush's timeout=None, which this project has already paid
+            # for once (see services/notification/webpush.py). The sibling
+            # openai_compatible provider already passes 30s; this one did not.
+            client = anthropic.Anthropic(api_key=settings.AI_API_KEY, timeout=30.0, max_retries=1)
             response = client.messages.create(
                 model=settings.AI_MODEL or "claude-sonnet-4-5",
                 max_tokens=1024,
