@@ -34,4 +34,5 @@ def search_symbols(
         # nothing: a company listed after this table was built genuinely will
         # not be here, and that is a different problem from a typo.
         listings_generated_at=symbol_search.listings_generated_at(),
+        us_listings_generated_at=symbol_search.us_listings_generated_at(),
     )

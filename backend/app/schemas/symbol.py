@@ -34,3 +34,7 @@ class SymbolSearchResponse(BaseModel):
     # after that date is legitimately absent, which is a different thing from a
     # typo and deserves a different message.
     listings_generated_at: str | None = None
+    # And when the bundled US directory was built. Both are reported because a
+    # search that finds nothing looked in both, and a US company listed last
+    # week produces exactly the same empty result as a typo.
+    us_listings_generated_at: str | None = None

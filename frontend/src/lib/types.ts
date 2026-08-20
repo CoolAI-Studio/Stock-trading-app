@@ -538,4 +538,8 @@ export interface SymbolSearchResponse {
    * after this date is legitimately absent -- a different problem from a typo,
    * and it deserves a different message. */
   listings_generated_at: string | null
+  /** And when the bundled US directory was built. Both are reported
+   * because an empty result looked in both, and a US company listed last
+   * week produces exactly the same empty result as a typo. */
+  us_listings_generated_at: string | null
 }

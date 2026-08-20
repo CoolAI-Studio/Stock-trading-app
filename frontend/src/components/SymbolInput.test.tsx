@@ -39,6 +39,7 @@ const TSMC: SymbolSearchResponse = {
     },
   ],
   listings_generated_at: '2026-08-19',
+  us_listings_generated_at: '2026-08-19',
 }
 
 const AMBIGUOUS: SymbolSearchResponse = {
@@ -64,12 +65,14 @@ const AMBIGUOUS: SymbolSearchResponse = {
     },
   ],
   listings_generated_at: '2026-08-19',
+  us_listings_generated_at: '2026-08-19',
 }
 
 const NOTHING: SymbolSearchResponse = {
   query: 'zzzz',
   matches: [],
   listings_generated_at: '2026-08-19',
+  us_listings_generated_at: '2026-08-19',
 }
 
 function show(props: Partial<React.ComponentProps<typeof SymbolInput>> = {}) {
@@ -152,6 +155,7 @@ describe('用中文名稱找股票', () => {
         },
       ],
       listings_generated_at: '2026-08-19',
+      us_listings_generated_at: '2026-08-19',
     } as never)
     const user = userEvent.setup()
     show()
@@ -266,6 +270,7 @@ describe('同一家公司的兩個掛牌', () => {
       },
     ],
     listings_generated_at: '2026-08-20',
+    us_listings_generated_at: '2026-08-20',
   }
 
   it('兩條都列出來', async () => {
@@ -304,5 +309,52 @@ describe('同一家公司的兩個掛牌', () => {
 
     const list = await screen.findByRole('listbox', { name: '搜尋結果' })
     expect(within(list).getByText('台股')).toBeInTheDocument()
+  })
+})
+
+// --- 查不到的時候，到底是誰的問題 --------------------------------------------
+//
+// 「找不到」 has three causes and only one of them is the owner's mistake: a
+// typo, a company listed after the tables were bundled, or a market this app
+// does not model. The empty state named one date -- 「台股清單更新於…」 -- and
+// there are two tables now, so a US company listed last week produced an empty
+// result explained in terms of Taiwan.
+//
+// Without the dates, 「this is too new for the list」 is indistinguishable from
+// 「you typed it wrong」, and somebody retypes a stock that exists five times
+// before giving up on it.
+
+describe('查不到的時候要說是在哪張表裡找不到', () => {
+  const EMPTY: SymbolSearchResponse = {
+    query: 'zzzzzzzz',
+    matches: [],
+    listings_generated_at: '2026-08-19',
+    us_listings_generated_at: '2026-08-20',
+  }
+
+  it('兩張表的日期都要說', async () => {
+    vi.mocked(api.get).mockResolvedValue(EMPTY as never)
+    const user = userEvent.setup()
+    show()
+
+    await user.type(screen.getByLabelText('代號'), 'zzzzzzzz')
+
+    expect(await screen.findByText(/2026-08-19/)).toBeInTheDocument()
+    expect(screen.getByText(/2026-08-20/)).toBeInTheDocument()
+  })
+
+  it('沒有日期時不要憑空生一個出來', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      ...EMPTY,
+      listings_generated_at: null,
+      us_listings_generated_at: null,
+    } as never)
+    const user = userEvent.setup()
+    show()
+
+    await user.type(screen.getByLabelText('代號'), 'zzzzzzzz')
+
+    expect(await screen.findByText(/找不到/)).toBeInTheDocument()
+    expect(screen.queryByText(/更新於/)).not.toBeInTheDocument()
   })
 })

@@ -136,11 +136,21 @@ export function SymbolInput({
 
           {searchQuery.isSuccess && matches.length === 0 && (
             <p className="p-2 text-xs text-slate-400">
-              找不到「{trimmed}」。台股請試公司簡稱或四碼代號；美股請直接輸入代號。
-              {searchQuery.data?.listings_generated_at && (
+              找不到「{trimmed}」。台股請試公司簡稱或四碼代號；美股可以打代號或英文公司名。
+              {/* Both dates, because an empty result looked in both tables --
+                  and 「找不到」 has three causes of which only one is a typo.
+                  Without the dates, 「listed after the table was built」 reads
+                  exactly like 「you typed it wrong」, and somebody retypes a
+                  stock that exists until they give up on it. */}
+              {(searchQuery.data?.listings_generated_at ||
+                searchQuery.data?.us_listings_generated_at) && (
                 <span className="block text-slate-600">
-                  台股清單更新於 {searchQuery.data.listings_generated_at}，比這個日期更晚上市的
-                  公司不會在裡面。
+                  清單更新於
+                  {searchQuery.data?.listings_generated_at &&
+                    ` 台股 ${searchQuery.data.listings_generated_at}`}
+                  {searchQuery.data?.us_listings_generated_at &&
+                    ` 美股 ${searchQuery.data.us_listings_generated_at}`}
+                  ，比這個日期更晚上市的公司不會在裡面。
                 </span>
               )}
             </p>

@@ -289,6 +289,20 @@ def listings_generated_at() -> str | None:
         return None
 
 
+def us_listings_generated_at() -> str | None:
+    """When the bundled US directory was built.
+
+    Reported alongside the Taiwanese date rather than instead of it: 「找不到」
+    has three causes and only one is a typo, and the owner cannot tell 「too new
+    for the list」 from 「you typed it wrong」 unless the page says which list it
+    looked in and how old that list is.
+    """
+    try:
+        return json.loads(_US_LISTINGS_DATA.read_text(encoding="utf-8")).get("generated_at")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
 def is_taiwanese(symbol: str) -> bool:
     """Whether this names a Taiwanese listing -- 2330.TW, 6488.TWO, 00632R.TW.
 
