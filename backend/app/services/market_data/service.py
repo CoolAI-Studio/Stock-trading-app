@@ -19,6 +19,23 @@ _DEFAULT_TTL_SEC: dict[DataSource, float] = {
     DataSource.BINANCE: 5.0,
 }
 
+# How long a quote may go on being served after the provider stopped
+# confirming it. Two things are true at once and this number is where they
+# meet: a one-poll hiccup must not open a gap, because no quote means no
+# evaluation and a skipped evaluation is a missed alert -- while an indefinite
+# failure must not be served as a live price, because every threshold in the
+# app is then comparing against a number that can no longer move.
+#
+# Comfortably more than a handful of failed refreshes at each source's own TTL,
+# and far less than the forever it used to be. Binance is shorter because it
+# trades around the clock: a two-minute-old crypto price is already a
+# different market, whereas an equity quote outside session hours legitimately
+# does not change.
+_DEFAULT_STALE_LIMIT_SEC: dict[DataSource, float] = {
+    DataSource.YFINANCE: 300.0,
+    DataSource.BINANCE: 120.0,
+}
+
 # Candle history is the far more expensive request -- years of rows per
 # symbol -- and a candle that has closed can never change again, so re-asking
 # for it on every poll is pure waste aimed straight at the rate limiter.
@@ -51,6 +68,7 @@ class MarketDataService:
         ttl_sec: dict[DataSource, float] | None = None,
         bar_ttl_sec: dict[Timeframe, float] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        stale_limit_sec: dict[DataSource, float] | None = None,
     ) -> None:
         self._providers = providers or {
             DataSource.YFINANCE: YFinanceProvider(),
@@ -58,7 +76,13 @@ class MarketDataService:
         }
         self._ttl_sec = {**_DEFAULT_TTL_SEC, **(ttl_sec or {})}
         self._bar_ttl_sec = {**_DEFAULT_BAR_TTL_SEC, **(bar_ttl_sec or {})}
+        self._stale_limit_sec = {**_DEFAULT_STALE_LIMIT_SEC, **(stale_limit_sec or {})}
         self._clock = clock
+        # When each symbol was last actually ANSWERED FOR, monotonic. Kept
+        # apart from the cache's single per-source timestamp, which records
+        # when the bucket was last refreshed as a whole and therefore says
+        # nothing about the one symbol inside it that stopped coming back.
+        self._answered_at: dict[tuple[DataSource, str], float] = {}
         self._cache: dict[DataSource, tuple[float, dict[str, Quote]]] = {}
         # Keyed per symbol and per timeframe, unlike the quote cache's single
         # per-source bucket. That is what keeps one symbol's fetch schedule
@@ -79,7 +103,30 @@ class MarketDataService:
             provider = self._providers[data_source]
             fetch_list = symbols if stale else missing
             fresh = provider.get_quotes(fetch_list)
+            # Stamped here, not in the providers: this is the moment the
+            # answer arrived, and it has to survive being served from cache
+            # later or a held price is indistinguishable from a live one.
+            answered_at = utcnow()
+            for quote in fresh.values():
+                quote.fetched_at = answered_at
+            for symbol in fresh:
+                self._answered_at[(data_source, symbol)] = now
             cached_quotes = {**cached_quotes, **fresh}
+
+            # Withdraw what the provider has now gone too long without
+            # confirming. Without this the merge above preserved a dead
+            # symbol's last entry forever -- a full refresh could not dislodge
+            # it, because a refresh asks for everything and the merge keeps
+            # whatever the answer omitted. Only symbols just asked for are
+            # considered; another caller's names are not this fetch's business.
+            limit = self._stale_limit_sec.get(data_source, 300.0)
+            for symbol in fetch_list:
+                if symbol in fresh:
+                    continue
+                last_ok = self._answered_at.get((data_source, symbol))
+                if last_ok is None or (now - last_ok) > limit:
+                    cached_quotes.pop(symbol, None)
+                    self._answered_at.pop((data_source, symbol), None)
             # Only a full refresh restarts the TTL clock. A backfill must not:
             # providers silently omit symbols they can't resolve (a typo, a
             # delisting, a Taiwan ticker missing its .TW suffix), so that
@@ -169,7 +216,10 @@ class MarketDataService:
             # screen is using.
             if quote.currency:
                 row.currency = quote.currency
-            row.fetched_at = utcnow()
+            # The quote's own arrival time when it has one. Re-stamping
+            # 「now」 on every poll is what let a price frozen at 09:00 read as
+            # seconds old at 14:00 on the page built to reveal exactly that.
+            row.fetched_at = quote.fetched_at or utcnow()
         db.commit()
 
 

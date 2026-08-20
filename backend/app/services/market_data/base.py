@@ -20,6 +20,13 @@ class Quote:
     # existed -- defaulting to a currency would relabel every one of them, and
     # a wrong label is worse than a missing one.
     currency: str | None = None
+    # When the PROVIDER answered, stamped by MarketDataService rather than by
+    # a provider. Distinct from quote_time (when the exchange says the trade
+    # happened) and from 「now」: a quote served from cache after a failed
+    # refresh keeps the time it actually arrived, which is the only way the
+    # rest of the app can tell a live price from a held one. None when the
+    # quote was built by hand and never went through a fetch.
+    fetched_at: datetime | None = None
 
 
 class QuoteProvider(Protocol):
