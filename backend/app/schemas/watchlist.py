@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import DataSource
 from app.schemas.common import UtcDatetime
@@ -29,6 +29,15 @@ class WatchlistItemCreate(BaseModel):
         if problem:
             raise ValueError(problem)
         return cleaned
+
+    @model_validator(mode="after")
+    def _check_source_matches_symbol(self):
+        """A row whose source cannot price its symbol is a row that shows a
+        blank price forever, with nothing anywhere saying why."""
+        problem = symbol_search.market_mismatch(self.symbol, self.data_source)
+        if problem:
+            raise ValueError(problem)
+        return self
 
 
 class WatchlistItemRead(BaseModel):

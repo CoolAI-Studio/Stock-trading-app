@@ -27,6 +27,7 @@ from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
 from app.models.enums import DataSource
+from app.services import symbol_search
 
 
 class _Session:
@@ -58,9 +59,23 @@ _US = _Session("America/New_York", time(9, 30), time(16, 0))
 
 def _session_for(symbol: str, data_source: DataSource) -> _Session | None:
     """None means "cannot tell", which callers must read as open."""
-    if data_source == DataSource.BINANCE:
-        return None  # crypto trades continuously; nothing to be closed
     upper = symbol.upper()
+    if data_source == DataSource.BINANCE:
+        if upper.endswith((".TW", ".TWO")):
+            # Binance does not list Taiwanese equities, so this pairing is a
+            # mistake -- refused at the input now, but rows predating that
+            # check still exist and 「always open」 means polling a shut market
+            # every five seconds all night against a source that cannot price
+            # it. Same precedent as the bare numeric code below.
+            return _TAIWAN
+        return None  # crypto trades continuously; nothing to be closed
+    if symbol_search.is_yfinance_crypto(upper):
+        # BTC-USD, ETH-USD: yfinance's own crypto tickers. Real, priceable and
+        # traded around the clock. The bare-ticker rule below has no dot to go
+        # on, so it read these as US equities and called them 閉市 from 16:00
+        # to 09:30 New York -- the hours crypto actually moves. A stop-loss on
+        # one was never checked overnight and nothing said so.
+        return None
     if upper.endswith((".TW", ".TWO")):
         return _TAIWAN
     if "." not in upper:

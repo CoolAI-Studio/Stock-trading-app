@@ -468,6 +468,79 @@ def looks_unpriceable(symbol: str) -> str | None:
     return None
 
 
+# yfinance's own crypto tickers: BTC-USD, ETH-USD, SOL-USDT. Real, priceable,
+# and traded around the clock -- so they are NOT the mismatch below, and
+# market_calendar must not read them as US equities.
+_YF_CRYPTO = re.compile(r"^[A-Z0-9]{2,10}-(USD|USDT|USDC|TWD)$")
+
+# A US ticker runs to five letters (see _US_TICKER). Anything longer that ends
+# in a stablecoin cannot be one, which is what makes this certain enough to
+# refuse. The bound is deliberately loose in the safe direction: 「USDT」 itself,
+# and any five-character symbol, is left alone, because refusing a stock the
+# owner then cannot add is a worse failure than polling one that turns out not
+# to price.
+_UNMISTAKABLE_PAIR_MIN_LEN = 6
+
+
+def market_mismatch(symbol: str, data_source) -> str | None:
+    """Why this symbol cannot come from this data source, or None.
+
+    The two halves were never checked against each other, and the mismatch is
+    silent in both directions:
+
+      binance + 2330.TW -- Binance does not list Taiwanese equities, so it
+      never prices. And market_calendar answers 「cannot tell」 for everything on
+      Binance because crypto trades continuously, so the app also polls this
+      symbol every five seconds through the night.
+
+      yfinance + BTCUSDT -- yfinance does not serve Binance pair names, so the
+      same silence, from the other side.
+
+    REFUSED ONLY WHEN CERTAIN, which is this module's standing rule. Binance
+    holding a .TW listing is certain. A seven-character symbol ending in USDT
+    being a US ticker is certain. Everything else passes.
+    """
+    from app.models.enums import DataSource
+
+    text = normalise(symbol)
+    if not text:
+        # looks_unpriceable owns the empty case, and two validators saying the
+        # same thing differently is how error messages start contradicting.
+        return None
+
+    if data_source == DataSource.BINANCE:
+        if is_taiwanese(text) or _TW_CODE.match(text):
+            return f"「{text}」是台股代號，Binance 沒有這個標的。資料來源請改成 yfinance。"
+        if "." in text:
+            return (
+                f"「{text}」帶著市場後綴，不是 Binance 的交易對格式（例如 BTCUSDT）。"
+                "資料來源請改成 yfinance。"
+            )
+        return None
+
+    if (
+        _CRYPTO_PAIR.match(text)
+        and len(text) >= _UNMISTAKABLE_PAIR_MIN_LEN
+        and not _YF_CRYPTO.match(text)
+    ):
+        return (
+            f"「{text}」看起來是 Binance 的交易對，yfinance 抓不到它。"
+            "資料來源請改成 Binance，或改用 yfinance 自己的寫法（例如 BTC-USD）。"
+        )
+    return None
+
+
+def is_yfinance_crypto(symbol: str) -> bool:
+    """BTC-USD and friends: yfinance's own 24-hour instruments.
+
+    Named separately from the mismatch check because market_calendar needs the
+    same fact for a different reason -- a bare ticker with no dot was being
+    classified as a US equity, so a stop-loss on BTC-USD went unchecked from
+    16:00 to 09:30 New York, which is when crypto moves.
+    """
+    return bool(_YF_CRYPTO.match(normalise(symbol)))
+
+
 # TradingView's {{exchange}} placeholder, mapped to what this app can price.
 # Delayed feeds append _DL or _DLY to the exchange (TradingView's own docs say
 # so, and TWSE_DLY:2330 is a real symbol on their site) -- Taiwan's free data is

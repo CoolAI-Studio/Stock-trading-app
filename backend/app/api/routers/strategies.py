@@ -22,7 +22,7 @@ from app.schemas.strategy import (
     StrategyValidateRequest,
     StrategyValidateResult,
 )
-from app.services import risk_resolver, strategy_performance
+from app.services import risk_resolver, strategy_performance, symbol_search
 from app.services.ai_provider import get_ai_provider
 from app.services.market_data.base import bars_from_closes
 from app.services.market_loop import release_strategy
@@ -264,6 +264,15 @@ def update_strategy(
 
     for field, value in data.items():
         setattr(strategy, field, value)
+
+    # Checked on the MERGED row, not on the payload. A patch that changes only
+    # the symbol, or only the data source, cannot be judged by the schema --
+    # the other half is on the stored row -- and either edit alone can produce
+    # a pairing that never prices and is polled around the clock.
+    mismatch = symbol_search.market_mismatch(strategy.symbol, strategy.data_source)
+    if mismatch:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=mismatch)
 
     # A source edit already recompiles -- the registry keys on a content hash.
     # Editing the symbol does not, and the instance's accumulated prices

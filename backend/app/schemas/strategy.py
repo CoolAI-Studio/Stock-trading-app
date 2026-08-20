@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
@@ -59,6 +59,18 @@ class StrategyCreate(StrategyRiskOverrides):
     def _check_symbol(cls, value: str) -> str:
         return _clean_symbol(value) or value
 
+    @model_validator(mode="after")
+    def _check_source_matches_symbol(self):
+        """The two halves of one answer, which were never checked together.
+
+        binance + 2330.TW never prices AND is polled around the clock, because
+        the calendar reads everything on Binance as continuously traded.
+        """
+        problem = symbol_search.market_mismatch(self.symbol, self.data_source)
+        if problem:
+            raise ValueError(problem)
+        return self
+
 
 class StrategyUpdate(StrategyRiskOverrides):
     name: str | None = Field(default=None, min_length=1, max_length=120)
@@ -73,6 +85,19 @@ class StrategyUpdate(StrategyRiskOverrides):
     @classmethod
     def _check_symbol(cls, value: str | None) -> str | None:
         return _clean_symbol(value)
+
+    @model_validator(mode="after")
+    def _check_source_matches_symbol(self):
+        """Only when the payload carries both. A patch that changes one half
+        cannot be judged here -- the other half lives on the stored row -- so
+        the router re-checks the merged result. See routers/strategies.py.
+        """
+        if self.symbol is None or self.data_source is None:
+            return self
+        problem = symbol_search.market_mismatch(self.symbol, self.data_source)
+        if problem:
+            raise ValueError(problem)
+        return self
 
 
 class StrategyRead(BaseModel):
