@@ -318,7 +318,18 @@ def search(query: str, limit: int = 8) -> list[SymbolMatch]:
         score = _score(row, text)
         if score is not None:
             scored.append((score, row))
-    scored.sort(key=lambda pair: (pair[0], pair[1].get("code", "")))
+    # Tie-break by NAME LENGTH before code.
+    #
+    # Sorting ties by code as a string put every 00xxx ETF ahead of every
+    # four-digit company, so 「台新」 returned five 台新-branded bond funds and
+    # never 台新新光金 -- which was in the table the whole time and simply
+    # unreachable. The prefix of an ETF's name is its sponsor, not its
+    # identity, and somebody typing two characters of a company name wants the
+    # company. The shortest matching name is the closest thing to what they
+    # typed. Code stays as the final tie-break so the order is stable.
+    scored.sort(
+        key=lambda pair: (pair[0], len(pair[1].get("short_name", "")), pair[1].get("code", ""))
+    )
 
     matches = [_tw_match(row) for _score_, row in scored[:limit]]
 

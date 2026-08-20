@@ -556,3 +556,67 @@ def test_an_alias_result_says_which_company_it_landed_on():
     match = next(m for m in search("護國神山") if m.symbol == "2330.TW")
 
     assert match.name == "台積電"
+
+
+# --- keyword search has to put the company first ----------------------------
+#
+# 「台新」 returned five 台新-branded ETFs and not 台新新光金 at all; 「中信」 the
+# same, with no 中信金. The company was in the table the whole time -- it lost
+# on the tie-break, which sorted by code as a string, so 00703 came before 2887.
+#
+# The prefix of an ETF's name is its SPONSOR, not its identity: 台新JPM新興債 is
+# a bond fund that 台新 happens to issue. Somebody typing two characters of a
+# company name wants the company. The shortest matching name is the closest
+# thing to what they typed, and that is the tie-break.
+
+
+def test_a_company_outranks_the_etfs_that_share_its_sponsor_name():
+    """The bug this section exists for: 2887 was in the table and unreachable.
+
+    Asserted as "near the top" rather than "first" on purpose. 6838 台新藥 is a
+    real company whose whole name is shorter, so it wins the length tie-break
+    fairly -- and claiming to know that somebody typing 台新 meant the financial
+    group rather than the biotech would need popularity data the exchange
+    registry does not carry. What is fixable, and is fixed, is that the company
+    is no longer buried under five of its own sponsor's bond funds.
+    """
+    assert "2887.TW" in _symbols("台新")[:3]
+
+
+def test_the_same_for_the_other_big_financial_groups():
+    for query, expected in [("中信", "2891.TW"), ("元大", "2885.TW"), ("國泰", "2882.TW")]:
+        assert _symbols(query)[0] == expected, query
+
+
+def test_a_keyword_that_is_only_ever_an_etf_still_returns_etfs():
+    """No company is called 高股息. Promoting companies must not mean demoting
+    the right answer when there is no company to promote."""
+    top = search("高股息")[0]
+
+    assert top.symbol == "0056.TW"
+    assert "ETF" in top.detail
+
+
+def test_an_exact_short_name_still_wins_outright():
+    """Length is the tie-break, not the ranking. An exact match beats a shorter
+    partial one."""
+    assert _symbols("鴻海")[0] == "2317.TW"
+
+
+def test_a_single_character_still_ranks_sensibly():
+    assert _symbols("鴻")[0] == "2317.TW"
+
+
+def test_a_product_keyword_finds_the_funds_that_hold_it():
+    """The case where fuzzy search earns its place: nobody knows the code for
+    a semiconductor ETF, and there are a dozen of them."""
+    symbols = _symbols("半導體")
+
+    assert len(symbols) >= 3
+    assert all(s.endswith((".TW", ".TWO")) for s in symbols)
+
+
+def test_an_industry_keyword_finds_the_companies_in_it():
+    """水泥 appears in the legal names, not the short ones -- 台泥's full name is
+    臺灣水泥股份有限公司."""
+    assert "1101.TW" in _symbols("水泥")
