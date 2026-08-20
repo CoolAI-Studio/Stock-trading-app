@@ -8,6 +8,7 @@ import {
   subscribeToPush,
   unsubscribeFromPush,
 } from '../lib/push'
+import { forgetPushChannel, rememberPushChannel } from '../lib/pushHealth'
 import { currentPushAvailability } from '../lib/platform'
 import type { ChannelType, NotificationChannel, NotificationLog } from '../lib/types'
 
@@ -509,7 +510,10 @@ function ChannelRow({ channel }: { channel: NotificationChannel }) {
       // a failed DELETE leaves a channel that can never deliver and gives no
       // sign of it -- the worst of both outcomes.
       await api.delete(`/api/notifications/channels/${channel.id}`)
-      if (mine) await unsubscribeFromPush()
+      if (mine) {
+        forgetPushChannel()
+        await unsubscribeFromPush()
+      }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notification-channels'] }),
   })
@@ -616,7 +620,15 @@ function NewChannelForm({ onDone }: { onDone: () => void }) {
         quiet_end_hour: quiet[1],
       })
     },
-    onSuccess: () => {
+    onSuccess: (created) => {
+      // Remember WHICH row this device just made. iOS never fires
+      // pushsubscriptionchange, so when it later rotates this subscription the
+      // endpoint stops being a usable link back to the row -- the endpoint is
+      // precisely the thing that changed. See lib/pushHealth.ts.
+      if (channelType === 'web_push') {
+        const id = (created as { id?: number } | null | undefined)?.id
+        if (typeof id === 'number') rememberPushChannel(id)
+      }
       queryClient.invalidateQueries({ queryKey: ['notification-channels'] })
       onDone()
     },

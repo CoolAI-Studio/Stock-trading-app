@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useWebSocket } from '../lib/useWebSocket'
+import { InstallPrompt } from './InstallPrompt'
+import { PushSelfHeal } from './PushSelfHeal'
 import { WorkerHealthBanner } from './WorkerHealthBanner'
 
 const NAV_ITEMS = [
@@ -60,6 +62,13 @@ export function Layout() {
       {/* Directly under the nav, on every page: the failure it reports makes
           every other page's contents untrustworthy, so it cannot live on the
           dashboard alone. */}
+      {/* Above the worker banner on purpose: if this phone cannot receive a
+          push at all, knowing the worker is healthy is not the useful fact. */}
+      <InstallPrompt />
+      {/* iOS silently rotates push subscriptions and fires no event, so the
+          only place to notice is here, on load. Silent unless it could not
+          repair itself. */}
+      <PushSelfHeal />
       <WorkerHealthBanner />
       <main className="p-4 sm:p-6">
         <Outlet />

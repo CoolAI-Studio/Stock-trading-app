@@ -1,6 +1,7 @@
 {
   "name": "交易提醒儀表板",
   "short_name": "交易提醒",
+  "id": "/",
   "description": "盯盤、跑策略，事情發生時通知你。下單請到你自己的券商 App。",
   "lang": "zh-Hant",
   "dir": "ltr",

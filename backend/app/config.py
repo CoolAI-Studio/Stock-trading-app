@@ -1,3 +1,4 @@
+import base64
 import sys
 from functools import lru_cache
 
@@ -157,6 +158,7 @@ def verify_required_secrets(s: Settings) -> None:
             )
 
     _verify_encryption_key(s)
+    _verify_vapid(s)
 
 
 def _verify_encryption_key(s: Settings) -> None:
@@ -209,3 +211,102 @@ def enforce_required_secrets(s: Settings) -> None:
     if s.ALLOW_INSECURE_SECRETS or "pytest" in sys.modules:
         return
     verify_required_secrets(s)
+
+
+# Not a real address, and render.yaml deploys it verbatim. Kept as a named
+# constant so the check and the file that ships it cannot drift apart.
+_VAPID_SUBJECT_PLACEHOLDERS = frozenset(
+    {"mailto:you@example.com", "mailto:admin@example.com", "mailto:me@example.com"}
+)
+
+_VAPID_HINT = "Regenerate a matching pair with: python scripts/generate_vapid_keys.py"
+
+
+def _b64url(value: str) -> bytes:
+    """Decode with or without padding -- some tools emit '=' and some strip
+    it, and rejecting a perfectly good key over padding would be an outage we
+    inflicted on ourselves."""
+    text = value.strip()
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def _verify_vapid(s: Settings) -> None:
+    """Refuse to start on a VAPID configuration that cannot deliver.
+
+    VAPID_PUBLIC_KEY is handed to the browser and baked into every
+    subscription it creates; VAPID_PRIVATE_KEY signs every push. Nothing
+    checked they were the same pair, so regenerating one and not the other --
+    or pasting the wrong half into Render -- made Apple answer 403
+    VapidPkHashMismatch to every push, forever. The app booted green, the
+    health check passed, a channel could be created and reported success, and
+    not one alert was ever delivered.
+
+    That silence is the failure this product cannot have, so this follows
+    _verify_encryption_key's precedent and stops the boot. A deploy that fails
+    immediately and says why is far cheaper than one that delivers nothing.
+
+    Both keys empty is a valid configuration and boots: web push is one channel
+    of four, and somebody using only Telegram and email must not be blocked.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    public = (s.VAPID_PUBLIC_KEY or "").strip()
+    private = (s.VAPID_PRIVATE_KEY or "").strip()
+
+    if not public and not private:
+        return  # web push switched off; nothing to check, including the subject
+
+    if not public or not private:
+        missing = "VAPID_PUBLIC_KEY" if not public else "VAPID_PRIVATE_KEY"
+        raise RuntimeError(
+            f"{missing} is empty while the other half is set -- refusing to start. "
+            "Half a pair can only be a mistake, and it produces the same silent "
+            f"403 on every push as a mismatched one. {_VAPID_HINT}"
+        )
+
+    try:
+        scalar = int.from_bytes(_b64url(private), "big")
+        derived = (
+            ec.derive_private_key(scalar, ec.SECP256R1())
+            .public_key()
+            .public_bytes(encoding=Encoding.X962, format=PublicFormat.UncompressedPoint)
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "VAPID_PRIVATE_KEY is not a valid P-256 private key -- refusing to start, "
+            "because it would fail on every push instead of now. Expected the raw "
+            f"32-byte scalar, base64url-encoded. {_VAPID_HINT}"
+        ) from exc
+
+    try:
+        configured = _b64url(public)
+    except Exception as exc:
+        raise RuntimeError(
+            "VAPID_PUBLIC_KEY is not valid base64url -- refusing to start. Expected an "
+            f"X9.62 uncompressed point (65 bytes starting with 0x04). {_VAPID_HINT}"
+        ) from exc
+
+    if configured != derived:
+        raise RuntimeError(
+            "VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are not the same key pair -- "
+            "refusing to start. The browser bakes the public key into every "
+            "subscription and the private key signs every push, so a mismatch makes "
+            "the push service reject all of them (Apple: 403 VapidPkHashMismatch) "
+            "while everything else looks healthy. "
+            f"{_VAPID_HINT} -- and note that changing the pair invalidates every "
+            "existing subscription, so each device has to set up push again."
+        )
+
+    subject = (s.VAPID_SUBJECT or "").strip()
+    if subject in _VAPID_SUBJECT_PLACEHOLDERS:
+        raise RuntimeError(
+            f"VAPID_SUBJECT is still the placeholder {subject!r} -- refusing to start. "
+            "It is nobody's address, and a push service is entitled to reject a "
+            "contact it cannot use. Set it to your own mailto: address."
+        )
+    if not subject.startswith(("mailto:", "https://")):
+        raise RuntimeError(
+            f"VAPID_SUBJECT must be a mailto: or https: URI (RFC 8292), got {subject!r} "
+            "-- refusing to start. A bare email address looks right and is not."
+        )

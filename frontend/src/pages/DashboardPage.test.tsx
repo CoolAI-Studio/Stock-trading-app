@@ -180,3 +180,47 @@ describe('DashboardPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('無法讀取資料')
   })
 })
+
+// --- picking a symbol previews it ------------------------------------------
+
+describe('用中文找股票並確認是不是同一家', () => {
+  it('選了候選就直接把圖表換過去，讓人在加入前先看一眼', async () => {
+    // The point of previewing: the whole feature exists because the owner
+    // searched by a Chinese name, and a returned number is not something they
+    // can verify by reading it. The chart is.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/symbols/search'))
+        return {
+          query: '台積電',
+          matches: [
+            {
+              symbol: '2330.TW',
+              name: '台積電',
+              detail: '上市 · 台灣積體電路製造股份有限公司',
+              market: '台股',
+              data_source: 'yfinance',
+              verified: true,
+            },
+          ],
+          listings_generated_at: '2026-08-19',
+        } as never
+      if (path === '/api/watchlist') return [] as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.type(await screen.findByLabelText('查詢代號'), '台積電')
+    const list = await screen.findByRole('listbox', { name: '搜尋結果' })
+    await user.click(within(list).getByText('2330.TW'))
+
+    // TradingView spells it TWSE:2330; the widget is what proves the whole
+    // chain (search -> our symbol -> TradingView symbol) actually connects.
+    // The container stamps the resolved symbol on itself -- see
+    // TradingViewWidget's dataset.tvSymbol guard.
+    await waitFor(() => {
+      const container = document.querySelector('.tradingview-widget-container') as HTMLElement
+      expect(container?.dataset.tvSymbol).toBe('TWSE:2330')
+    })
+  })
+})
