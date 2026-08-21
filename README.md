@@ -10,7 +10,7 @@ LINE/Telegram/Email 通知。後端 FastAPI + SQLAlchemy，前端 Vite + React +
 額度。
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CoolAI-Studio/Stock-trading-app)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/CoolAI-Studio/Stock-trading-app&root-directory=frontend&env=VITE_API_BASE_URL,VITE_WS_URL&envDescription=VITE_API_BASE_URL%20%2F%20VITE_WS_URL%20%E8%AB%8B%E5%A1%AB%E4%BD%A0%E9%83%A8%E7%BD%B2%E5%A5%BD%E7%9A%84%20Render%20%E5%BE%8C%E7%AB%AF%E7%B6%B2%E5%9D%80)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/CoolAI-Studio/Stock-trading-app&root-directory=frontend&env=VITE_API_BASE_URL&envDescription=VITE_API_BASE_URL%20%E8%AB%8B%E5%A1%AB%E4%BD%A0%E9%83%A8%E7%BD%B2%E5%A5%BD%E7%9A%84%20Render%20%E5%BE%8C%E7%AB%AF%E7%B6%B2%E5%9D%80%EF%BC%88https%3A//...onrender.com%EF%BC%89)
 
 **你需要三個免費帳號**：Render（後端）、Vercel（前端）、Neon（資料庫）。三個都不用信用卡。
 
@@ -27,16 +27,17 @@ LINE/Telegram/Email 通知。後端 FastAPI + SQLAlchemy，前端 Vite + React +
 
    部署完成後你會拿到一個網址，例如 `https://your-app.onrender.com`。
 
-3. **點 Deploy with Vercel**（前端）。畫面會要你填兩個變數，兩個都填**上一步那個 Render 網址**：
-   - `VITE_API_BASE_URL` = `https://your-app.onrender.com`
-   - `VITE_WS_URL` = 同一個網址，但開頭改成 `wss://`
+3. **點 Deploy with Vercel**（前端）。只要填一個變數：
+   - `VITE_API_BASE_URL` = 上一步那個 Render 網址，例如 `https://your-app.onrender.com`
+
+   （即時報價用的 WebSocket 網址會自動從這個推導出來，不用另外填。）
 
 4. **打開你的前端網址**（例如 `https://your-app.vercel.app`）。畫面會自動帶你到**設定頁**，
    而不是給你一個壞掉的登入畫面。那一頁會分成兩區：
    - **「現在完全不能用」**：加密金鑰之類的，每一個都有一顆「產生」按鈕，按了複製、貼回
      Render 的 Environment 頁面。
-   - **「不會擋住啟動，但沒填就會有東西不能用」**：主要是 `CORS_ORIGINS`——把你的 Vercel
-     網址貼進去。這一格一定是最後填的，因為在前端存在之前沒有人知道那個網址。
+   - **「不會擋住啟動，但沒填就會有東西不能用」**：主要是 `CORS_ORIGINS`。
+     **這一格的值設定頁會直接印出來給你複製**——你正在看的這個網址就是它要的東西。
 
    每一項都標了步驟編號、不填會怎樣、去哪裡拿。存回 Render 之後它會自動重新部署，
    一兩分鐘後重新整理就好。

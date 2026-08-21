@@ -256,3 +256,43 @@ describe('分成「擋住啟動」和「不會擋，但也是錯的」', () => {
     expect(screen.queryByText(/現在完全不能用/)).not.toBeInTheDocument()
   })
 })
+
+// --- the value the page can just tell you ------------------------------------
+//
+// CORS_ORIGINS is the last step of the flow and the one most likely to be got
+// wrong, because it cannot be known until the frontend exists. But by the time
+// somebody is reading this page, the frontend DOES exist -- they are looking
+// at it. The browser knows its own address, so the page can print exactly what
+// to paste instead of sending somebody to go and find it.
+
+describe('CORS_ORIGINS 要填的值，畫面自己就知道', () => {
+  const NEEDS_CORS: SetupStatus = {
+    missing: [
+      {
+        name: 'CORS_ORIGINS',
+        why: '瀏覽器會把後端的每一個回應都丟掉。',
+        how: '等前端部署完，把它的網址貼進來。',
+        generator: null,
+        blocking: false,
+        step: 5,
+      },
+    ],
+    where: 'Render 後台 → Environment',
+  }
+
+  it('把這一頁自己的網址印出來讓人複製', async () => {
+    vi.mocked(api.get).mockResolvedValue(NEEDS_CORS as never)
+    show()
+
+    const row = (await screen.findByText('CORS_ORIGINS')).closest('li')!
+    expect(within(row).getByDisplayValue(window.location.origin)).toBeInTheDocument()
+  })
+
+  it('只有 CORS_ORIGINS 這一項給，其他項目不要亂塞網址', async () => {
+    vi.mocked(api.get).mockResolvedValue(STATUS as never)
+    show()
+
+    const row = (await screen.findByText('SECRET_ENCRYPTION_KEY')).closest('li')!
+    expect(within(row).queryByDisplayValue(window.location.origin)).not.toBeInTheDocument()
+  })
+})

@@ -77,6 +77,23 @@ function MissingRow({ item }: { item: SetupStatus['missing'][number] }) {
       <p className="mt-1 text-sm text-slate-300">{item.why}</p>
       <p className="mt-1 text-sm text-slate-400">{item.how}</p>
 
+      {/* CORS_ORIGINS is the last step of the flow and the one most likely to
+          be got wrong, because it cannot be known until the frontend exists.
+          But by the time anybody is reading this, the frontend DOES exist --
+          they are looking at it -- so the browser can print exactly what to
+          paste instead of sending them to go and find it. */}
+      {item.name === 'CORS_ORIGINS' && (
+        <label className="mt-2 block">
+          <span className="text-xs text-slate-400">把這一串貼進去就對了</span>
+          <input
+            readOnly
+            value={window.location.origin}
+            onFocus={(e) => e.currentTarget.select()}
+            className="block w-full rounded border border-emerald-800 bg-slate-950 px-2 py-1 font-mono text-xs text-emerald-300"
+          />
+        </label>
+      )}
+
       {item.generator && (
         <button
           type="button"

@@ -1,9 +1,16 @@
 import { useEffect } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import { websocketBaseUrl } from './wsUrl'
 import type { WsEvent } from './types'
 
-const WS_BASE_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:8000'
+// Derived from the API address unless VITE_WS_URL says otherwise. See
+// lib/wsUrl.ts: asking a deployer to paste the same host twice with a
+// different scheme is a blank that should not exist.
+const WS_BASE_URL = websocketBaseUrl(
+  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
+  import.meta.env.VITE_WS_URL,
+)
 const RECONNECT_DELAY_MS = 3000
 
 function handleMessage(message: WsEvent, queryClient: QueryClient): void {
