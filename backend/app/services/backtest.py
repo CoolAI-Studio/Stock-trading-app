@@ -54,7 +54,7 @@ counted into summary.ambiguous_exit_bars and reported.
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
 from app.models.enums import DataSource
@@ -86,6 +86,24 @@ class FillPriceBasis(StrEnum):
     # owner could have traded at, since they only learn the close once the
     # candle is over.
     CLOSE = "close"
+
+
+class PositionSizing(StrEnum):
+    """How many units each entry buys."""
+
+    # What every run did before this existed, and still the default: a fixed
+    # unit count, unrelated to the account. Kept as the default because saved
+    # runs are compared with each other, and changing what the default means
+    # would make every historical run incomparable with every new one.
+    FIXED_QUANTITY = "fixed_quantity"
+    # A fraction of what the account is worth at the moment of entry. This is
+    # the sizing that makes the headline return mean 「what this strategy did
+    # to my money」: under fixed sizing, one unit of a NT$2,375 stock against
+    # NT$100,000 is 2.4% invested, so a strategy that DOUBLES that stock
+    # reports 2.4% -- and the same strategy on a NT$20 stock reports 0.02%.
+    # The two runs are not comparable with each other, which is the entire
+    # reason somebody ran both.
+    PERCENT_OF_EQUITY = "percent_of_equity"
 
 
 class ExitReason(StrEnum):
@@ -123,6 +141,18 @@ DEFAULT_SELL_TAX_RATE = Decimal(0)
 DEFAULT_MINIMUM_FEE = Decimal(0)
 DEFAULT_QUANTITY = Decimal(1)
 DEFAULT_INITIAL_CAPITAL = Decimal(100_000)
+
+# All of it. With one position at a time and no leverage, a full-equity entry
+# makes the equity curve exactly the strategy's own return, which is the
+# question a backtest is being asked. Only read when position_sizing is
+# PERCENT_OF_EQUITY.
+DEFAULT_EQUITY_PCT = Decimal(1)
+
+# Units are rounded DOWN to this many places when sizing from equity. Eight is
+# what a crypto pair needs (a satoshi is 1e-8 BTC) and is harmless for equities.
+# Rounding down rather than to nearest, so a sized entry can never cost more
+# than the fraction of equity it was allowed.
+_SIZE_PLACES = Decimal("0.00000001")
 
 # Zero means "not simulated", which is the same convention services/risk.py's
 # check_stop_loss and check_take_profit already use for the live thresholds --
@@ -193,7 +223,13 @@ class BacktestAssumptions:
     minimum_fee: Decimal = DEFAULT_MINIMUM_FEE
     slippage_rate: Decimal = DEFAULT_SLIPPAGE_RATE
     sell_tax_rate: Decimal = DEFAULT_SELL_TAX_RATE
+    # How the size of each entry is decided. See PositionSizing; the default
+    # keeps every existing run byte-identical.
+    position_sizing: PositionSizing = PositionSizing.FIXED_QUANTITY
+    # Read only under FIXED_QUANTITY.
     quantity: Decimal = DEFAULT_QUANTITY
+    # Read only under PERCENT_OF_EQUITY.
+    equity_pct: Decimal = DEFAULT_EQUITY_PCT
     initial_capital: Decimal = DEFAULT_INITIAL_CAPITAL
     # Measured from the position's own fill price, the way
     # market_loop._check_position_exit measures from position.avg_entry_price.
@@ -208,8 +244,18 @@ class BacktestAssumptions:
         # looked like a trade.
         if self.initial_capital <= 0:
             raise ValueError("起始本金必須大於 0。")
-        if self.quantity <= 0:
-            raise ValueError("每次下單數量必須大於 0。")
+        # Each mode validates only the field it reads. Demanding a meaningful
+        # quantity from a percent run -- or a meaningful percentage from a
+        # fixed one -- is how a form grows a question nobody can answer.
+        if self.position_sizing == PositionSizing.FIXED_QUANTITY:
+            if self.quantity <= 0:
+                raise ValueError("每次下單數量必須大於 0。")
+        elif not (0 < self.equity_pct <= 1):
+            # Above 1 would be leverage, and nothing here models a margin
+            # account, an interest cost or a margin call. Reporting a levered
+            # return from a simulation that cannot be liquidated is the most
+            # flattering wrong answer this module could give.
+            raise ValueError("每次投入的本金比例必須大於 0 且不超過 1（100%）。")
         for name, rate in (
             ("手續費率", self.commission_rate),
             ("滑價率", self.slippage_rate),
@@ -471,6 +517,32 @@ def _exit_trigger(
     return None
 
 
+def _entry_quantity(account: _Account, price: Decimal, assumptions: BacktestAssumptions) -> Decimal:
+    """How many units this entry buys. Zero means it cannot happen.
+
+    Under PERCENT_OF_EQUITY the account is always flat when this is reached
+    (the replay refuses a BUY while holding), so equity is simply cash.
+
+    `price` already carries the proportional costs -- commission and slippage
+    are folded into the fill -- so it is the all-in cost per unit. The one cost
+    it cannot carry is the broker's per-leg minimum, which does not scale with
+    the trade; that is reserved off the top so a full-equity entry still has
+    the fee left to pay and cash cannot go negative.
+    """
+    if assumptions.position_sizing is PositionSizing.FIXED_QUANTITY:
+        return assumptions.quantity
+    if price <= 0:
+        # yfinance rounds to four decimals, so a sub-cent penny stock really
+        # can arrive as 0.0 -- the same guard the trade's return_pct needs.
+        return Decimal(0)
+    budget = account.cash * assumptions.equity_pct - assumptions.minimum_fee
+    if budget <= 0:
+        return Decimal(0)
+    # Rounded DOWN, so a sized entry can never cost more than the fraction of
+    # equity it was allowed.
+    return (budget / price).quantize(_SIZE_PLACES, rounding=ROUND_DOWN)
+
+
 def _execute(
     account: _Account,
     side: str,
@@ -478,9 +550,20 @@ def _execute(
     at: datetime,
     assumptions: BacktestAssumptions,
     exit_reason: ExitReason = ExitReason.SIGNAL,
-) -> None:
-    quantity = assumptions.quantity
+) -> bool:
+    """Fill one leg. False means nothing happened and the book is unchanged.
+
+    Only a BUY can come back False, and only under equity sizing: an account
+    too small to buy anything at this price. Opening it anyway at zero units
+    would put a row in the ledger that moved no money -- something that reads
+    as a trade and is not one.
+    """
     price = _fill_price(reference, side, assumptions)
+    # The exit sells what is actually held, which under equity sizing is not
+    # `assumptions.quantity` and never was under any sizing that compounds.
+    quantity = _entry_quantity(account, price, assumptions) if side == "BUY" else account.quantity
+    if quantity <= 0:
+        return False
     account.costs += abs(price - reference) * quantity
 
     # The percentage is already inside `price`; this is only the shortfall up
@@ -497,7 +580,7 @@ def _execute(
         account.quantity = quantity
         account.entry_price = price
         account.opened_at = at
-        return
+        return True
 
     account.cash += price * quantity
     pnl = (price - account.entry_price) * quantity
@@ -523,6 +606,7 @@ def _execute(
     account.quantity = Decimal(0)
     account.entry_price = Decimal(0)
     account.opened_at = None
+    return True
 
 
 # --- the replay -------------------------------------------------------------
@@ -595,6 +679,11 @@ def run_backtest(
     pending_side: str | None = None
     signals = 0
     skipped_buy_while_holding = 0
+    # Equity sizing can produce a zero-unit entry when the account is too small
+    # to buy anything at this price. Counted rather than silently dropped: a
+    # backtest that quietly skipped half its trades reports a return for a
+    # strategy that never ran.
+    skipped_buy_unaffordable = 0
     skipped_sell_while_flat = 0
     unfilled = 0
     stop_loss_exits = 0
@@ -608,7 +697,10 @@ def run_backtest(
         #    candle's open -- before the strategy is shown this candle, which
         #    is the order the two events really happen in.
         if pending_side is not None:
-            _execute(account, pending_side, Decimal(str(bar.open)), bar.timestamp, assumptions)
+            if not _execute(
+                account, pending_side, Decimal(str(bar.open)), bar.timestamp, assumptions
+            ):
+                skipped_buy_unaffordable += 1
             pending_side = None
 
         # 2) The stop-loss / take-profit check, in the same place the live
@@ -650,7 +742,10 @@ def run_backtest(
             elif signal == "SELL" and account.quantity == 0:
                 skipped_sell_while_flat += 1
             elif assumptions.fill_price_basis is FillPriceBasis.CLOSE:
-                _execute(account, signal, Decimal(str(bar.close)), bar.timestamp, assumptions)
+                if not _execute(
+                    account, signal, Decimal(str(bar.close)), bar.timestamp, assumptions
+                ):
+                    skipped_buy_unaffordable += 1
             else:
                 pending_side = signal
 
@@ -682,6 +777,7 @@ def run_backtest(
             tested=tested,
             skipped_buy_while_holding=skipped_buy_while_holding,
             skipped_sell_while_flat=skipped_sell_while_flat,
+            skipped_buy_unaffordable=skipped_buy_unaffordable,
             ambiguous_exit_bars=ambiguous_exit_bars,
         )
     )
@@ -692,7 +788,9 @@ def run_backtest(
         bars_total=len(bars),
         tested=tested,
         signals=signals,
-        skipped_signals=skipped_buy_while_holding + skipped_sell_while_flat,
+        skipped_signals=(
+            skipped_buy_while_holding + skipped_sell_while_flat + skipped_buy_unaffordable
+        ),
         unfilled_signals=unfilled,
         stop_loss_exits=stop_loss_exits,
         take_profit_exits=take_profit_exits,
@@ -772,12 +870,37 @@ def _no_data_note(bars: list[Bar], warmup: int) -> str:
     )
 
 
+def _sizing_note(assumptions: BacktestAssumptions) -> str:
+    """How big each trade was, which decides what the return figure means.
+
+    Under fixed sizing the return is 「what N units of this stock did」, which is
+    not comparable between two stocks at different price levels and never
+    compounds. Under equity sizing it is 「what this strategy did to the
+    account」. The two answer different questions, so the run has to say which
+    one it answered.
+    """
+    if assumptions.position_sizing is PositionSizing.FIXED_QUANTITY:
+        return (
+            f"每次下單數量固定 {format(assumptions.quantity.normalize(), 'f')} 單位，"
+            "而且一次只持有一個部位，不加碼、不放空。"
+        )
+    pct = assumptions.equity_pct * 100
+    return (
+        f"每次進場投入當下帳戶淨值的 {format(pct.normalize(), 'f')}%，"
+        "而且一次只持有一個部位，不加碼、不放空。獲利會滾入下一筆的部位大小 —— "
+        "報酬率因此代表「這個策略對這個帳戶做了什麼」，可以跟別支策略直接比較。"
+        "不模擬整股／零股的股數限制（台股一張是 1000 股），會買到小數單位；"
+        "無條件捨去到小數點後 8 位，不會超買。"
+    )
+
+
 def _run_notes(
     *,
     account: _Account,
     tested: list[Bar],
     skipped_buy_while_holding: int,
     skipped_sell_while_flat: int,
+    skipped_buy_unaffordable: int = 0,
     ambiguous_exit_bars: int = 0,
 ) -> list[str]:
     notes: list[str] = []
@@ -787,6 +910,12 @@ def _run_notes(
             "收四個價格，無法確定哪一邊先到，這裡一律當成停損先觸發 —— "
             "那是唯一不會讓結果變好看的選法。這幾筆的結果是估的，不是測出來的；"
             "如果它們佔的比例不低，換成更小的 K 棒週期再測一次會準得多。"
+        )
+    if skipped_buy_unaffordable:
+        notes.append(
+            f"有 {skipped_buy_unaffordable} 次買進訊號因為帳戶剩餘資金買不到任何單位而略過。"
+            "這代表策略在那段期間等於沒有在跑，上面的報酬率是「剩下那些有成交的交易」"
+            "的結果，不是策略本身的結果。"
         )
     if skipped_buy_while_holding:
         notes.append(
@@ -970,8 +1099,7 @@ def _assumption_notes(
         f"賣出交易稅：{_rate_text(assumptions.sell_tax_rate)}，只在賣出時收。"
         "台股現股請自行設成 0.003（0.3%）；預設是 0，沒有幫你偷偷加上去。",
         f"滑價：{_rate_text(assumptions.slippage_rate)}，方向一律對你不利（買貴、賣便宜）。",
-        f"每次下單數量固定 {format(assumptions.quantity.normalize(), 'f')} 單位，"
-        "而且一次只持有一個部位，不加碼、不放空。",
+        _sizing_note(assumptions),
         f"起始本金 {format(assumptions.initial_capital.normalize(), 'f')}，"
         "只用來換算報酬率與最大回撤，不會擋下任何一筆買進。",
         "風控閘門：回測「不」套用實際下單的風控（部位上限、單筆金額上限、本金上限、"

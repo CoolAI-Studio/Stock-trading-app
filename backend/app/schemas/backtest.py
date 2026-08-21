@@ -7,6 +7,7 @@ from app.models.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
 from app.services.backtest import (
     DEFAULT_COMMISSION_RATE,
+    DEFAULT_EQUITY_PCT,
     DEFAULT_INITIAL_CAPITAL,
     DEFAULT_MINIMUM_FEE,
     DEFAULT_QUANTITY,
@@ -15,6 +16,7 @@ from app.services.backtest import (
     BacktestAssumptions,
     ExitReason,
     FillPriceBasis,
+    PositionSizing,
 )
 from app.services.market_data.base import Timeframe
 
@@ -30,7 +32,13 @@ class BacktestAssumptionsRead(BaseModel):
     minimum_fee: MoneyStr
     slippage_rate: MoneyStr
     sell_tax_rate: MoneyStr
+    # Which of the two size fields below actually decided anything. Echoed
+    # like every other assumption: a return sized at a fixed unit count and one
+    # sized at a fraction of equity answer different questions, and two runs
+    # that do not say which cannot be compared with each other.
+    position_sizing: PositionSizing
     quantity: MoneyStr
+    equity_pct: MoneyStr
     initial_capital: MoneyStr
     # Echoed like every other assumption: a run that applied a 5% stop and one
     # that applied none are different experiments, and telling them apart
@@ -63,7 +71,15 @@ class BacktestRunRequest(BaseModel):
     minimum_fee: Decimal = Field(default=DEFAULT_MINIMUM_FEE, ge=0)
     slippage_rate: Decimal = Field(default=DEFAULT_SLIPPAGE_RATE, ge=0, le=1)
     sell_tax_rate: Decimal = Field(default=DEFAULT_SELL_TAX_RATE, ge=0, le=1)
+    # Defaults to the fixed-count sizing every run used before this existed:
+    # saved runs are compared with each other, and a changed default would make
+    # every historical run incomparable with every new one.
+    position_sizing: PositionSizing = PositionSizing.FIXED_QUANTITY
     quantity: Decimal = Field(default=DEFAULT_QUANTITY, gt=0)
+    # A fraction of the account, read only under PERCENT_OF_EQUITY. Capped at
+    # 1: above that is leverage, and nothing here models a margin account, an
+    # interest cost or a margin call.
+    equity_pct: Decimal = Field(default=DEFAULT_EQUITY_PCT, gt=0, le=1)
     initial_capital: Decimal = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
 
     # None, not 0, and the difference carries meaning -- the same three-state
@@ -108,7 +124,9 @@ class BacktestRunRequest(BaseModel):
             minimum_fee=self.minimum_fee,
             slippage_rate=self.slippage_rate,
             sell_tax_rate=self.sell_tax_rate,
+            position_sizing=self.position_sizing,
             quantity=self.quantity,
+            equity_pct=self.equity_pct,
             initial_capital=self.initial_capital,
             stop_loss_pct=stop_loss_pct,
             take_profit_pct=take_profit_pct,
