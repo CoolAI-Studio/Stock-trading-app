@@ -95,7 +95,16 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
             for symbol, gap in beat.symbol_gap_sec.items()
             if gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC
         )
-        checks["symbols"] = {"status": _FAIL, "stale_symbols": stale} if stale else {"status": _OK}
+        # A COUNT, never the names. This endpoint is public by necessity --
+        # render.yaml points its health check here and the external watchdog
+        # polls it with no credentials -- so naming them served the owner's
+        # watchlist to the internet at exactly the moment something went
+        # wrong. A probe only needs to know that something is stale, and the
+        # names are on the authenticated status page for whoever has to fix
+        # it.
+        checks["symbols"] = (
+            {"status": _FAIL, "stale_count": len(stale)} if stale else {"status": _OK}
+        )
     else:
         # An intentionally idle worker (local runs, the test suite) is a
         # configuration choice, not something to wake the owner over.

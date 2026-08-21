@@ -152,12 +152,51 @@ def test_a_symbol_with_no_price_for_a_long_time_turns_the_probe_red(client, monk
     assert resp.json()["checks"]["symbols"]["status"] == "fail"
 
 
-def test_the_response_names_the_symbol(client, monkeypatch):
-    """Otherwise the email says something is wrong and leaves the owner to
-    find out which of their rows it was."""
+def test_the_response_counts_the_symbols_but_does_not_name_them(client, monkeypatch):
+    """THE CONTRACT CHANGED, and the reason is worth keeping written down.
+
+    This used to assert the names, because otherwise the watchdog email says
+    「something is wrong」 and leaves the owner to work out which of their rows
+    it was. That reasoning still stands -- but this endpoint has no
+    authentication and cannot have any: render.yaml points its health check
+    here and the external watchdog polls it with no credentials. Naming the
+    symbols therefore published the owner's watchlist to anyone who asked, and
+    it did so at precisely the moment something had gone wrong.
+
+    A count tells a probe everything a probe can act on. The names are still
+    one login away on /api/system/status, which is where the person who has to
+    fix the row is going anyway -- see the test below, which exists so nobody
+    removes them from there believing they are redundant.
+    """
     resp = _healthz(client, monkeypatch, {"2330.TW": 99999.0, "AAPL": 1.0})
 
-    assert resp.json()["checks"]["symbols"]["stale_symbols"] == ["2330.TW"]
+    symbols = resp.json()["checks"]["symbols"]
+    assert symbols["stale_count"] == 1
+    assert "2330.TW" not in resp.text
+
+
+def test_but_the_owner_can_still_find_out_which_symbol_it_was(auth_client, monkeypatch):
+    """The half of the old contract that must not be lost: 「something is
+    wrong」 is not a thing anybody can act on."""
+    from app.services import worker_health
+
+    class _Beat:
+        @staticmethod
+        def snapshot():
+            return worker_health.HeartbeatSnapshot(
+                uptime_sec=9999.0,
+                last_loop_age_sec=1.0,
+                last_poll_age_sec=1.0,
+                consecutive_empty_polls=0,
+                symbol_gap_sec={"2330.TW": 99999.0},
+            )
+
+    monkeypatch.setattr(settings, "WORKER_ENABLED", True)
+    monkeypatch.setattr(worker_health, "heartbeat", _Beat())
+
+    body = auth_client.get("/api/system/status").json()
+
+    assert any(row["symbol"] == "2330.TW" for row in body["market_data"]["stale_symbols"])
 
 
 def test_the_check_is_disabled_along_with_the_worker(client, monkeypatch):

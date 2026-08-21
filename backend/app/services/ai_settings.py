@@ -64,6 +64,14 @@ def _row(db: Session, user_id: int) -> AiSettings | None:
     return db.execute(select(AiSettings).where(AiSettings.user_id == user_id)).scalar_one_or_none()
 
 
+def _is_deployment_owner(db: Session, user_id: int) -> bool:
+    """The first account this deployment ever had."""
+    from app.models.user import User
+
+    first = db.query(User.id).order_by(User.id).first()
+    return first is not None and first[0] == user_id
+
+
 def resolve(db: Session, user_id: int) -> ResolvedAI:
     row = _row(db, user_id)
     if row is not None:
@@ -73,6 +81,22 @@ def resolve(db: Session, user_id: int) -> ResolvedAI:
             api_key=(row.api_key_encrypted or {}).get("api_key", ""),
             model=row.model,
             source="database",
+        )
+
+    # THE ENVIRONMENT KEY BELONGS TO WHOEVER DEPLOYED THIS, and it is billed to
+    # them. Falling back to it for any account without a row of its own is
+    # right for the owner and wrong for everybody else -- a second account
+    # would spend the owner's credit without ever seeing the key.
+    #
+    # 「The owner」 is the first account this deployment ever had, which on the
+    # normal single-owner deployment is the only one.
+    if not _is_deployment_owner(db, user_id):
+        return ResolvedAI(
+            provider=settings.AI_PROVIDER,
+            base_url=settings.AI_BASE_URL,
+            api_key="",
+            model="",
+            source="none",
         )
 
     api_key = (settings.AI_API_KEY or "").strip()

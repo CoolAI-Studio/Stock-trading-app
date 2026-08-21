@@ -90,7 +90,20 @@ def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User |
     by_symbol = query.first()
     if by_symbol is not None:
         return db.get(User, by_symbol.user_id)
-    return db.query(User).order_by(User.id).first()
+
+    # The fallback is 「the only account there is」, and it is now spelled that
+    # way rather than 「the first account ever created」. Those are the same
+    # thing on a single-owner deployment and nothing changes there.
+    #
+    # They stop being the same the moment a second account exists, and then
+    # order_by(User.id).first() means THE OWNER: anybody holding the shared
+    # TV_WEBHOOK_SECRET could post an alert for a symbol nobody has a strategy
+    # for and have it land in the owner's account, as an order and a
+    # notification. There is one secret for the whole deployment, so the
+    # payload cannot say who it is from. Guessing is not available to an app
+    # that decides whose money moves.
+    users = db.query(User).order_by(User.id).limit(2).all()
+    return users[0] if len(users) == 1 else None
 
 
 def _prune_audit_log(db: Session) -> None:
@@ -296,7 +309,7 @@ def list_webhook_logs(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_active_user),
+    user: User = Depends(get_current_active_user),
 ) -> list[TradingViewWebhookLog]:
     """What TradingView actually sent.
 
@@ -307,14 +320,23 @@ def list_webhook_logs(
     the secret was wrong, whether the JSON was malformed, or whether a risk
     gate refused it.
 
-    Not filtered by user: a call that failed the secret or failed to parse has
-    no user attached, and those are exactly the rows somebody is looking for.
-    This deployment has one owner (see CLAUDE.md), so there is nobody else's
-    traffic to leak; the day that changes, this needs revisiting along with
-    the webhook's own single-tenant user resolution.
+    THE DAY HAS COME. This was deliberately unfiltered, on the reasoning that
+    a deployment has one owner so there is nobody else's traffic to leak, and
+    that the rows worth reading -- a call that failed the secret, or whose JSON
+    would not parse -- have no user attached and would be filtered away. The
+    first half stopped being safe to assume the moment a second account could
+    exist at all.
+
+    So: your own rows, plus the ones that belong to nobody. An unattributed row
+    is a deployment-level diagnostic -- either the secret was wrong, in which
+    case the sender was not a user of this app, or the payload never parsed --
+    and it is still exactly the row somebody debugging is looking for.
     """
     return (
         db.query(TradingViewWebhookLog)
+        .filter(
+            (TradingViewWebhookLog.user_id == user.id) | (TradingViewWebhookLog.user_id.is_(None))
+        )
         .order_by(TradingViewWebhookLog.id.desc())
         .offset(offset)
         .limit(limit)
