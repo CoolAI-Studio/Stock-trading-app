@@ -6,7 +6,13 @@ import { DashboardPage } from './DashboardPage'
 import { api } from '../lib/api'
 import type { Order, Position, Quote, Strategy } from '../lib/types'
 
-vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }))
+// importOriginal so ApiError is the real class. PriceChart renders on this
+// page and uses `instanceof ApiError` to tell 「the backend is older than
+// this page」 from any other failure; a mock without it throws on import.
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
+  api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
+}))
 vi.mock('../lib/useWebSocket', () => ({ useWebSocket: vi.fn() }))
 
 // Inherits every risk knob from the global settings, like every strategy

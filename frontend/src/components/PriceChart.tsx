@@ -8,7 +8,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../lib/api'
+import { ApiError, api } from '../lib/api'
 import { looksUnpriceable } from '../lib/symbol'
 import { tradingViewSymbol } from '../lib/tradingView'
 import type { BarsResponse, DataSource } from '../lib/types'
@@ -68,6 +68,11 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   const query = useQuery({
     queryKey: ['bars', symbol, timeframe, dataSource],
     enabled: !unpriceable,
+    // No retries. The failures this actually sees are a 404 from a backend
+    // older than this page and a 422 from a symbol it will not price -- both
+    // permanent, and retrying them means seven seconds of a blank chart before
+    // anything is said.
+    retry: false,
     queryFn: () =>
       api.get<BarsResponse>(
         `/api/market/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}` +
@@ -166,6 +171,10 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   // returning something else -- would otherwise throw during render and
   // unmount the whole dashboard over a chart.
   const empty = query.isSuccess && !query.data?.bars?.length
+  // A 404 is not a transient outage: it means the deployed backend is older
+  // than the page asking it, and 「稍後重新整理」 would leave somebody waiting
+  // for something that never happens on its own.
+  const notFound = query.error instanceof ApiError && query.error.status === 404
 
   return (
     <div className="space-y-2">
@@ -200,7 +209,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
             explanation is indistinguishable from a typo, an outage and a
             broken app, which is exactly what the embedded widget gave. */}
         {(renderFailed || unpriceable || query.isPending || empty || query.isError) && (
-          <div className="absolute inset-0 flex items-center justify-center rounded bg-slate-950/80 p-4 text-center text-sm">
+          <div className="absolute inset-0 z-[60] flex items-center justify-center rounded bg-slate-950/80 p-4 text-center text-sm">
             {renderFailed ? (
               <p role="alert" className="text-red-400">
                 這個瀏覽器畫不出圖表。下面的「在 TradingView 開啟」還是可以看，
@@ -210,8 +219,9 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
               <p className="text-amber-300">{unpriceable}</p>
             ) : query.isError ? (
               <p role="alert" className="text-red-400">
-                讀不到歷史資料。可能是後端還沒醒（Render 免費方案冷啟動要一分鐘左右），
-                或者行情來源暫時不通 —— 稍後重新整理看看。
+                {notFound
+                  ? '後端還沒有這個功能 —— 部署的後端版本比這個畫面舊。去 Render 按一次 Manual Deploy，等它跑完再重新整理。'
+                  : '讀不到歷史資料。可能是後端還沒醒（Render 免費方案冷啟動要一分鐘左右），或者行情來源暫時不通 —— 稍後重新整理看看。'}
               </p>
             ) : empty ? (
               <p className="text-slate-400">

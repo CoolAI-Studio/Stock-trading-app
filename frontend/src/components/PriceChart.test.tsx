@@ -3,10 +3,15 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PriceChart } from './PriceChart'
-import { api } from '../lib/api'
+import { ApiError, api } from '../lib/api'
 import type { BarsResponse } from '../lib/types'
 
-vi.mock('../lib/api', () => ({ api: { get: vi.fn() } }))
+// importOriginal so ApiError is the real class -- the component uses
+// `instanceof` to tell a 404 from any other failure.
+vi.mock('../lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/api')>()),
+  api: { get: vi.fn() },
+}))
 
 /**
  * The chart, drawn from data this app already has.
@@ -221,5 +226,35 @@ describe('元件本身', () => {
 
     const region = screen.getByRole('img', { name: /0050\.TW/ })
     expect(within(region.parentElement!).queryByText(/載入中/)).not.toBeInTheDocument()
+  })
+})
+
+// --- the message that was there and could not be seen -----------------------
+//
+// The 404 from an out-of-date backend rendered its overlay and nobody saw it:
+// lightweight-charts puts z-index up to 50 on its own elements, and an overlay
+// with no z-index of its own paints UNDERNEATH the canvas. What the owner got
+// was a black rectangle with no explanation -- the exact failure the overlay
+// exists to prevent, produced by the overlay.
+
+describe('錯誤訊息要真的看得到', () => {
+  it('覆蓋層要疊在圖表上面，不是被圖表蓋住', async () => {
+    // lightweight-charts uses z-index up to 50, so anything less loses.
+    vi.mocked(api.get).mockRejectedValue(new Error('boom'))
+    show()
+
+    const alert = await screen.findByRole('alert')
+    const overlay = alert.parentElement!
+    expect(overlay.className).toMatch(/z-\[?\d/)
+  })
+
+  it('後端沒有這個端點時，講的是「去按 Manual Deploy」而不是「稍後再試」', async () => {
+    // A 404 is not a transient outage. It means the deployed backend is older
+    // than the page asking it, and 「稍後重新整理」 would have somebody waiting
+    // for something that will never happen on its own.
+    vi.mocked(api.get).mockRejectedValue(new ApiError(404, 'Not Found'))
+    show()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Manual Deploy|重新部署/)
   })
 })
