@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 from collections.abc import Callable
 
@@ -106,11 +107,30 @@ class MarketDataService:
         # holds what is known, this one holds when it was last impossible to
         # find out.
         self._bar_failed_at: dict[tuple[DataSource, str, Timeframe], float] = {}
-        # Whether the most recent get_bars call could not reach the provider.
-        # Read by the chart endpoint so 「we could not ask」 and 「there is no
-        # history」 reach the screen as different sentences: one clears on its
-        # own and one never will.
-        self.last_bar_fetch_failed = False
+        # One lock per (source, symbol, timeframe), so that two callers wanting
+        # the SAME candles at the same time cost one upstream request.
+        #
+        # The chart makes exactly that pair: GET /bars for the candles and POST
+        # /indicators for the lines over them, fired together, and FastAPI runs
+        # sync endpoints in a threadpool so they really do overlap. Once the
+        # cache is warm this is free; on a cold one both miss and both fetch.
+        # Cold is the normal case here -- Render's free tier spins down when
+        # idle -- and a rate-limited fetch is precisely the failure that made
+        # AAPL read as having no history.
+        #
+        # PER KEY, never global: a single lock would queue the market loop's
+        # whole sweep behind one slow symbol, and 「警告不能停擺」 outranks
+        # everything in this product.
+        #
+        # THE DEPTH IS PART OF THE KEY, and that is not an optimisation. The
+        # chart asks for DEFAULT_BAR_LIMIT and a backtest asks for thousands;
+        # the providers tail to exactly what was asked, so a 250-bar answer
+        # cannot satisfy a 300-bar question. Sharing a lock across depths makes
+        # the deeper caller wait for a fetch it then has to repeat -- all of
+        # the cost, none of the benefit -- and the caller most likely to be
+        # deeper is the market loop.
+        self._bar_locks: dict[tuple[DataSource, str, Timeframe, int], threading.Lock] = {}
+        self._bar_locks_guard = threading.Lock()
 
     def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
         if not symbols:
@@ -200,6 +220,50 @@ class MarketDataService:
         common case and the one the rate limiter cares about.
         """
         key = (data_source, symbol, timeframe)
+        served = self._cached_bars(key, timeframe, limit)
+        if served is not None:
+            return served
+
+        # Everyone who missed the cache for this one key now queues here, and
+        # all but the first will find the answer already waiting when they get
+        # in. Taken AFTER the fast path above so a warm cache never touches a
+        # lock at all.
+        with self._bar_lock((*key, limit)):
+            served = self._cached_bars(key, timeframe, limit)
+            if served is not None:
+                return served
+            return self._fetch_bars(key, symbol, timeframe, data_source, limit)
+
+    def bar_fetch_failed(self, symbol: str, timeframe: Timeframe, data_source: DataSource) -> bool:
+        """Whether this symbol's last bar fetch could not reach the provider.
+
+        Asked PER KEY rather than read off a 「last call」 attribute on the
+        service. Two requests now overlap by design -- the chart fires /bars
+        and /indicators together -- and a shared attribute means one symbol's
+        outcome can be reported on another symbol's response. That would put
+        the permanent sentence (「查不到歷史資料」) on a stock that was merely
+        rate limited, which is the exact confusion this flag exists to prevent.
+        """
+        failed_at = self._bar_failed_at.get((data_source, symbol, timeframe))
+        return failed_at is not None and (self._clock() - failed_at) <= FAILED_FETCH_RETRY_SEC
+
+    def _bar_lock(self, key: tuple[DataSource, str, Timeframe, int]) -> threading.Lock:
+        with self._bar_locks_guard:
+            lock = self._bar_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._bar_locks[key] = lock
+            return lock
+
+    def _cached_bars(
+        self, key: tuple[DataSource, str, Timeframe], timeframe: Timeframe, limit: int
+    ) -> list[Bar] | None:
+        """What can be answered without asking the provider, or None.
+
+        None means 「go and fetch」; an empty list is a real answer meaning 「we
+        asked and there is nothing」. Keeping those apart is the whole subject
+        of test_bars_failure_is_not_an_answer.py.
+        """
         now = self._clock()
         cached_at, cached_limit, cached = self._bar_cache.get(key, (None, 0, []))
         fresh = cached_at is not None and (now - cached_at) <= self._bar_ttl_sec[timeframe]
@@ -212,9 +276,19 @@ class MarketDataService:
         # perfectly good symbol reading as delisted.
         failed_at = self._bar_failed_at.get(key)
         if failed_at is not None and (now - failed_at) <= FAILED_FETCH_RETRY_SEC:
-            self.last_bar_fetch_failed = True
             return cached[-limit:]
-        self.last_bar_fetch_failed = False
+        return None
+
+    def _fetch_bars(
+        self,
+        key: tuple[DataSource, str, Timeframe],
+        symbol: str,
+        timeframe: Timeframe,
+        data_source: DataSource,
+        limit: int,
+    ) -> list[Bar]:
+        now = self._clock()
+        _, _, cached = self._bar_cache.get(key, (None, 0, []))
 
         try:
             fetched = closed_bars(self._providers[data_source].get_bars(symbol, timeframe, limit))
@@ -231,12 +305,13 @@ class MarketDataService:
             # instead of a full TTL: a transient failure costs a minute, not
             # the fifteen a real answer is worth.
             logger.warning("%s bars failed for %s: %s", data_source.value, symbol, exc)
-            self._bar_failed_at[key] = now
-            # Set HERE as well as in the cooldown branch above: the very first
-            # failure is the one somebody is looking at, and without this the
-            # page would call it 「no history」 exactly once -- on the request
-            # that actually failed.
-            self.last_bar_fetch_failed = True
+            # Stamped NOW, not with the `now` read before the fetch. A fetch
+            # that fails slowly -- a socket timeout is the normal way this
+            # fails -- would otherwise be recorded as having failed a minute
+            # ago, so the cooldown is already spent and the page is told
+            # 「there is no history」 about the very request that could not be
+            # made.
+            self._bar_failed_at[key] = self._clock()
             # Whatever history is already held still stands: one failed request
             # must not look like 「this strategy has no history yet」 and
             # silently restart its warm-up.
