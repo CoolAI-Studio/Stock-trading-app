@@ -93,7 +93,14 @@ _FORBIDDEN_NAMES = frozenset(
 _SAFE_BUILTIN_NAMES = frozenset(
     {
         "abs", "all", "any", "bool", "callable", "chr", "classmethod", "dict", "divmod",
-        "enumerate", "filter", "float", "format", "frozenset", "hasattr", "hash", "int",
+        # `format` is NOT here, deliberately. str.format walks attributes named
+        # in the TEMPLATE, and the template is a plain string constant that the
+        # AST guard cannot look inside:
+        #     "{0._urandom.__self__.environ}".format(random)
+        # is the same escape as a dunder chain, spelled where no static pass
+        # will ever see it. f-strings and %-formatting cover everything a
+        # strategy needs to build a signal string.
+        "enumerate", "filter", "float", "frozenset", "hasattr", "hash", "int",
         "isinstance", "issubclass", "iter", "len", "list", "map", "max", "min", "next",
         "object", "ord", "pow", "print", "property", "range", "repr", "reversed", "round",
         "set", "slice", "sorted", "staticmethod", "str", "sum", "super", "tuple", "type",
@@ -124,6 +131,54 @@ def _is_dunder(name: str) -> bool:
     return name.startswith("__") and name.endswith("__")
 
 
+class _PublicModule:
+    """A module with its private attributes removed.
+
+    THE SECOND LAYER, and the one that does not depend on foreseeing a
+    spelling. The static pass refuses `collections._sys` in source; this makes
+    the attribute absent, so a route nobody thought of finds nothing there
+    either.
+
+    It exists because of the shape of the bug that was actually exploited:
+    CPython's collections/__init__.py does `import sys as _sys`, so a module
+    the allow-list deliberately includes was handing out the real `sys`, and
+    from there `sys.modules["os"].environ` is the whole environment --
+    SECRET_ENCRYPTION_KEY, DATABASE_URL, JWT_SECRET. Which standard-library
+    module happens to keep a private alias is a detail of the interpreter
+    version, not something to enumerate.
+
+    Public API is passed straight through, so `math.sqrt`, `statistics.mean`
+    and `collections.OrderedDict` are untouched.
+
+    NOT A SANDBOX. Strategy code still runs in this process, and the module
+    header above says what the real answer is: a separate process with a
+    cleared environment and its own limits. This narrows the hole that was
+    open; it does not turn the sandbox into a boundary.
+    """
+
+    __slots__ = ("_module",)
+
+    def __init__(self, module) -> None:
+        object.__setattr__(self, "_module", module)
+
+    def __getattr__(self, name: str):
+        if name.startswith("_"):
+            raise AttributeError(
+                f"module '{object.__getattribute__(self, '_module').__name__}' has no "
+                f"attribute '{name}' -- private attributes are not available to strategy code."
+            )
+        return getattr(object.__getattribute__(self, "_module"), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        raise AttributeError("strategy code cannot modify a module.")
+
+    def __dir__(self) -> list[str]:
+        return [a for a in dir(object.__getattribute__(self, "_module")) if not a.startswith("_")]
+
+    def __repr__(self) -> str:
+        return f"<module {object.__getattribute__(self, '_module').__name__!r}>"
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
     """Replaces __import__ inside the strategy namespace; the argument names
     shadow builtins because they mirror the real __import__ signature. The AST
@@ -132,7 +187,9 @@ def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
     root = name.split(".")[0]
     if level != 0 or root not in _ALLOWED_MODULES:
         raise StrategySecurityError(f"Strategy code may not import '{name}'.")
-    return builtins.__import__(name, globals, locals, fromlist, level)
+    # Wrapped, never handed over raw. See _PublicModule: the module a strategy
+    # receives must not carry the private aliases that reach the interpreter.
+    return _PublicModule(builtins.__import__(name, globals, locals, fromlist, level))
 
 
 def _build_sandbox_namespace() -> dict:
@@ -155,6 +212,31 @@ def _build_sandbox_namespace() -> dict:
     }
 
 
+def _is_own_attribute(node: ast.Attribute) -> bool:
+    """`self._prices` -- the strategy reaching into its own instance.
+
+    Allowed because it is a convention people genuinely use and because `self`
+    is the object the strategy already owns; there is nothing there to escape
+    to. `self._prices._sys` is still refused, because the outer attribute's
+    value is no longer `self`.
+    """
+    return isinstance(node.value, ast.Name) and node.value.id == "self"
+
+
+def _format_field_parts(template: str) -> list[str]:
+    """The attribute names a format template would walk.
+
+    Parsed leniently and on purpose: this runs to REFUSE things, so a template
+    it cannot make sense of should still have its pieces examined rather than
+    being waved through.
+    """
+    parts: list[str] = []
+    for chunk in template.split("{")[1:]:
+        field = chunk.split("}")[0].split("!")[0].split(":")[0]
+        parts.extend(piece for piece in field.replace("[", ".").split(".") if piece)
+    return parts
+
+
 def _reject_unsafe_source(tree: ast.AST) -> None:
     """Static pass over the whole tree, including branches that never run on a
     given tick -- an exfiltration payload hidden in `if price > 9999:` has to
@@ -175,11 +257,40 @@ def _reject_unsafe_source(tree: ast.AST) -> None:
                     f"strategy code. Allowed: {', '.join(sorted(_ALLOWED_MODULES))}."
                 )
         elif isinstance(node, ast.Attribute):
-            if _is_dunder(node.attr):
+            # ANY leading underscore, not just dunders. This is the hole that
+            # was actually exploited: CPython's collections/__init__.py does
+            # `import sys as _sys`, so
+            #
+            #     collections._sys.modules["os"].environ
+            #
+            # reached the real os module through a module the allow-list
+            # deliberately includes, without a dunder anywhere. Every other
+            # allowed module is one refactor of the standard library away from
+            # offering the same thing, so the rule is about the SHAPE of the
+            # access rather than a list of known-bad names.
+            #
+            # `self._anything` stays legal -- see below. A strategy's own
+            # private attributes are a convention people use, and self is the
+            # strategy's own object; there is nothing to escape to.
+            if node.attr.startswith("_") and not _is_own_attribute(node):
                 raise StrategySecurityError(
-                    f"line {node.lineno}: accessing '{node.attr}' is not allowed -- dunder "
+                    f"line {node.lineno}: accessing '{node.attr}' is not allowed -- private "
                     "attributes are the usual route out of a restricted namespace."
                 )
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # A format template is data to the parser and code to str.format.
+            # `format` is off the builtin list, but a strategy still holds
+            # every string method, so the template itself has to be refused.
+            if "{" in node.value and ("." in node.value or "[" in node.value):
+                stripped = node.value.replace(" ", "")
+                if any(marker in stripped for marker in ("{0.", "{0[", "{}.", "{!")) or any(
+                    part.startswith("_") for part in _format_field_parts(node.value)
+                ):
+                    raise StrategySecurityError(
+                        f"line {node.lineno}: this string looks like a format template that "
+                        "reaches into an object's attributes, which is how a restricted "
+                        "namespace is escaped without naming the attribute in code."
+                    )
         elif isinstance(node, ast.Name):
             if node.id in _FORBIDDEN_NAMES or _is_dunder(node.id):
                 raise StrategySecurityError(
