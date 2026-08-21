@@ -37,7 +37,7 @@ from app.models.enums import NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationLog
 from app.models.user import User
-from app.services import setup_state, worker_health
+from app.services import ai_settings, setup_state, worker_health
 from app.services.ai_provider import get_ai_provider
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -67,15 +67,19 @@ _ASSISTANT_PROMPT = (
 )
 
 
-def _assistant_available() -> bool:
+def _assistant_available(db: Session, user_id: int) -> bool:
     """Whether asking would produce an answer rather than an error.
 
-    Reported on the status payload so the UI can leave the box out entirely.
-    AI_API_KEY is one more blank in a deploy form and is optional by design; a
-    page that offers a feature which answers every question with 「尚未設定」
-    makes the optional thing feel broken.
+    Resolved per user rather than read off the environment: the key now lives
+    in the database (services/ai_settings.py) with the env var as a fallback,
+    and a page that advertised the assistant based on the wrong one would
+    either hide a working feature or offer a broken one.
+
+    Reported on the status payload so the UI can leave the box out entirely. An
+    AI key is optional by design; a box that answers every question with
+    「尚未設定」 makes the optional thing feel broken.
     """
-    return bool(settings.AI_API_KEY.strip() and settings.AI_MODEL.strip())
+    return ai_settings.resolve(db, user_id).is_configured
 
 
 def _worse(current: str, candidate: str) -> str:
@@ -196,7 +200,7 @@ def system_status(
         "worker": worker,
         "market_data": market_data,
         "notifications": notifications,
-        "assistant_available": _assistant_available(),
+        "assistant_available": _assistant_available(db, user.id),
     }
 
 
@@ -268,5 +272,7 @@ def system_assist(
     afterwards.
     """
     question = f"{payload.message}\n\n{_state_for_assistant(db, user)}"
-    result = get_ai_provider().ask(question, system=_ASSISTANT_PROMPT)
+    result = get_ai_provider(ai_settings.resolve(db, user.id)).ask(
+        question, system=_ASSISTANT_PROMPT
+    )
     return AssistResult(ok=result.ok, reply=result.reply, error=result.error)

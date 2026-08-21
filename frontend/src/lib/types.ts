@@ -637,3 +637,22 @@ export interface BarsResponse {
     volume: number
   }[]
 }
+
+/** GET /api/ai-settings -- which model to ask, and enough about the key to
+ * recognise it.
+ *
+ * Write-only over the API: the key itself never comes back, like every other
+ * secret on every other settings page. */
+export interface AiSettings {
+  configured: boolean
+  /** Where the setting in force came from. 「It works and I never set it here」
+   * sends somebody hunting through Render for a value they do not remember
+   * typing. */
+  source: 'database' | 'env' | 'none'
+  provider: string
+  base_url: string
+  model: string
+  /** The last four characters, which is what tells 「the key I meant」 from
+   * 「one I pasted wrong six months ago」 without revealing it. */
+  key_preview: string | null
+}

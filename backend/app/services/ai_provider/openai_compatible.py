@@ -1,7 +1,7 @@
 import httpx
 
 from app.config import settings
-from app.services.ai_provider.base import SYSTEM_PROMPT, AIResult
+from app.services.ai_provider.base import SYSTEM_PROMPT, AIResult, AISettings
 
 # Statuses where moving on to the *next* configured model is worth a try: the
 # request itself was well-formed, this particular model just couldn't serve it.
@@ -48,11 +48,24 @@ class OpenAICompatibleProvider:
     routing parameter keeps this class provider-agnostic.
     """
 
+    def __init__(self, config: AISettings | None = None) -> None:
+        # None means 「read the environment」, which keeps every existing caller
+        # and every existing test working unchanged.
+        self._config = config
+
+    @property
+    def _settings(self) -> AISettings:
+        return self._config or AISettings(
+            base_url=settings.AI_BASE_URL,
+            api_key=settings.AI_API_KEY,
+            model=settings.AI_MODEL,
+        )
+
     def ask(self, message: str, system: str | None = None) -> AIResult:
-        if not settings.AI_API_KEY:
+        if not self._settings.api_key:
             return AIResult(ok=False, error="尚未設定 AI_API_KEY。")
 
-        models = [m.strip() for m in settings.AI_MODEL.split(",") if m.strip()]
+        models = [m.strip() for m in self._settings.model.split(",") if m.strip()]
         if not models:
             return AIResult(ok=False, error="尚未設定 AI_MODEL。")
 
@@ -71,8 +84,8 @@ class OpenAICompatibleProvider:
         """Returns (result, whether trying another model could still help)."""
         try:
             response = httpx.post(
-                f"{settings.AI_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {settings.AI_API_KEY}"},
+                f"{self._settings.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self._settings.api_key}"},
                 json={
                     "model": model,
                     "messages": [

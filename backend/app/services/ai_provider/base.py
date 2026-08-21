@@ -19,6 +19,22 @@ class AIResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class AISettings:
+    """What to call and what to call it with.
+
+    Passed in rather than read off the global settings object, because the key
+    now lives per user in the database (services/ai_settings.py) and the
+    environment variable is only the fallback. A provider that reached for the
+    global would ignore whatever the owner saved on the page -- a key that is
+    accepted and then not used is worse than no page at all.
+    """
+
+    base_url: str
+    api_key: str
+    model: str
+
+
 class AIProvider(Protocol):
     # `system` overrides SYSTEM_PROMPT for callers with a different contract to
     # teach the model (strategy generation), so they get the multi-model

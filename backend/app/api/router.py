@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routers import (
+    ai_settings,
     alerts,
     auth,
     backtests,
@@ -31,6 +32,7 @@ api_router.include_router(setup.router)
 api_router.include_router(auth.router)
 api_router.include_router(system.router)
 api_router.include_router(alerts.router)
+api_router.include_router(ai_settings.router)
 api_router.include_router(strategies.router)
 api_router.include_router(backtests.router)
 api_router.include_router(backup.router)

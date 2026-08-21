@@ -3,6 +3,7 @@ Alembic autogenerate (or Base.metadata.create_all in tests) runs. This file
 being complete is load-bearing -- a missing import here means a table is
 silently absent from migrations."""
 
+from app.models.ai import AiSettings  # noqa: F401
 from app.models.backtest import BacktestRun  # noqa: F401
 from app.models.backup import BackupSchedule  # noqa: F401,E402
 from app.models.broker import BrokerCredential  # noqa: F401

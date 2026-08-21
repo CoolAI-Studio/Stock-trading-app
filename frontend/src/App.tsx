@@ -15,6 +15,7 @@ import { WebhooksPage } from './pages/WebhooksPage'
 import { BacktestPage } from './pages/BacktestPage'
 import { SetupPage } from './pages/SetupPage'
 import { SystemStatusPage } from './pages/SystemStatusPage'
+import { AiSettingsPage } from './pages/AiSettingsPage'
 import { setSetupRequiredHandler } from './lib/api'
 
 /** Sends somebody to the setup page the moment the backend says it has not
@@ -60,6 +61,7 @@ function App() {
             <Route path="/webhooks" element={<WebhooksPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/system" element={<SystemStatusPage />} />
+            <Route path="/ai-settings" element={<AiSettingsPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
