@@ -36,7 +36,10 @@ class BarRead(BaseModel):
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: Decimal
+    # Optional, because Bar.volume is. The provider's NaN guard covers OHLC
+    # only, so a row Yahoo padded over a halt really can arrive with no volume
+    # -- and declaring it required turned that one row into a 500 on the chart.
+    volume: Decimal | None = None
 
 
 class BarsRead(BaseModel):
@@ -50,3 +53,9 @@ class BarsRead(BaseModel):
     symbol: str
     timeframe: str
     bars: list[BarRead]
+    # Whether the provider could not be reached, as opposed to answering with
+    # nothing. The page needs different words for the two: 「no history」 is
+    # permanent and 「could not fetch」 clears on its own, and showing the first
+    # for the second is how a stock with fifty years of candles reads as
+    # delisted.
+    fetch_failed: bool = False

@@ -76,6 +76,7 @@ def get_bars(
     return BarsRead(
         symbol=cleaned,
         timeframe=timeframe.value,
+        fetch_failed=service.last_bar_fetch_failed and not bars,
         # An empty list is a real answer, not an error: a newly listed stock
         # genuinely has no candles yet, and 500ing over it would make the page
         # look broken rather than empty.

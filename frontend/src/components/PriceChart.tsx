@@ -138,8 +138,23 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
 
   useEffect(() => {
     const series = seriesRef.current
+    if (!series) return
+
     const bars = query.data?.bars
-    if (!series || !bars?.length) return
+    if (!bars?.length) {
+      // CLEARED, not left alone. Returning early here is what put another
+      // company's candles under a 「查不到 AAPL 的歷史資料」 message: the canvas
+      // held the last successful non-empty answer regardless of which symbol
+      // was selected, and the overlay is only 80% opaque so the old candles
+      // showed through it.
+      //
+      // A blank chart is obviously broken. A plausible, well-formed, WRONG
+      // chart with a warning somebody reads as spurious is worse -- it is the
+      // same failure the backend refuses ambiguous symbols to avoid.
+      series.candles.setData([])
+      series.volume.setData([])
+      return
+    }
 
     // SECONDS, not milliseconds. The library reads a bare number as a UNIX
     // second count; handed milliseconds it plots every candle somewhere around
@@ -171,6 +186,11 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   // returning something else -- would otherwise throw during render and
   // unmount the whole dashboard over a chart.
   const empty = query.isSuccess && !query.data?.bars?.length
+  // 「Could not ask」 and 「there is nothing here」 need different words: one
+  // clears on its own and one never will, and showing the permanent message
+  // for the transient case is how a stock with fifty years of candles reads
+  // as delisted.
+  const fetchFailed = empty && query.data?.fetch_failed === true
   // A 404 is not a transient outage: it means the deployed backend is older
   // than the page asking it, and 「稍後重新整理」 would leave somebody waiting
   // for something that never happens on its own.
@@ -200,7 +220,9 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
         <div
           ref={containerRef}
           role="img"
-          aria-label={`${symbol} 價格走勢圖`}
+          aria-label={
+            query.data?.bars?.length ? `${symbol} 價格走勢圖` : `${symbol} 價格走勢圖（目前沒有資料）`
+          }
           style={{ height: CHART_HEIGHT_PX }}
           className="rounded border border-slate-800"
         />
@@ -222,6 +244,11 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
                 {notFound
                   ? '後端還沒有這個功能 —— 部署的後端版本比這個畫面舊。去 Render 按一次 Manual Deploy，等它跑完再重新整理。'
                   : '讀不到歷史資料。可能是後端還沒醒（Render 免費方案冷啟動要一分鐘左右），或者行情來源暫時不通 —— 稍後重新整理看看。'}
+              </p>
+            ) : fetchFailed ? (
+              <p role="alert" className="text-amber-300">
+                暫時抓不到「{symbol}」的歷史資料 —— 行情來源沒有回應，可能是被限流了。
+                這是暫時的，稍後重新整理就會回來。
               </p>
             ) : empty ? (
               <p className="text-slate-400">

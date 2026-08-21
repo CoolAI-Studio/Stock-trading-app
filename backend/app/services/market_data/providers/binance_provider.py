@@ -1,12 +1,15 @@
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 import httpx
 
 from app.models.enums import DataSource
-from app.services.market_data.base import Bar, Quote, Timeframe, currency_for
+from app.services.market_data.base import Bar, BarFetchError, Quote, Timeframe, currency_for
 
 _TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
+logger = logging.getLogger("app.market_data.binance")
+
 _KLINES_URL = "https://api.binance.com/api/v3/klines"
 
 # Binance spells three of the intervals differently from Yahoo. Timeframe
@@ -75,10 +78,19 @@ class BinanceProvider:
                 )
                 response.raise_for_status()
                 rows = response.json()
-        except (httpx.HTTPError, ValueError):
-            # Absent, not an exception: one unresolvable pair must not take
-            # the whole poll down.
-            return []
+        except Exception as exc:
+            # Everything, not just HTTPError/ValueError: anything that escapes
+            # here reaches the chart endpoint as a 500 instead of a sentence
+            # the page can render, and reaches the market loop as a crashed
+            # poll. One unreachable pair must take neither down.
+            #
+            # A FAILURE, not an absence -- the same disease the yfinance side
+            # had. Bars get cached, so returning [] here would store 「this pair
+            # has no history」 as fact for the whole TTL after one dropped
+            # connection. The caller decides how long to wait before asking
+            # again; it cannot decide anything if both answers look alike.
+            logger.warning("binance bars failed for %s", symbol, exc_info=True)
+            raise BarFetchError(f"{symbol}: {type(exc).__name__}") from exc
 
         bars: list[Bar] = []
         for row in rows:

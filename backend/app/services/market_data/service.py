@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 from app.models.enums import DataSource
 from app.models.market import MarketQuote
 from app.models.mixins import utcnow
-from app.services.market_data.base import Bar, Quote, QuoteProvider, Timeframe, closed_bars
+from app.services.market_data.base import (
+    Bar,
+    BarFetchError,
+    Quote,
+    QuoteProvider,
+    Timeframe,
+    closed_bars,
+)
 from app.services.market_data.providers.binance_provider import BinanceProvider
 from app.services.market_data.providers.yfinance_provider import YFinanceProvider
 
@@ -42,6 +49,11 @@ _DEFAULT_STALE_LIMIT_SEC: dict[DataSource, float] = {
 # Each TTL is a fraction of its own candle, which is the honest bound: it is
 # short enough that a newly closed candle is picked up promptly, and long
 # enough that nothing is downloaded faster than it can possibly change.
+# How long a FAILED bar fetch holds the door shut. Short on purpose: it exists
+# to stop a refetch-on-focus page turning one 429 into a hundred, not to decide
+# how long a symbol has no history. Fifteen minutes of that was the bug.
+FAILED_FETCH_RETRY_SEC = 60.0
+
 _DEFAULT_BAR_TTL_SEC: dict[Timeframe, float] = {
     Timeframe.MINUTE_1: 30.0,
     Timeframe.MINUTE_5: 60.0,
@@ -89,6 +101,16 @@ class MarketDataService:
         # entirely its own business -- see get_bars(). The stored tuple is
         # (fetched_at, limit_asked_for, bars).
         self._bar_cache: dict[tuple[DataSource, str, Timeframe], tuple[float, int, list[Bar]]] = {}
+        # When a bar fetch last FAILED for each key, monotonic. Separate from
+        # the cache above because the two answer different questions: that one
+        # holds what is known, this one holds when it was last impossible to
+        # find out.
+        self._bar_failed_at: dict[tuple[DataSource, str, Timeframe], float] = {}
+        # Whether the most recent get_bars call could not reach the provider.
+        # Read by the chart endpoint so 「we could not ask」 and 「there is no
+        # history」 reach the screen as different sentences: one clears on its
+        # own and one never will.
+        self.last_bar_fetch_failed = False
 
     def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
         if not symbols:
@@ -184,19 +206,53 @@ class MarketDataService:
         if fresh and cached_limit >= limit:
             return cached[-limit:]
 
-        fetched = closed_bars(self._providers[data_source].get_bars(symbol, timeframe, limit))
-        # An empty result is a fetch that happened, so it stamps the clock:
-        # otherwise a symbol the provider cannot resolve is re-requested on
-        # every single poll, which is exactly how an IP gets blocked. Keeping
-        # the previous history rather than replacing it with nothing also
-        # stops one failed request from looking like "this strategy has no
-        # history yet" and silently restarting its warm-up.
+        # A recent failure holds the door shut, briefly. Without this a page
+        # that refetches on focus turns one rate-limited response into a
+        # hundred; with a full TTL it turns one into fifteen minutes of a
+        # perfectly good symbol reading as delisted.
+        failed_at = self._bar_failed_at.get(key)
+        if failed_at is not None and (now - failed_at) <= FAILED_FETCH_RETRY_SEC:
+            self.last_bar_fetch_failed = True
+            return cached[-limit:]
+        self.last_bar_fetch_failed = False
+
+        try:
+            fetched = closed_bars(self._providers[data_source].get_bars(symbol, timeframe, limit))
+        except BarFetchError as exc:
+            # A FAILURE IS NOT AN ANSWER, and this line is the whole reason the
+            # bug existed. The old code could not tell 「asked, and there is
+            # nothing here」 from 「could not ask」, so one 429 on a shared
+            # deployment IP was stored as fact and a stock with fifty years of
+            # history read as having none for the next fifteen minutes.
+            #
+            # Still not retried on every request, because the concern the old
+            # comment raised is real -- a page that refetches on focus would
+            # turn one 429 into a hundred. It waits FAILED_FETCH_RETRY_SEC
+            # instead of a full TTL: a transient failure costs a minute, not
+            # the fifteen a real answer is worth.
+            logger.warning("%s bars failed for %s: %s", data_source.value, symbol, exc)
+            self._bar_failed_at[key] = now
+            # Set HERE as well as in the cooldown branch above: the very first
+            # failure is the one somebody is looking at, and without this the
+            # page would call it 「no history」 exactly once -- on the request
+            # that actually failed.
+            self.last_bar_fetch_failed = True
+            # Whatever history is already held still stands: one failed request
+            # must not look like 「this strategy has no history yet」 and
+            # silently restart its warm-up.
+            return cached[-limit:]
+
+        # An empty ANSWER is a fetch that happened, so it stamps the clock:
+        # otherwise a symbol the provider genuinely cannot resolve is
+        # re-requested on every single poll, which is exactly how an IP gets
+        # blocked. Keeping the previous history rather than replacing it with
+        # nothing also stops one thin window from restarting a warm-up.
         bars = fetched or cached
-        # Stamped with the limit just asked for even when the fetch came back
-        # empty: it records what was requested, so a repeat of the same
-        # request is served from cache rather than hammering a symbol the
-        # provider cannot resolve.
+        # Stamped with the limit just asked for even when the answer was empty:
+        # it records what was requested, so a repeat of the same request is
+        # served from cache rather than hammering a symbol that has nothing.
         self._bar_cache[key] = (now, limit, bars)
+        self._bar_failed_at.pop(key, None)
         return bars[-limit:]
 
     def upsert_quotes(self, db: Session, quotes: dict[str, Quote]) -> None:

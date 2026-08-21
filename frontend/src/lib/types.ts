@@ -634,6 +634,11 @@ export interface BarsResponse {
   /** Echoed, because a chart drawing weekly candles under a 「日」 label is a
    * wrong chart that looks right. */
   timeframe: string
+  /** The provider could not be reached, as opposed to answering with nothing.
+   * Two different sentences on screen: one clears on its own and one never
+   * will, and showing the permanent one for the transient case is how a stock
+   * with fifty years of candles reads as delisted. */
+  fetch_failed?: boolean
   bars: {
     /** ISO string. lightweight-charts wants UNIX SECONDS, so the component
      * converts -- handing it milliseconds plots every candle around the year

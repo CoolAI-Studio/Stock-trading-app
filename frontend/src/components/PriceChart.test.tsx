@@ -76,14 +76,29 @@ beforeEach(() => {
   vi.mocked(api.get).mockResolvedValue(BARS as never)
 })
 
+
+/** The candles actually drawn.
+ *
+ * `setData` is now called with [] first on every render where there is no data
+ * -- pending, empty, failed -- because leaving the previous symbol's candles on
+ * the canvas was its own bug. So a test about the DRAWN series has to wait for a
+ * non-empty call rather than for the first one.
+ */
+async function drawn(): Promise<Record<string, number>[]> {
+  await vi.waitFor(() => {
+    const last = setData.mock.calls.at(-1)?.[0]
+    expect(last?.length).toBeGreaterThan(0)
+  })
+  return setData.mock.calls.at(-1)![0]
+}
+
 // --- the symbol the embedded widget refuses -----------------------------------
 
 describe('台股也畫得出來', () => {
   it('0050.TW 有 K 棒就畫出來', async () => {
     show()
 
-    await vi.waitFor(() => expect(setData).toHaveBeenCalled())
-    expect(setData.mock.calls[0][0]).toHaveLength(2)
+    expect(await drawn()).toHaveLength(2)
   })
 
   it('送給繪圖的是秒為單位的時間，不是毫秒', async () => {
@@ -92,16 +107,14 @@ describe('台股也畫得出來', () => {
     // back empty with no error anywhere.
     show()
 
-    await vi.waitFor(() => expect(setData).toHaveBeenCalled())
-    const first = setData.mock.calls[0][0][0]
+    const first = (await drawn())[0]
     expect(first.time).toBe(Math.floor(Date.parse('2026-08-18T00:00:00Z') / 1000))
   })
 
   it('開高低收都傳過去，不是只有收盤價', async () => {
     show()
 
-    await vi.waitFor(() => expect(setData).toHaveBeenCalled())
-    expect(setData.mock.calls[0][0][0]).toMatchObject({
+    expect((await drawn())[0]).toMatchObject({
       open: 100,
       high: 104,
       low: 99,
@@ -112,7 +125,9 @@ describe('台股也畫得出來', () => {
   it('成交量也畫', async () => {
     show()
 
-    await vi.waitFor(() => expect(setVolumeData).toHaveBeenCalled())
+    await vi.waitFor(() => {
+      expect(setVolumeData.mock.calls.at(-1)?.[0]?.length).toBeGreaterThan(0)
+    })
   })
 
   it('中文公司名不要送出去問後端 —— 那一定是 422', async () => {
@@ -205,7 +220,7 @@ describe('離開頁面', () => {
         <PriceChart symbol="0050.TW" />
       </QueryClientProvider>,
     )
-    await vi.waitFor(() => expect(setData).toHaveBeenCalled())
+    await drawn()
 
     view.unmount()
 
@@ -219,10 +234,10 @@ describe('元件本身', () => {
   it('畫布掛在畫面上，而且資料到了就不再蓋著「載入中」', async () => {
     show()
 
-    // Waited on the DATA, not on the container: the container renders
-    // immediately either way, so asserting on it alone would pass while the
-    // overlay was still covering the chart.
-    await vi.waitFor(() => expect(setData).toHaveBeenCalled())
+    // Waited on the DRAWN candles, not on the container: the container renders
+    // immediately either way, and setData([]) now fires on the pending render,
+    // so either alone would pass while the overlay still covered the chart.
+    await drawn()
 
     const region = screen.getByRole('img', { name: /0050\.TW/ })
     expect(within(region.parentElement!).queryByText(/載入中/)).not.toBeInTheDocument()
@@ -256,5 +271,84 @@ describe('錯誤訊息要真的看得到', () => {
     show()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/Manual Deploy|重新部署/)
+  })
+})
+
+// --- the canvas kept another company's candles -------------------------------
+//
+// Reported with a screenshot: the chart showed 0050.TW's candles under a
+// message reading 「查不到「AAPL」的歷史資料」. The data effect returns early for
+// pending, empty AND error (`if (!series || !bars?.length) return`), so the
+// canvas holds the last successful non-empty answer regardless of which symbol
+// is selected -- and the overlay is only 80% opaque, so the old candles show
+// through it.
+//
+// That is worse than a blank chart. A blank one is obviously broken; this one
+// is a plausible, well-formed, wrong chart with a warning somebody will read as
+// spurious. It is the same failure the backend refuses symbols to avoid: 「would
+// come back with a Japanese company's price history and draw it convincingly」.
+
+describe('換代號的時候', () => {
+  it('抓不到資料就把舊的 K 棒清掉，不要留著別檔股票的圖', async () => {
+    vi.mocked(api.get).mockResolvedValue({ ...BARS, symbol: '0050.TW' } as never)
+    const { rerender } = render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PriceChart symbol="0050.TW" />
+      </QueryClientProvider>,
+    )
+    await drawn()
+    setData.mockClear()
+
+    vi.mocked(api.get).mockResolvedValue({ symbol: 'AAPL', timeframe: '1d', bars: [] } as never)
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PriceChart symbol="AAPL" />
+      </QueryClientProvider>,
+    )
+
+    await vi.waitFor(() => expect(setData).toHaveBeenCalledWith([]))
+  })
+
+  it('抓失敗也一樣要清掉', async () => {
+    vi.mocked(api.get).mockResolvedValue(BARS as never)
+    show()
+    await drawn()
+    setData.mockClear()
+
+    vi.mocked(api.get).mockRejectedValue(new Error('boom'))
+    show('MSFT')
+
+    await vi.waitFor(() => expect(setData).toHaveBeenCalledWith([]))
+  })
+})
+
+// --- 「could not ask」 and 「there is nothing」 are different sentences ----------
+
+describe('分清楚是抓不到還是真的沒有', () => {
+  it('抓取失敗要說是暫時的、可以重試', async () => {
+    // One clears on its own and one never will. Showing the permanent message
+    // for the transient case is how a stock with fifty years of candles reads
+    // as delisted.
+    vi.mocked(api.get).mockResolvedValue({
+      symbol: 'AAPL',
+      timeframe: '1d',
+      bars: [],
+      fetch_failed: true,
+    } as never)
+    show()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/暫時|稍後|重試/)
+  })
+
+  it('真的沒有歷史才說沒有歷史', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      symbol: '9999.TW',
+      timeframe: '1d',
+      bars: [],
+      fetch_failed: false,
+    } as never)
+    show('9999.TW')
+
+    expect(await screen.findByText(/查不到.*歷史/)).toBeInTheDocument()
   })
 })

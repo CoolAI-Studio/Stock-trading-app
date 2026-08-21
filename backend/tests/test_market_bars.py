@@ -221,7 +221,21 @@ def test_a_row_with_no_close_is_skipped(monkeypatch):
     assert [b.close for b in bars] == [1.5]
 
 
-def test_a_symbol_yfinance_cannot_resolve_yields_no_bars(monkeypatch):
+def test_a_fetch_that_raises_is_reported_as_a_failure_not_as_no_bars(monkeypatch):
+    """This used to assert []. It was wrong, and it cost fifteen minutes of a
+    perfectly good stock reading as delisted.
+
+    The service CACHES what get_bars returns. With a failure and an absence
+    arriving as the same empty list, one rate-limited response on a shared
+    deployment IP was stored as 「AAPL has no history」 for the whole TTL. The
+    caller has to be able to tell the two apart to decide how long to wait, so
+    a failure raises now -- see BarFetchError and
+    tests/test_bars_failure_is_not_an_answer.py.
+    """
+    import pytest
+
+    from app.services.market_data.base import BarFetchError
+
     class _RaisingTicker:
         def __init__(self, symbol: str) -> None:
             self.symbol = symbol
@@ -231,7 +245,8 @@ def test_a_symbol_yfinance_cannot_resolve_yields_no_bars(monkeypatch):
 
     monkeypatch.setattr(yfinance_provider.yf, "Ticker", _RaisingTicker)
 
-    assert yfinance_provider.YFinanceProvider().get_bars("NOPE", Timeframe.WEEK_1, limit=10) == []
+    with pytest.raises(BarFetchError):
+        yfinance_provider.YFinanceProvider().get_bars("NOPE", Timeframe.WEEK_1, limit=10)
 
 
 def test_mock_provider_only_produces_closed_bars():

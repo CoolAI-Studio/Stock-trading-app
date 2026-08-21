@@ -7,6 +7,20 @@ from typing import Protocol
 from app.models.enums import DataSource
 
 
+class BarFetchError(Exception):
+    """The provider could not be asked -- rate limited, unreachable, refused.
+
+    Distinct from an empty list, which means 「asked, and this symbol has no
+    candles in that window」. They used to be the same value, and the service
+    cached that value as an answer: one 429 on a shared deployment IP made a
+    stock with fifty years of history read as having none, for the full
+    fifteen-minute TTL of a daily chart.
+
+    Raised rather than returned as None, because a None is easy to forget to
+    check and this one must never be silently treated as 「no history」 again.
+    """
+
+
 @dataclass
 class Quote:
     symbol: str

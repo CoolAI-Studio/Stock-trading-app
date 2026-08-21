@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 import yfinance as yf
 
 from app.models.enums import DataSource
-from app.services.market_data.base import Bar, Quote, Timeframe, currency_for
+from app.services.market_data.base import Bar, BarFetchError, Quote, Timeframe, currency_for
 
 # How far back to ask for each interval. Yahoo caps intraday history hard --
 # roughly 7 days of 1m, 60 days of anything else under an hour, 2 years of
@@ -99,14 +99,29 @@ class YFinanceProvider:
                 interval=timeframe.value,
                 auto_adjust=True,
             )
-        except Exception:
-            # Same contract as get_quotes: a symbol this provider cannot
-            # resolve is absent, never an exception that takes the poll down
-            # with it.
-            return []
+        except Exception as exc:
+            # NOT the same contract as get_quotes any more. A quote that fails
+            # is absent for one poll and the next one fixes it; a bar fetch
+            # that fails gets CACHED, and returning [] here made the service
+            # store 「this symbol has no history」 as fact for fifteen minutes.
+            #
+            # yfinance re-raises YFRateLimitError unconditionally -- the one
+            # error it does not hide -- and that is exactly the shared-IP 429
+            # a free-tier deployment meets.
+            logger.warning("yfinance bars failed for %s", symbol, exc_info=True)
+            raise BarFetchError(f"{symbol}: {type(exc).__name__}") from exc
 
         if frame is None or frame.empty:
-            return []
+            # ALSO a failure, and the likelier of the two. yfinance 1.6.0 ships
+            # `hide_exceptions = True`, so history() catches its own errors and
+            # hands back an empty frame rather than raising -- meaning the
+            # commonest way a fetch fails arrives here, not in the except
+            # above. A symbol that genuinely has no candles is rare enough,
+            # and recoverable enough, to be worth calling a failure: the cost
+            # of being wrong is one short retry, against fifteen minutes of a
+            # real stock reading as delisted.
+            logger.warning("yfinance returned an empty frame for %s", symbol)
+            raise BarFetchError(f"{symbol}: yfinance returned nothing")
 
         bars: list[Bar] = []
         for index, row in frame.tail(limit).iterrows():
