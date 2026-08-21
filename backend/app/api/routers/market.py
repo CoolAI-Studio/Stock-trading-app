@@ -5,10 +5,22 @@ from app.api.deps import get_current_active_user
 from app.db.session import get_db
 from app.models.enums import DataSource
 from app.models.user import User
-from app.schemas.market import BarRead, BarsRead, QuoteRead
-from app.services import symbol_search
+from app.schemas.market import (
+    AvailableIndicators,
+    BarRead,
+    BarsRead,
+    IndicatorRequest,
+    IndicatorSeriesRead,
+    IndicatorsRead,
+    QuoteRead,
+)
+from app.services import chart_indicators, indicator_panes, symbol_search
 from app.services.market_data.base import Timeframe
-from app.services.market_data.service import MarketDataService, get_market_data_service
+from app.services.market_data.service import (
+    DEFAULT_BAR_LIMIT,
+    MarketDataService,
+    get_market_data_service,
+)
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -49,7 +61,12 @@ def get_quote(
 def get_bars(
     symbol: str = Query(..., min_length=1, max_length=32),
     timeframe: Timeframe = Timeframe.DAY_1,
-    limit: int = Query(default=250, ge=1, le=MAX_CHART_BARS),
+    # The same depth the market loop asks for, deliberately. Two different
+    # defaults mean the chart's cache entry can never answer the loop's
+    # question and vice versa, so every chart view costs an extra request on an
+    # IP that is already rate limited -- which is how a stock with fifty years
+    # of history once read as having none.
+    limit: int = Query(default=DEFAULT_BAR_LIMIT, ge=1, le=MAX_CHART_BARS),
     data_source: DataSource = DataSource.YFINANCE,
     service: MarketDataService = Depends(get_market_data_service),
     user: User = Depends(get_current_active_user),
@@ -76,7 +93,7 @@ def get_bars(
     return BarsRead(
         symbol=cleaned,
         timeframe=timeframe.value,
-        fetch_failed=service.last_bar_fetch_failed and not bars,
+        fetch_failed=not bars and service.bar_fetch_failed(cleaned, timeframe, data_source),
         # An empty list is a real answer, not an error: a newly listed stock
         # genuinely has no candles yet, and 500ing over it would make the page
         # look broken rather than empty.
@@ -90,5 +107,63 @@ def get_bars(
                 volume=bar.volume,
             )
             for bar in bars
+        ],
+    )
+
+
+@router.get("/indicators/available", response_model=AvailableIndicators)
+def available_indicators(
+    user: User = Depends(get_current_active_user),
+) -> AvailableIndicators:
+    """What the chart can draw, and which axis each output needs.
+
+    The axis comes from the server because it cannot be derived and must not be
+    guessed twice: see services/indicator_panes.py. A client-side rule would be
+    a second answer to the same question, and the first time the two disagreed
+    the chart would silently squash.
+    """
+    return AvailableIndicators(indicators=indicator_panes.chartable())
+
+
+@router.post("/indicators", response_model=IndicatorsRead)
+def compute_indicators(
+    payload: IndicatorRequest,
+    service: MarketDataService = Depends(get_market_data_service),
+    user: User = Depends(get_current_active_user),
+) -> IndicatorsRead:
+    """Indicator values over the same candles the chart is drawing.
+
+    Computed with `spec.fn` -- the very object the strategy sandbox hands to
+    user code -- so the line on the chart and the number a strategy trades on
+    cannot drift apart. That is the whole reason this is a server endpoint and
+    not a TypeScript moving average.
+    """
+    cleaned = symbol_search.normalise(payload.symbol)
+    problem = symbol_search.looks_unpriceable(cleaned)
+    if problem:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
+
+    bars = service.get_bars(cleaned, payload.timeframe, payload.data_source, limit=payload.limit)
+    try:
+        series = chart_indicators.compute(
+            bars, [request.model_dump() for request in payload.indicators]
+        )
+    except chart_indicators.IndicatorRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return IndicatorsRead(
+        symbol=cleaned,
+        timeframe=payload.timeframe.value,
+        series=[
+            IndicatorSeriesRead(
+                name=item.name,
+                key=item.key,
+                pane=item.pane,
+                scale=item.scale,
+                points=[{"time": point.time, "value": point.value} for point in item.points],
+            )
+            for item in series
         ],
     )

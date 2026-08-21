@@ -1,9 +1,11 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
+from app.services.market_data.base import Timeframe
+from app.services.market_data.service import DEFAULT_BAR_LIMIT
 
 
 class QuoteRead(BaseModel):
@@ -59,3 +61,52 @@ class BarsRead(BaseModel):
     # for the second is how a stock with fifty years of candles reads as
     # delisted.
     fetch_failed: bool = False
+
+
+class IndicatorPointRead(BaseModel):
+    time: UtcDatetime
+    value: float
+
+
+class IndicatorSeriesRead(BaseModel):
+    name: str
+    # Empty for an indicator with a single output. Present so a caller can tell
+    # macd's three lines apart without parsing a composite name.
+    key: str
+    # "price" (shares the candles' axis) or "own". Decided on the server: see
+    # services/indicator_panes.py for why it cannot be derived, and why a
+    # second answer on the client would silently squash the chart.
+    pane: str
+    # Two series in one pane sharing this string share an axis. Everything an
+    # indicator returns shares it by default -- macd against its own signal
+    # line is the point of macd -- except where the server declares otherwise.
+    scale: str
+    points: list[IndicatorPointRead]
+
+
+class IndicatorsRead(BaseModel):
+    symbol: str
+    timeframe: str
+    series: list[IndicatorSeriesRead]
+
+
+class IndicatorRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    timeframe: Timeframe = Timeframe.DAY_1
+    # Matches GET /bars and the market loop, so all three share one cache
+    # entry and one upstream fetch. See the comment on that endpoint.
+    limit: int = Field(default=DEFAULT_BAR_LIMIT, ge=1, le=1000)
+    data_source: DataSource = DataSource.YFINANCE
+    indicators: list["IndicatorSpecRequest"] = Field(default_factory=list)
+
+
+class IndicatorSpecRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    # Only the tuning knobs. The bar columns are bound from the candles the
+    # server just fetched -- accepting them from the client would let a caller
+    # draw an indicator over prices this app never saw.
+    params: dict = Field(default_factory=dict)
+
+
+class AvailableIndicators(BaseModel):
+    indicators: list[dict]
