@@ -115,3 +115,31 @@ def _market_always_open(request, monkeypatch):
         return
     monkeypatch.setattr("app.services.market_calendar.is_open", lambda *a, **k: True)
     monkeypatch.setattr("app.services.market_calendar.any_open", lambda *a, **k: True)
+
+
+@pytest.fixture
+def second_user_headers(auth_client, db_session):
+    """A second account on the same deployment, and its bearer token.
+
+    CREATED DIRECTLY IN THE DATABASE, not through /api/auth/register, because
+    registration now closes itself the moment a deployment has an owner (see
+    tests/test_registration_closes_itself.py). That is the security fix, not an
+    obstacle to work around: a second account can still arrive by
+    scripts/create_user.py, or already exist on a deployment where
+    ALLOW_REGISTRATION was left switched on before the fix landed. The owner's
+    data must be safe in that world, so the cross-user tests still need a real
+    second identity -- they just cannot mint one through the front door any
+    more.
+    """
+    from app.core.security import create_access_token, hash_password
+    from app.models.user import User
+
+    user = User(
+        email="second-account@example.com",
+        hashed_password=hash_password("a different password entirely"),
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    token = create_access_token(subject=str(user.id), token_version=user.token_version)
+    return {"Authorization": f"Bearer {token}"}

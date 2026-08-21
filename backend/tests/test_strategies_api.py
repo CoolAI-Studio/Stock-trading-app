@@ -144,27 +144,15 @@ def test_delete_strategy(auth_client):
     assert get_resp.status_code == 404
 
 
-def test_cannot_access_another_users_strategy(auth_client, client, monkeypatch):
+def test_cannot_access_another_users_strategy(auth_client, second_user_headers):
     create_resp = auth_client.post(
         "/api/strategies",
         json={"name": "mine", "symbol": "AAPL", "source_code": MA5_SOURCE},
     )
     strategy_id = create_resp.json()["id"]
 
-    monkeypatch.setattr("app.config.settings.ALLOW_REGISTRATION", True)
-    client.post(
-        "/api/auth/register",
-        json={"email": "other@example.com", "password": "correct-horse-battery"},
-    )
-    login_resp = client.post(
-        "/api/auth/login",
-        data={"username": "other@example.com", "password": "correct-horse-battery"},
-    )
-    other_token = login_resp.json()["access_token"]
+    resp = auth_client.get(f"/api/strategies/{strategy_id}", headers=second_user_headers)
 
-    resp = client.get(
-        f"/api/strategies/{strategy_id}", headers={"Authorization": f"Bearer {other_token}"}
-    )
     assert resp.status_code == 404
 
 

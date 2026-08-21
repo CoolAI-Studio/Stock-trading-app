@@ -95,28 +95,18 @@ def test_orders_require_auth(client):
     assert resp.status_code == 401
 
 
-def test_cannot_confirm_another_users_order(auth_client, client, monkeypatch):
+def test_cannot_confirm_another_users_order(auth_client, second_user_headers):
     create_resp = auth_client.post(
         "/api/orders", json={"symbol": "AAPL", "side": "buy", "quantity": "1"}
     )
     order_id = create_resp.json()["id"]
 
-    monkeypatch.setattr("app.config.settings.ALLOW_REGISTRATION", True)
-    client.post(
-        "/api/auth/register",
-        json={"email": "other-orders@example.com", "password": "correct-horse-battery"},
-    )
-    login_resp = client.post(
-        "/api/auth/login",
-        data={"username": "other-orders@example.com", "password": "correct-horse-battery"},
-    )
-    other_token = login_resp.json()["access_token"]
-
-    resp = client.post(
+    resp = auth_client.post(
         f"/api/orders/{order_id}/confirm",
         json={"fill_price": "100"},
-        headers={"Authorization": f"Bearer {other_token}"},
+        headers=second_user_headers,
     )
+
     assert resp.status_code == 404
 
 

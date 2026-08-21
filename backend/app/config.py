@@ -56,7 +56,18 @@ class Settings(BaseSettings):
     # Closed by default: with registration off, a publicly reachable backend only
     # exposes login + the secret-gated TradingView webhook. First user is created
     # via scripts/create_user.py.
+    # No longer the thing that guards the door: registration closes itself once
+    # the deployment has an owner (see routers/auth.py). Kept only so a
+    # deployment that wants its account made by hand can refuse even the first
+    # one.
     ALLOW_REGISTRATION: bool = False
+
+    # Whether a brand-new deployment may create its FIRST account from the web
+    # page. On by default, because that is the whole 「按一個按鈕部署自己一份」
+    # flow -- the alternative was DEPLOYMENT.md's three-step curl dance, which
+    # for this audience is the same as no flow at all. It stops mattering the
+    # moment that first account exists.
+    ALLOW_FIRST_ACCOUNT: bool = True
 
     # Brute-force throttle on POST /api/auth/login: one password guards every
     # stored broker credential, so a public URL must not allow unlimited guesses.

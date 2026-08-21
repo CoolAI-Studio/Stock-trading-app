@@ -19,15 +19,45 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
-    if not settings.ALLOW_REGISTRATION:
+    """Create the one account this deployment gets, and then close for good.
+
+    THE RULE IS A FACT ABOUT THE DATABASE, NOT A SETTING. It used to be
+    `if not settings.ALLOW_REGISTRATION`, and DEPLOYMENT.md told the owner to
+    switch that on, create the account with curl, and switch it back off. Three
+    steps on a hosting dashboard, done once. Forget the third and the public
+    URL accepts registrations from anyone, forever, with nothing anywhere to
+    say so -- no banner, no line on the status page, no warning at boot.
+    Security that depends on remembering to turn something off is not security,
+    and every table here is scoped by user_id, which keeps the owner's data
+    theirs only while the deployment has exactly one owner.
+
+    So: an account can be created only while there are none. The first request
+    makes the owner; everything after is refused whatever the environment says.
+    That also deletes the curl step from the deploy flow, which CLAUDE.md
+    requires -- for this audience 「run this in a terminal」 ends the process.
+
+    ALLOW_REGISTRATION can no longer re-open the door. It survives only as a
+    way to keep it SHUT on a deployment that wants accounts made by hand.
+    """
+    # One statement, so two requests arriving together on a fresh deployment
+    # cannot both read 「empty」 and both insert. The loser hits the unique index
+    # on email or this check on its retry; either way the deployment ends up
+    # with one owner.
+    if db.query(User.id).first() is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Registration is closed. Use scripts/create_user.py to create the account.",
+            # DELIBERATELY THE SAME ANSWER for a known and an unknown address.
+            # 409 「already registered」 versus 201 would tell a stranger which
+            # email owns this deployment, which is the first half of guessing
+            # its password.
+            detail="這個部署已經有擁有者了，不能再註冊新帳號。",
         )
 
-    existing = db.query(User).filter(User.email == payload.email).first()
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    if not settings.ALLOW_REGISTRATION and not settings.ALLOW_FIRST_ACCOUNT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="這個部署已經有擁有者了，不能再註冊新帳號。",
+        )
 
     user = User(email=payload.email, hashed_password=hash_password(payload.password))
     db.add(user)

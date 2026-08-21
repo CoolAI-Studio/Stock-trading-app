@@ -43,8 +43,20 @@ def test_register_then_login_then_me(client, monkeypatch):
     assert me_resp.json()["email"] == "trader@example.com"
 
 
-def test_register_rejected_when_registration_closed(client, monkeypatch):
+def test_register_rejected_when_even_the_first_account_is_closed(client, monkeypatch):
+    """A deployment that wants its account created by hand can refuse even the
+    first one.
+
+    The rule CHANGED: registration used to be gated solely on
+    ALLOW_REGISTRATION, so an empty deployment with the flag off refused
+    everybody -- which is why DEPLOYMENT.md told the owner to switch it on,
+    curl an account into existence, and switch it back. Now the door closes
+    itself once an owner exists (see test_registration_closes_itself.py), and
+    the flags only decide whether the FIRST account may be made from the web
+    page at all. Both must be off to refuse it.
+    """
     monkeypatch.setattr("app.config.settings.ALLOW_REGISTRATION", False)
+    monkeypatch.setattr("app.config.settings.ALLOW_FIRST_ACCOUNT", False)
 
     resp = client.post(
         "/api/auth/register",
