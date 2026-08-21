@@ -74,6 +74,10 @@ const PENDING_ORDER: Order = {
   created_at: '2026-08-16T00:00:00Z',
 }
 
+// The chart asks for candles now that the dashboard draws its own -- see
+// components/PriceChart.tsx for why the TradingView widget could not.
+const BARS = { symbol: 'AAPL', timeframe: '1d', bars: [] }
+
 const QUOTE: Quote = {
   symbol: 'AAPL',
   data_source: 'yfinance',
@@ -105,6 +109,7 @@ describe('DashboardPage', () => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/positions') return [POSITION] as never
       if (path.startsWith('/api/orders')) return [PENDING_ORDER] as never
+      if (path.startsWith('/api/market/bars')) return BARS as never
       if (path.startsWith('/api/market/quote')) return [QUOTE] as never
       return [] as never
     })
@@ -178,7 +183,14 @@ describe('DashboardPage', () => {
     vi.mocked(api.get).mockRejectedValue(new Error('Service Unavailable'))
     renderPage()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('無法讀取資料')
+    // waitFor around the whole search, not findAllByRole: the chart's own
+    // request also fails and its alert appears first, so a query that resolves
+    // on 「any alert」 would run this assertion while the page's own queries
+    // were still pending. This test is about the PAGE saying so.
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts.some((el) => el.textContent?.includes('無法讀取資料'))).toBe(true)
+    })
   })
 })
 
@@ -215,13 +227,21 @@ describe('用中文找股票並確認是不是同一家', () => {
     const list = await screen.findByRole('listbox', { name: '搜尋結果' })
     await user.click(within(list).getByText('2330.TW'))
 
-    // TradingView spells it TWSE:2330; the widget is what proves the whole
-    // chain (search -> our symbol -> TradingView symbol) actually connects.
-    // The container stamps the resolved symbol on itself -- see
-    // TradingViewWidget's dataset.tvSymbol guard.
+    // The chart is this app's own now -- TradingView's embedded widget could
+    // not show Taiwanese symbols at all (「此商品僅在 TradingView 上可用」), which
+    // is a data licensing restriction rather than anything about the symbol.
+    // What proves the chain still connects is that candles are requested for
+    // the symbol the search resolved to.
     await waitFor(() => {
-      const container = document.querySelector('.tradingview-widget-container') as HTMLElement
-      expect(container?.dataset.tvSymbol).toBe('TWSE:2330')
+      // The LAST bars request: the first one is for whatever symbol the
+      // dashboard opened on, and finding that instead would assert the chart
+      // never changed.
+      const barsCall = vi
+        .mocked(api.get)
+        .mock.calls.map((call) => call[0] as string)
+        .filter((path) => path.startsWith('/api/market/bars'))
+        .at(-1)
+      expect(barsCall).toContain(encodeURIComponent('2330.TW'))
     })
   })
 })

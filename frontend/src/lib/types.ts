@@ -613,3 +613,27 @@ export interface SystemStatus {
     window_hours: number
   }
 }
+
+/** GET /api/market/bars -- candles for the chart, from this app's own feed.
+ *
+ * Exists because TradingView's free embedded widget answers 「此商品僅在
+ * TradingView 上可用」 for Taiwanese symbols: a data licensing restriction, not
+ * a symbol-format problem. The backend already had these candles -- every
+ * price, alert and backtest runs on them. */
+export interface BarsResponse {
+  symbol: string
+  /** Echoed, because a chart drawing weekly candles under a 「日」 label is a
+   * wrong chart that looks right. */
+  timeframe: string
+  bars: {
+    /** ISO string. lightweight-charts wants UNIX SECONDS, so the component
+     * converts -- handing it milliseconds plots every candle around the year
+     * 57000 and the chart comes back empty with no error anywhere. */
+    time: string
+    open: number
+    high: number
+    low: number
+    close: number
+    volume: number
+  }[]
+}

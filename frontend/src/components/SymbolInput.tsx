@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { looksUnpriceable } from '../lib/symbol'
 import type { SymbolMatch, SymbolSearchResponse } from '../lib/types'
 
 /**
@@ -32,27 +33,6 @@ const MIN_QUERY = 2
 // Long enough that typing 台積電 is one request rather than three, short enough
 // that the list feels attached to the keyboard.
 const DEBOUNCE_MS = 250
-
-/** Whether what is currently typed can ever produce a price.
- *
- * Mirrors services/symbol_search.looks_unpriceable -- deliberately, because
- * the server refuses these too and the box should say so before the submit
- * rather than after it. The server remains the authority; this is only there
- * so the answer arrives while the person is still looking at the field.
- */
-function unpriceableReason(value: string): string | null {
-  const text = value.trim()
-  if (!text) return null
-
-  // eslint-disable-next-line no-control-regex
-  if (!/^[\x00-\x7F]*$/.test(text)) {
-    return '這是公司名稱，不是代號。請從下面的搜尋結果選一個，例如台積電要用 2330.TW。'
-  }
-  if (/^\d{4,6}$/.test(text)) {
-    return `台股代號要帶市場後綴，只寫「${text}」會被行情來源當成其他市場的股票。請從下面選出 ${text}.TW 或 ${text}.TWO。`
-  }
-  return null
-}
 
 export function SymbolInput({
   id,
@@ -96,7 +76,7 @@ export function SymbolInput({
   })
 
   const matches = searchQuery.data?.matches ?? []
-  const problem = unpriceableReason(query)
+  const problem = looksUnpriceable(query)
 
   function pick(match: SymbolMatch) {
     setOpen(false)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tradingViewSymbol, unsupportedMarketNote } from './tradingView'
+import { tradingViewSymbol } from './tradingView'
 
 /**
  * Turning this app's symbols into TradingView's.
@@ -77,25 +77,5 @@ describe('不亂猜', () => {
 
   it('只有後綴、沒有代號的東西不翻譯', () => {
     expect(tradingViewSymbol('.TW')).toBe('.TW')
-  })
-})
-
-describe('對應不出交易所的時候要講出來', () => {
-  it('翻得出來的就不用囉嗦', () => {
-    expect(unsupportedMarketNote('2330.TW')).toBeNull()
-    expect(unsupportedMarketNote('6488.TWO')).toBeNull()
-    expect(unsupportedMarketNote('AAPL')).toBeNull()
-    expect(unsupportedMarketNote('BTCUSDT', 'binance')).toBeNull()
-  })
-
-  it('沒把握的後綴要說清楚是哪一個，不要只說「失敗」', () => {
-    // Without the suffix in the message the owner is left guessing whether it
-    // was their typo, the market, or the app.
-    const note = unsupportedMarketNote('0700.HK')
-    expect(note).toContain('.HK')
-  })
-
-  it('已經指定交易所的不算不支援', () => {
-    expect(unsupportedMarketNote('HKEX:0700')).toBeNull()
   })
 })

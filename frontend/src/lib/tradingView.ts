@@ -54,29 +54,3 @@ export function tradingViewSymbol(symbol: string, dataSource?: DataSource): stri
   // those as "cannot tell" too.
   return trimmed
 }
-
-/** Says so when the symbol carries a market suffix this app cannot turn into a
- * TradingView exchange, so a blank chart comes with a reason.
- *
- * The alternative is what used to happen: the widget quietly fails to resolve
- * the symbol and shows nothing, leaving the owner unable to tell a typo from a
- * market the app does not cover. Everything else here exists to avoid drawing
- * a wrong chart; this exists to avoid drawing no chart and saying nothing.
- */
-export function unsupportedMarketNote(symbol: string, dataSource?: DataSource): string | null {
-  const trimmed = symbol.trim()
-  if (!trimmed || trimmed.includes(':')) return null
-  if (dataSource === 'binance') return null
-
-  const translated = tradingViewSymbol(trimmed, dataSource)
-  if (translated.includes(':')) return null
-
-  const dot = trimmed.lastIndexOf('.')
-  if (dot < 0) return null // a bare ticker; TradingView resolves those itself
-
-  const suffix = trimmed.slice(dot).toUpperCase()
-  return (
-    `這個代號的市場後綴 ${suffix} 對應不到 TradingView 的交易所，圖表可能是空白的。` +
-    "價格、策略與提醒不受影響 —— 那些走的是後端自己的行情來源，跟這張圖無關。"
-  )
-}
