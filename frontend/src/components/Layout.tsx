@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/notifications', label: '通知' },
   { to: '/webhooks', label: 'TradingView' },
   { to: '/account', label: '帳號' },
+  { to: '/system', label: '系統狀態' },
   { to: '/risk-settings', label: '風險設定' },
   { to: '/broker-settings', label: '券商設定' },
 ]

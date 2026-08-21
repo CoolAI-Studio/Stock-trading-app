@@ -567,3 +567,40 @@ export interface SetupStatus {
    * just met Render and does not know env vars live under Environment. */
   where: string
 }
+
+/** GET /api/system/status -- 「is it still running」, for the page that answers it.
+ *
+ * Distinct from /healthz, which is unauthenticated and therefore deliberately
+ * terse. This one is behind a login and can say how long, how many, and which. */
+export interface SystemStatus {
+  /** The one word the page leads with, so 「一切正常」 is readable without
+   * decoding the four sections under it. */
+  overall: 'ok' | 'warn' | 'fail'
+  /** Whether asking the assistant would produce an answer rather than an
+   * error. AI_API_KEY is one more blank in a deploy form and is optional by
+   * design, so the box is left out entirely rather than offered and broken. */
+  assistant_available: boolean
+  worker: {
+    enabled: boolean
+    uptime_sec: number
+    last_loop_age_sec: number | null
+    last_poll_age_sec: number | null
+  }
+  market_data: {
+    consecutive_empty_polls: number
+    /** Named and aged rather than counted: the fix is to correct or delete
+     * that one watchlist row, and nobody can do either from a number. */
+    stale_symbols: { symbol: string; gap_sec: number }[]
+  }
+  notifications: {
+    enabled: boolean
+    sent: number
+    retrying: number
+    deferred: number
+    given_up: number
+    /** No channel was reachable at all. Counted apart from the rest because
+     * it is the one failure the owner can fix themselves. */
+    reached_nobody: number
+    window_hours: number
+  }
+}

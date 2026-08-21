@@ -1,0 +1,201 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { SystemStatusPage } from './SystemStatusPage'
+import { api } from '../lib/api'
+import type { SystemStatus } from '../lib/types'
+
+vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
+
+/**
+ * 「是不是還在跑」, answered inside the app.
+ *
+ * CLAUDE.md asks for Prometheus and Grafana and gives the reason: 「警告不能停擺，
+ * 就必須看得到它有沒有在跑」. The reason is right and this page serves it; the
+ * instruments were wrong for the audience. A scraped metrics endpoint needs a
+ * Grafana Cloud account and an eighth blank in the deploy form, for a dashboard
+ * somebody who wants stock alerts on their phone will never open.
+ *
+ * The data was all in the process already. What was missing was a screen.
+ */
+
+const HEALTHY: SystemStatus = {
+  overall: 'ok',
+  worker: { enabled: true, uptime_sec: 3600, last_loop_age_sec: 2, last_poll_age_sec: 3 },
+  market_data: { consecutive_empty_polls: 0, stale_symbols: [] },
+  assistant_available: false,
+  notifications: {
+    enabled: true,
+    sent: 12,
+    retrying: 0,
+    deferred: 0,
+    given_up: 0,
+    reached_nobody: 0,
+    window_hours: 24,
+  },
+}
+
+function show(status: Partial<SystemStatus> = {}) {
+  vi.mocked(api.get).mockResolvedValue({ ...HEALTHY, ...status } as never)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <SystemStatusPage />
+    </QueryClientProvider>,
+  )
+}
+
+beforeEach(() => vi.clearAllMocks())
+
+// --- the one line that has to be readable without decoding the rest ---------
+
+describe('一眼看得出來的結論', () => {
+  it('都正常的時候就直接說正常', async () => {
+    show()
+
+    expect(await screen.findByText(/一切正常/)).toBeInTheDocument()
+  })
+
+  it('有東西壞掉的時候不要還說正常', async () => {
+    show({ overall: 'fail' })
+
+    expect(await screen.findByText(/停擺|有問題/)).toBeInTheDocument()
+    expect(screen.queryByText(/一切正常/)).not.toBeInTheDocument()
+  })
+
+  it('讀不到狀態的時候要說，不要留一片空白', async () => {
+    vi.mocked(api.get).mockRejectedValue(new Error('down'))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <SystemStatusPage />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+  })
+})
+
+// --- the failures this product cannot survive --------------------------------
+
+describe('警告會不會停擺', () => {
+  it('通知被整個關掉要講出來 —— 那是最安靜的一種停擺', async () => {
+    show({
+      overall: 'fail',
+      notifications: { ...HEALTHY.notifications, enabled: false },
+    })
+
+    expect(await screen.findByText(/通知功能.*關|關.*通知功能/)).toBeInTheDocument()
+  })
+
+  it('抓不到報價的代號要列出名字，不是只給一個數量', async () => {
+    // 「有 1 個代號有問題」 sends somebody to work out which. The fix is to
+    // correct or delete that one row, and they cannot do either from a count.
+    show({
+      overall: 'fail',
+      market_data: {
+        consecutive_empty_polls: 0,
+        stale_symbols: [{ symbol: '2330.TW', gap_sec: 1800 }],
+      },
+    })
+
+    expect(await screen.findByText('2330.TW')).toBeInTheDocument()
+  })
+
+  it('worker 停了要看得出來', async () => {
+    show({
+      overall: 'fail',
+      worker: { enabled: true, uptime_sec: 9999, last_loop_age_sec: 9999, last_poll_age_sec: 9999 },
+    })
+
+    expect(await screen.findByText(/背景|worker/i)).toBeInTheDocument()
+  })
+
+  it('已經放棄的通知要單獨算，不要跟還在重試的混在一起', async () => {
+    show({
+      overall: 'warn',
+      notifications: { ...HEALTHY.notifications, given_up: 3, retrying: 1 },
+    })
+
+    const givenUp = await screen.findByText(/放棄/)
+    expect(givenUp).toBeInTheDocument()
+    expect(screen.getByText(/重試/)).toBeInTheDocument()
+  })
+
+  it('沒送到任何管道的要另外講 —— 那是使用者自己修得掉的', async () => {
+    show({
+      overall: 'warn',
+      notifications: { ...HEALTHY.notifications, reached_nobody: 2 },
+    })
+
+    expect(await screen.findByText(/沒有送到|沒送到/)).toBeInTheDocument()
+  })
+})
+
+// --- and the numbers say what window they cover ------------------------------
+
+describe('數字的範圍', () => {
+  it('說清楚這些數字是多久以內的', async () => {
+    // A lifetime total stops moving and stops meaning anything; without the
+    // window, 「送出 12 則」 could be today or could be since March.
+    show()
+
+    expect(await screen.findByText(/24/)).toBeInTheDocument()
+  })
+})
+
+// --- the assistant ------------------------------------------------------------
+//
+// The question a non-developer actually asks is never 「what does
+// last_loop_age_sec mean」 -- it is 「something is wrong and I do not know
+// what」. The backend answers that against this deployment's own numbers.
+//
+// AI_API_KEY is one more blank in a deploy form and is optional by design, so
+// the box has to be ABSENT when there is no assistant, not present and
+// answering every question with an error.
+
+describe('看不懂的時候問一下', () => {
+  it('沒設定 AI 的部署就不要出現這個框', async () => {
+    show({ assistant_available: false })
+
+    await screen.findByText(/一切正常/)
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('有設定就給他問', async () => {
+    show({ assistant_available: true })
+
+    expect(await screen.findByRole('textbox')).toBeInTheDocument()
+  })
+
+  it('問了就把答案顯示出來', async () => {
+    show({ assistant_available: true })
+    vi.mocked(api.post).mockResolvedValue({
+      ok: true,
+      reply: 'worker 停了，去 Render 按一次 Manual Deploy。',
+      error: null,
+    } as never)
+    const user = userEvent.setup()
+
+    await user.type(await screen.findByRole('textbox'), '為什麼收不到通知')
+    await user.click(screen.getByRole('button', { name: /問/ }))
+
+    expect(await screen.findByText(/Manual Deploy/)).toBeInTheDocument()
+  })
+
+  it('AI 回失敗的時候要說，不要留白', async () => {
+    show({ assistant_available: true })
+    vi.mocked(api.post).mockResolvedValue({
+      ok: false,
+      reply: null,
+      error: 'AI 服務拒絕存取（HTTP 401）',
+    } as never)
+    const user = userEvent.setup()
+
+    await user.type(await screen.findByRole('textbox'), '怎麼回事')
+    await user.click(screen.getByRole('button', { name: /問/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/401/)
+  })
+})

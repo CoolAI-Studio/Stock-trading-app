@@ -17,6 +17,7 @@ from app.api.routers import (
     setup,
     strategies,
     symbols,
+    system,
     watchlist,
     webhooks,
     ws_ticket,
@@ -28,6 +29,7 @@ api_router = APIRouter()
 # configure. See routers/setup.py.
 api_router.include_router(setup.router)
 api_router.include_router(auth.router)
+api_router.include_router(system.router)
 api_router.include_router(alerts.router)
 api_router.include_router(strategies.router)
 api_router.include_router(backtests.router)
