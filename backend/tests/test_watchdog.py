@@ -309,3 +309,37 @@ def test_the_watchdog_explains_an_unconfigured_deployment():
 
     assert len(problems) == 1
     assert "設定" in problems[0], problems[0]
+
+
+# --- the log this prints into is public ---------------------------------------------
+
+
+def test_the_backend_url_is_not_printed_into_a_public_actions_log(capsys):
+    """The watchdog runs as a GitHub Actions schedule every 15 minutes, and
+    this repository is PUBLIC -- anyone can read those logs. Printing the URL
+    published the owner's deployment address to the internet 96 times a day.
+
+    It is not a credential, but it is theirs: it is the address somebody would
+    need before they could try anything at all against it. And the line bought
+    nothing, because the owner has exactly one backend and configured its URL
+    themselves.
+    """
+    from scripts import watchdog
+
+    watchdog.main(["watchdog.py", "https://not-a-real-host.example/healthz"])
+
+    printed = capsys.readouterr().out
+    assert "not-a-real-host.example" not in printed
+
+
+def test_it_still_says_clearly_whether_the_backend_is_up(capsys, monkeypatch):
+    """Redacting the URL must not cost the message its meaning -- this is the
+    only thing that tells the owner their alerts have stopped."""
+    from scripts import watchdog
+
+    monkeypatch.setattr(watchdog, "fetch", lambda url: (503, None))
+    code = watchdog.main(["watchdog.py", "https://not-a-real-host.example/healthz"])
+
+    printed = capsys.readouterr().out
+    assert code == 1
+    assert "提醒" in printed or "問題" in printed

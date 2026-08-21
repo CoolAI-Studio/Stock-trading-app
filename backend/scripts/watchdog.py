@@ -204,10 +204,17 @@ def main(argv: list[str]) -> int:
     problems = run_check(lambda: fetch(url))
 
     if not problems:
-        print(f"OK — {url} 回報一切正常。")
+        # THE URL IS NOT PRINTED. This runs as a GitHub Actions schedule every
+        # 15 minutes and the repository is PUBLIC, so every line here is readable
+        # by anyone -- printing it published the owner's deployment address to the
+        # internet 96 times a day. It is not a credential, but it is the address
+        # somebody needs before they can try anything at all against it, and the
+        # line bought nothing: whoever set HEALTH_URL has exactly one backend and
+        # already knows where it is.
+        print("OK — 後端回報一切正常。")
         return 0
 
-    print(f"這個後端有問題：{url}\n")
+    print("後端有問題（網址見 repository variable HEALTH_URL）：\n")
     for problem in problems:
         print(f"  - {problem}")
     print(

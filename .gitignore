@@ -32,3 +32,9 @@ Thumbs.db
 
 # Claude
 .claude/settings.local.json
+
+# Repomix dumps the whole codebase into one file. A stale copy in version
+# control misleads anyone who clones -- it was committed here from June and
+# still described code that had since changed -- and the next run could just
+# as easily sweep up a .env.
+repomix-output.*

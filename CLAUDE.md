@@ -3,7 +3,7 @@
 ## 目前專案
 
 正在把桌面版 tkinter 交易程式改寫成網頁版（FastAPI 後端 + React 前端）。完整架構、資料模型、
-分階段建置順序見計畫檔：`C:\Users\Corey Chan\.claude\plans\memoized-tickling-eich.md`。
+分階段建置順序見維護者本機的計畫檔（刻意不放進版控：這個 repo 是公開的，而完整路徑會連帶洩漏本機的使用者名稱）。
 
 ## 這是什麼產品
 
@@ -62,7 +62,7 @@ Render」部署一份自己的副本——自己的網址、自己的資料庫�
    skill 並照做。三條底線：
    - 前端一律 `npx vitest run --maxWorkers=1`，前後端測試不同時跑，跑測試時不要同時開背景工作。
    - 中斷或崩潰的執行會留下佔記憶體的孤兒程序，事後一定要清；**但只能清命令列指向本專案的**，
-     這台機器上還有別的專案（NextERP）的 pytest 長得一模一樣，殺錯就毀掉別人正在跑的東西。
+     這台機器上可能還有別的專案的 pytest 長得一模一樣，殺錯就毀掉別人正在跑的東西。
    - `Windows fatal exception: stack overflow`、`[vitest-pool] Failed to start threads worker`、
      單一測試 5000ms 逾時——這些都是記憶體不足的症狀，不是程式的 bug。**先重跑再診斷。**
    - 閒置的重量級程式（Docker Desktop 光是開著就吃約 700 MB）用不到就**停用**，不要讓它一直

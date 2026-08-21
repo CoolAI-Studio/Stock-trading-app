@@ -54,7 +54,7 @@ powershell -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\"
 ```
 
 **Only ever kill processes whose command line points at THIS repo.** This machine runs
-other projects (NextERP among them) whose pytest processes look identical in a bare process
+other projects whose pytest processes look identical in a bare process
 list. Killing one of those destroys someone else's in-flight work. Filter on the path:
 
 ```bash
