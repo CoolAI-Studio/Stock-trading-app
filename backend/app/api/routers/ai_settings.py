@@ -12,14 +12,14 @@ credentials already set: encrypted at rest, write-only over the API, and a
 button that finds out whether it actually works.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
 from app.models.user import User
-from app.services import ai_settings
+from app.services import ai_model_list, ai_settings
 from app.services.ai_provider import get_ai_provider
 
 router = APIRouter(prefix="/ai-settings", tags=["ai"])
@@ -136,3 +136,50 @@ def test_settings(
         system="You are answering a connectivity check. Reply with exactly: ok",
     )
     return AiTestResult(ok=result.ok, reply=result.reply, error=result.error)
+
+
+class ModelRead(BaseModel):
+    id: str
+    name: str
+    # Whether asking it costs anything. The single most useful thing to know
+    # when picking: a first-time deployer is choosing whether this feature
+    # costs them money at all.
+    free: bool
+
+
+class ModelListRead(BaseModel):
+    models: list[ModelRead]
+    # Why the list is empty, when it is. The page keeps its free-text box
+    # either way -- a picker that stops somebody typing a model they know is
+    # worse than no picker.
+    error: str | None = None
+
+
+@router.get("/models", response_model=ModelListRead)
+def list_models(
+    provider: str | None = Query(default=None),
+    base_url: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> ModelListRead:
+    """What this provider actually offers, right now.
+
+    Takes the provider and URL from the QUERY rather than from what is saved:
+    somebody picks a provider and a model in the same visit, and listing the
+    saved provider's models while they are looking at a different one is how a
+    picker offers names that cannot work.
+
+    The saved key is used when there is one, and its absence is not an error
+    for OpenRouter -- whose list needs no credentials, which is what makes this
+    usable from a completely empty form.
+    """
+    resolved = ai_settings.resolve(db, user.id)
+    result = ai_model_list.fetch(
+        provider or resolved.provider,
+        base_url or resolved.base_url,
+        resolved.api_key,
+    )
+    return ModelListRead(
+        models=[ModelRead(id=m.id, name=m.name, free=m.free) for m in result.models],
+        error=result.error,
+    )

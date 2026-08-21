@@ -59,6 +59,24 @@ export function AiSettingsPage() {
     setModel(query.data.model)
   }, [query.data])
 
+  // Fetched for what the FORM currently shows, not for what is saved: somebody
+  // picks a provider and a model in the same visit, and listing the saved
+  // provider's models while they look at a different one offers names that
+  // cannot possibly work.
+  const modelsQuery = useQuery({
+    queryKey: ['ai-models', provider, baseUrl],
+    queryFn: () =>
+      api.get<{ models: { id: string; name: string; free: boolean }[]; error: string | null }>(
+        `/api/ai-settings/models?provider=${encodeURIComponent(provider)}&base_url=${encodeURIComponent(baseUrl)}`,
+      ),
+    retry: false,
+  })
+
+  const models = modelsQuery.data?.models ?? []
+  // The picker only replaces the text box when there is something to pick. A
+  // picker that stops somebody typing a model they know is worse than none.
+  const canPick = models.length > 0
+
   const save = useMutation({
     mutationFn: () =>
       api.put<AiSettings>('/api/ai-settings', {
@@ -151,6 +169,9 @@ export function AiSettingsPage() {
         <label className="block">
           <span className="text-sm text-slate-300">API 網址</span>
           <input
+            aria-label="API 網址"
+            type="text"
+            autoComplete="off"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm"
@@ -159,15 +180,50 @@ export function AiSettingsPage() {
 
         <label className="block">
           <span className="text-sm text-slate-300">模型</span>
-          <input
-            aria-label="模型"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="例如 anthropic/claude-sonnet-4.5"
-            className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm"
-          />
+          {canPick ? (
+            <select
+              aria-label="模型"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm"
+            >
+              <option value="">（請選一個）</option>
+              {/* The saved model may not be in the list -- a provider retires
+                  one, or it was typed by hand. Kept as an option so opening
+                  the page does not silently change what is in force. */}
+              {model && !models.some((m) => m.id === model) && (
+                <option value={model}>{model}（目前設定，清單裡沒有）</option>
+              )}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.free ? `【免費】${m.name}` : m.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              aria-label="模型"
+              type="text"
+              // Without this a browser reads an unlabelled text box next to a
+              // password field as a username and fills in an email address --
+              // observed happening, with the owner's own address landing in
+              // this field.
+              autoComplete="off"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="例如 anthropic/claude-opus-5"
+              className="mt-1 block w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-sm"
+            />
+          )}
+          {modelsQuery.data?.error && (
+            <span className="mt-1 block text-xs text-amber-400">
+              抓不到模型清單（{modelsQuery.data.error}）—— 可以直接自己輸入。
+            </span>
+          )}
           <span className="mt-1 block text-xs text-slate-500">
-            用逗號分隔可以填好幾個，前面的不通就換下一個 —— 免費模型常常忙線，這是讓它還能用的關鍵。
+            {canPick
+              ? '【免費】的模型不用付費，但常常忙線。要備援的話存檔後改成自己輸入，用逗號分隔多個。'
+              : '用逗號分隔可以填好幾個，前面的不通就換下一個 —— 免費模型常常忙線，這是讓它還能用的關鍵。'}
           </span>
         </label>
 
@@ -183,6 +239,9 @@ export function AiSettingsPage() {
           <input
             aria-label="API 金鑰"
             type="password"
+            // new-password, not off: browsers ignore `off` on password fields
+            // and offer a saved login anyway. This is the value they honour.
+            autoComplete="new-password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={configured ? '留白就是不更動現有金鑰' : 'sk-...'}
