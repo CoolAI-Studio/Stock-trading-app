@@ -65,7 +65,15 @@ function MissingRow({ item }: { item: SetupStatus['missing'][number] }) {
 
   return (
     <li className="rounded border border-slate-700 bg-slate-900 p-3">
-      <p className="font-mono text-sm font-medium text-amber-300">{item.name}</p>
+      <p className="flex items-baseline gap-2">
+        {/* The step number is the part render.yaml could not show: seven blanks
+            presented side by side look independent, and two of them cannot even
+            be KNOWN until the one before has happened. */}
+        <span className="rounded bg-slate-700 px-1.5 text-xs text-slate-300">
+          步驟 {item.step}
+        </span>
+        <span className="font-mono text-sm font-medium text-amber-300">{item.name}</span>
+      </p>
       <p className="mt-1 text-sm text-slate-300">{item.why}</p>
       <p className="mt-1 text-sm text-slate-400">{item.how}</p>
 
@@ -107,6 +115,13 @@ export function SetupPage() {
   // a login page that cannot work, with nothing on screen explaining why.
   const failed = statusQuery.isError && !finished
 
+  // Split rather than sorted. The two groups answer different questions --
+  // 「can I use this at all」 and 「what will not work once I can」 -- and a
+  // reader who sees one list assumes every row in it has the same weight.
+  const missing = statusQuery.data?.missing ?? []
+  const blocking = missing.filter((item) => item.blocking)
+  const advisory = missing.filter((item) => !item.blocking)
+
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
       <h1 className="text-xl font-semibold text-slate-100">完成你的部署設定</h1>
@@ -131,18 +146,39 @@ export function SetupPage() {
 
       {statusQuery.isSuccess && statusQuery.data.missing.length > 0 && (
         <>
-          <p className="text-sm text-slate-300">
-            還差 {statusQuery.data.missing.length} 個設定。每一個下面都寫了不填會怎樣，
-            能由系統自己產生的都有按鈕，按了直接複製貼上就好。
-          </p>
           <p className="rounded border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-300">
             {statusQuery.data.where}
           </p>
-          <ul className="space-y-3">
-            {statusQuery.data.missing.map((item) => (
-              <MissingRow key={item.name} item={item} />
-            ))}
-          </ul>
+
+          {blocking.length > 0 && (
+            <section>
+              <h2 className="mb-2 text-sm font-semibold text-red-300">
+                這些沒填，系統現在完全不能用（{blocking.length} 項）
+              </h2>
+              <ul className="space-y-3">
+                {blocking.map((item) => (
+                  <MissingRow key={item.name} item={item} />
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {advisory.length > 0 && (
+            <section>
+              {/* Deliberately a separate heading. 「it will not start」 and
+                  「TradingView will send to the wrong address」 are not the same
+                  urgency, and one list containing both teaches people to skim
+                  past the half that matters. */}
+              <h2 className="mb-2 text-sm font-semibold text-amber-300">
+                這些不會擋住啟動，但沒填就會有東西不能用（{advisory.length} 項）
+              </h2>
+              <ul className="space-y-3">
+                {advisory.map((item) => (
+                  <MissingRow key={item.name} item={item} />
+                ))}
+              </ul>
+            </section>
+          )}
         </>
       )}
     </div>

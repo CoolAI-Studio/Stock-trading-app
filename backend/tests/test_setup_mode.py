@@ -68,8 +68,12 @@ def _names(s: Settings) -> list[str]:
 
 
 def test_a_fully_configured_deployment_needs_no_setup():
+    """「Configured」 means the process may serve, which is about the BLOCKING
+    list only. A deployment with the wrong CORS origin is misconfigured, not
+    unstartable, and locking somebody out of an app that works would be a
+    worse answer than letting them in to fix it."""
     assert setup_state.is_configured(_settings())
-    assert setup_state.missing_settings(_settings()) == []
+    assert setup_state.blocking_settings(_settings()) == []
 
 
 def test_the_encryption_key_is_the_wall_a_one_click_deploy_hits():
@@ -240,13 +244,20 @@ def test_the_status_endpoint_says_where_to_paste_the_answers(client, monkeypatch
 
 def test_the_endpoints_disappear_once_there_is_nothing_to_configure(client, monkeypatch):
     """404 rather than 403: there is nothing here to be forbidden from, and a
-    route that exists but refuses invites somebody to keep knocking."""
+    route that exists but refuses invites somebody to keep knocking.
+
+    「Nothing」 includes the two advisory settings. The page has to outlive the
+    blocking ones -- CORS_ORIGINS is the LAST step of the flow and cannot even
+    be known until the frontend exists, so a page that vanished the moment the
+    process could boot would disappear one step before it was needed most."""
     monkeypatch.setattr("app.config.settings.SECRET_ENCRYPTION_KEY", _fernet_key())
     monkeypatch.setattr("app.config.settings.DATABASE_URL", "postgresql://u:p@h/d")
     monkeypatch.setattr("app.config.settings.JWT_SECRET", "j" * 48)
     monkeypatch.setattr("app.config.settings.TV_WEBHOOK_SECRET", "t" * 48)
     monkeypatch.setattr("app.config.settings.VAPID_PUBLIC_KEY", "")
     monkeypatch.setattr("app.config.settings.VAPID_PRIVATE_KEY", "")
+    monkeypatch.setattr("app.config.settings.PUBLIC_BASE_URL", "https://my-app.onrender.com")
+    monkeypatch.setattr("app.config.settings.CORS_ORIGINS", "https://my-app.vercel.app")
 
     assert client.get("/api/setup/status").status_code == 404
 

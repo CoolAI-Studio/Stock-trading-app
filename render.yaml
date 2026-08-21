@@ -38,9 +38,14 @@ services:
       - key: LOG_LEVEL
         value: "INFO"
       - key: PUBLIC_BASE_URL
-        # This service's own https://...onrender.com address. Shown to the
-        # owner as the URL to paste into TradingView, so a wrong value means a
-        # webhook that never arrives with nothing on screen explaining why.
+        # LEAVE IT BLANK on Render. The app falls back to RENDER_EXTERNAL_URL,
+        # which Render injects with this service's own https://...onrender.com
+        # address -- so nobody has to copy a URL back into the service it came
+        # from, which is a step a first-time deployer skips and then wonders
+        # why TradingView webhooks never arrive.
+        #
+        # Fill it in ONLY for a custom domain, which is the one case Render's
+        # variable does not know about.
         sync: false
       - key: ALLOW_REGISTRATION
         value: "false"
@@ -54,3 +59,29 @@ services:
         value: "180"
       - key: WS_TICKET_TTL_SECONDS
         value: "30"
+
+      # --- AI 輔助（選填，不填就是沒有這個功能，其他一切照常）-------------
+      #
+      # Declared here so the deploy form actually ASKS. Without these keys in
+      # the blueprint the feature exists in the code and is unreachable: Render
+      # only prompts for what is declared, so somebody would have to already
+      # know to go and add the variables by hand -- which is exactly the 「you
+      # have to already know」 gap the setup page was built to close.
+      #
+      # Optional on purpose. The key is the deployer's own and every question
+      # costs them money on it, so nothing in the app requires it: with these
+      # blank the assistant simply does not appear.
+      - key: AI_PROVIDER
+        value: "openai_compatible"
+      - key: AI_BASE_URL
+        # OpenRouter by default -- one key reaches many models. Any
+        # OpenAI-compatible endpoint works; use https://api.anthropic.com with
+        # AI_PROVIDER=anthropic instead.
+        value: "https://openrouter.ai/api/v1"
+      - key: AI_API_KEY
+        # Your own key from the provider above. Blank = no AI features.
+        sync: false
+      - key: AI_MODEL
+        # The model id as that provider spells it, e.g.
+        # anthropic/claude-sonnet-4.5 on OpenRouter. Blank = no AI features.
+        sync: false

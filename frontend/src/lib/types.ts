@@ -562,6 +562,15 @@ export interface SetupStatus {
      * deployer can supply it (DATABASE_URL points at somebody else's service),
      * and offering a button would be a lie. */
     generator: string | null
+    /** False means the app boots and works, but something the owner expects
+     * to work will not. Shown apart from the blocking ones: 「it will not
+     * start」 and 「TradingView will send to the wrong address」 are not the
+     * same urgency, and a page that mixes them teaches people to skim. */
+    blocking: boolean
+    /** Which step of the deploy flow this belongs to. Seven parallel blanks
+     * is what render.yaml already gave them; the order is what was missing,
+     * and two of these cannot be KNOWN until the step before has happened. */
+    step: number
   }[]
   /** Where to paste the answers. Named rather than assumed: the audience has
    * just met Render and does not know env vars live under Environment. */

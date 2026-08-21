@@ -38,6 +38,16 @@ class MissingSettingRead(BaseModel):
     why: str
     how: str
     generator: str | None
+    # False means the app boots and works, but something the owner expects to
+    # work will not. Shown apart from the blocking ones, because 「it will not
+    # start」 and 「TradingView will send to the wrong address」 are not the same
+    # urgency and a page that mixes them teaches people to skim.
+    blocking: bool
+    # Which step of the deploy flow this belongs to. Seven parallel blanks is
+    # what render.yaml already gave them; the order is the part that was
+    # missing, and three of these cannot even be known until the step before
+    # them has happened.
+    step: int
 
 
 class SetupStatus(BaseModel):

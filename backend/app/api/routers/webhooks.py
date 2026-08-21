@@ -335,7 +335,7 @@ def tradingview_setup(_user: User = Depends(get_current_active_user)) -> Trading
     would put it in every browser cache and every screenshot of this page.
     """
     return TradingViewSetup(
-        url=f"{settings.PUBLIC_BASE_URL.rstrip('/')}/api/webhooks/tradingview",
+        url=f"{settings.public_base_url.rstrip('/')}/api/webhooks/tradingview",
         example_message=(
             "{\n"
             '  "secret": "<你的 TV_WEBHOOK_SECRET>",\n'

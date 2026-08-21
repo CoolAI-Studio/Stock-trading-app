@@ -1,9 +1,17 @@
 import base64
 import logging
+import os
 import sys
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The PUBLIC_BASE_URL default, named so the 「still unset」 check in
+# services/setup_state.py and the value that ships cannot drift apart. Module
+# level rather than a class attribute: pydantic turns a leading-underscore
+# class attribute into a ModelPrivateAttr, which compares equal to nothing and
+# made the check silently never fire.
+LOCAL_BASE_URL = "http://localhost:8000"
 
 
 class Settings(BaseSettings):
@@ -100,7 +108,7 @@ class Settings(BaseSettings):
     # behind a proxy, so the Host header is whatever that proxy forwards.
     # Wrong here just means the setup panel shows a URL they have to correct,
     # never a broken request.
-    PUBLIC_BASE_URL: str = "http://localhost:8000"
+    PUBLIC_BASE_URL: str = LOCAL_BASE_URL
 
     # How long an identical TradingView body is treated as a replay rather
     # than a second decision. Only applies to alerts with no `id`; one with an
@@ -126,6 +134,24 @@ class Settings(BaseSettings):
     # bypassing the test DB override -- and to never hit real endpoints
     # during a test run regardless.
     NOTIFICATIONS_ENABLED: bool = True
+
+    @property
+    def public_base_url(self) -> str:
+        """This deployment's own address, derived when nobody supplied one.
+
+        Render injects RENDER_EXTERNAL_URL with the service's own
+        https://...onrender.com address, so requiring somebody to copy that URL
+        back into the service it came from is a step that exists for no reason
+        -- and a step a first-time deployer skips, which produces a TradingView
+        webhook pointed at localhost and no sign of why nothing arrives.
+
+        A FALLBACK, never an override: a custom domain is exactly the case
+        Render's variable does not know about, so an explicit value wins.
+        """
+        explicit = (self.PUBLIC_BASE_URL or "").strip()
+        if explicit and explicit != LOCAL_BASE_URL:
+            return explicit
+        return (os.environ.get("RENDER_EXTERNAL_URL") or "").strip() or explicit
 
     @property
     def cors_origins_list(self) -> list[str]:

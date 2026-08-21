@@ -29,7 +29,7 @@ import base64
 import secrets
 from dataclasses import dataclass
 
-from app.config import _PLACEHOLDER_SECRETS, Settings
+from app.config import _PLACEHOLDER_SECRETS, LOCAL_BASE_URL, Settings
 
 # Long enough that guessing is not a strategy, and the same shape the existing
 # hint in config.py tells people to generate by hand.
@@ -50,6 +50,15 @@ class MissingSetting:
     why: str
     how: str
     generator: str | None = None
+    # False means the app boots and works, but something the owner expects to
+    # work will not. Reported apart from the blocking ones because 「it will not
+    # start」 and 「TradingView will send to the wrong address」 are not the same
+    # urgency, and a page that mixes them teaches people to skim.
+    blocking: bool = True
+    # Which step of the deploy flow this belongs to. render.yaml presents seven
+    # values as a flat parallel list; three of them are a chain, and a stranger
+    # cannot see the chain. The number is what puts them back in order.
+    step: int = 1
 
 
 def _fernet_ok(key: str) -> bool:
@@ -99,6 +108,7 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "（postgresql://... 開頭）貼進 Render 的這個欄位。免費方案就夠用。"
                 ),
                 generator=None,
+                step=1,
             )
         )
 
@@ -116,6 +126,7 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                 ),
                 how="按下面的「產生」，把產生出來的值貼回 Render。不需要在自己電腦上裝任何東西。",
                 generator="fernet",
+                step=2,
             )
         )
 
@@ -139,6 +150,7 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                         "Render 通常會自動幫你產生這一個。如果它是空的，按下面的「產生」再貼回去。"
                     ),
                     generator="token",
+                    step=2,
                 )
             )
 
@@ -157,15 +169,71 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "如果你不打算用手機推播，把兩個欄位都清空也是合法的設定。"
                 ),
                 generator="vapid",
+                step=4,
             )
         )
 
+    # --- not fatal, and the two a first-timer actually gets wrong ---------
+    #
+    # Neither stops the app booting, so neither was mentioned anywhere. They
+    # are the tail of the chain render.yaml presents as a flat list: you cannot
+    # know either URL until the thing it names exists.
+    if s.public_base_url.strip() in ("", LOCAL_BASE_URL):
+        missing.append(
+            MissingSetting(
+                name="PUBLIC_BASE_URL",
+                why=(
+                    "這是「你這台後端自己的網址」，只有一個地方用到：TradingView 設定頁"
+                    "會告訴你要把哪個網址貼進 TradingView。現在它還是 localhost，"
+                    "照著貼的話 TradingView 的訊號永遠不會送到，而且畫面上不會有任何提示。"
+                ),
+                how=(
+                    "在 Render 上通常不用填 —— 系統會自動用 Render 給這個服務的網址。"
+                    "只有在你另外接了自訂網域的時候才需要手動填。"
+                ),
+                generator=None,
+                blocking=False,
+                step=3,
+            )
+        )
+
+    if not [origin for origin in s.cors_origins_list if not origin.startswith("http://localhost")]:
+        missing.append(
+            MissingSetting(
+                name="CORS_ORIGINS",
+                why=(
+                    "這是「允許哪個網址來存取後端」。前端部署好之後如果沒有把它的網址填"
+                    "進來，瀏覽器會把後端的每一個回應都丟掉 —— 你會看到一片空白的畫面，"
+                    "而錯誤訊息藏在開發者工具裡，不會有人去看。"
+                ),
+                how=(
+                    "等前端（Vercel）部署完，把它給你的網址（https://xxx.vercel.app）"
+                    "貼進 Render 的這個欄位。這一格一定是最後填的，因為在前端存在之前"
+                    "沒有人知道那個網址。"
+                ),
+                generator=None,
+                blocking=False,
+                step=5,
+            )
+        )
+
+    missing.sort(key=lambda item: (not item.blocking, item.step))
     return missing
 
 
+def blocking_settings(s: Settings) -> list[MissingSetting]:
+    """Only the ones that stop the process from starting."""
+    return [item for item in missing_settings(s) if item.blocking]
+
+
 def is_configured(s: Settings) -> bool:
-    """Whether the real app may serve. False means setup mode."""
-    return not missing_settings(s)
+    """Whether the real app may serve. False means setup mode.
+
+    Reads the BLOCKING list only: a deployment with the wrong CORS origin is
+    misconfigured, not unstartable, and locking somebody out of an app that
+    works would be a worse answer than letting them in to fix it.
+    """
+    return not blocking_settings(s)
 
 
 def generate(kind: str) -> dict[str, str]:

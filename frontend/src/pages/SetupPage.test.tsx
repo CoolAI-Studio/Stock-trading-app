@@ -36,12 +36,16 @@ const STATUS: SetupStatus = {
       why: '你的 Telegram 權杖、LINE 權杖、Email 密碼都是用這把金鑰加密後才存進資料庫的。',
       how: '按下面的「產生」，把產生出來的值貼回 Render。',
       generator: 'fernet',
+      blocking: true,
+      step: 2,
     },
     {
       name: 'DATABASE_URL',
       why: '沒有資料庫，這個系統存不了任何東西。',
       how: '去 neon.tech 註冊一個免費帳號、建立一個資料庫。',
       generator: null,
+      blocking: true,
+      step: 1,
     },
   ],
   where: 'Render 後台 → 你的服務 → 左邊選單 Environment → 找到同名的欄位貼上去。',
@@ -126,6 +130,8 @@ describe('app 自己產生得出來的值', () => {
           why: '手機推播用的一對金鑰。',
           how: '按「產生」會一次給你完整的一對。',
           generator: 'vapid',
+          blocking: true,
+          step: 4,
         },
       ],
     } as never)
@@ -181,5 +187,72 @@ describe('設定完成之後', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
     expect(screen.queryByText(/設定完成/)).not.toBeInTheDocument()
+  })
+})
+
+// --- the order, which is the part render.yaml could not show -----------------
+//
+// Seven blanks presented as a flat parallel list are not parallel: three of
+// them are a chain, and a stranger cannot see the chain. Two of those cannot
+// even be KNOWN until the step before them has happened -- you cannot copy a
+// URL out of a service that does not exist yet.
+
+describe('分成「擋住啟動」和「不會擋，但也是錯的」', () => {
+  const MIXED: SetupStatus = {
+    missing: [
+      {
+        name: 'DATABASE_URL',
+        why: '沒有資料庫，這個系統存不了任何東西。',
+        how: '去 neon.tech 開一個免費的。',
+        generator: null,
+        blocking: true,
+        step: 1,
+      },
+      {
+        name: 'CORS_ORIGINS',
+        why: '瀏覽器會把後端的每一個回應都丟掉，你會看到一片空白。',
+        how: '等前端部署完，把它的網址貼進來。',
+        generator: null,
+        blocking: false,
+        step: 5,
+      },
+    ],
+    where: 'Render 後台 → Environment',
+  }
+
+  it('擋住啟動的排前面，而且說得出它擋住了', async () => {
+    vi.mocked(api.get).mockResolvedValue(MIXED as never)
+    show()
+
+    expect(await screen.findByText(/現在完全不能用|不會啟動|還不能用/)).toBeInTheDocument()
+  })
+
+  it('不擋啟動的要另外分一區，不要混在一起嚇人', async () => {
+    // 「it will not start」 and 「TradingView will send to the wrong address」
+    // are not the same urgency, and a page that mixes them teaches people to
+    // skim past both.
+    vi.mocked(api.get).mockResolvedValue(MIXED as never)
+    show()
+
+    expect(await screen.findByText(/不會擋住|還是可以用|不影響啟動/)).toBeInTheDocument()
+  })
+
+  it('每一項都標出它是第幾步', async () => {
+    vi.mocked(api.get).mockResolvedValue(MIXED as never)
+    show()
+
+    const row = (await screen.findByText('CORS_ORIGINS')).closest('li')!
+    expect(row.textContent).toMatch(/步驟\s*5|第\s*5\s*步/)
+  })
+
+  it('只剩不擋啟動的項目時，語氣不要還像壞掉了', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      ...MIXED,
+      missing: [MIXED.missing[1]],
+    } as never)
+    show()
+
+    expect(await screen.findByText(/還是可以用|不會擋住|不影響啟動/)).toBeInTheDocument()
+    expect(screen.queryByText(/現在完全不能用/)).not.toBeInTheDocument()
   })
 })

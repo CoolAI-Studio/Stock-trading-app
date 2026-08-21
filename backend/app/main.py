@@ -3,7 +3,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -137,6 +137,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _setup_is_reachable_from_anywhere(request, call_next):
+    """The setup endpoints answer any origin. This is the trap it exists for.
+
+    A wrong CORS_ORIGINS makes the browser discard every response from this
+    backend -- INCLUDING the setup page's own. So the one page whose entire job
+    is to explain the misconfiguration gets blanked by the misconfiguration,
+    and what the owner sees is an empty screen with the reason buried in a
+    developer console they will never open. It is the single most likely
+    mistake in the deploy flow, because the frontend's URL cannot be known
+    until after the frontend exists.
+
+    Safe to open because of what is behind it and nothing else: these routes
+    carry no secrets, no user data and no credentials -- they report WHICH
+    settings are blank and hand out freshly generated random values, and they
+    404 entirely once there is nothing left to configure.
+
+    The specific origin is echoed rather than "*": credentials are irrelevant
+    here, but a wildcard would also apply to a preflight the browser then
+    caches for the whole origin, and being narrow costs nothing.
+    """
+    origin = request.headers.get("origin")
+    if not origin or not request.url.path.startswith("/api/setup"):
+        return await call_next(request)
+
+    if request.method == "OPTIONS":
+        # Answered here rather than passed down: the CORS middleware above will
+        # only answer a preflight for an origin it already allows, which is
+        # exactly the origin this is for.
+        response = Response(status_code=status.HTTP_200_OK)
+    else:
+        response = await call_next(request)
+
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "content-type"
+    response.headers["Vary"] = "Origin"
+    return response
+
 
 app.include_router(health_router)
 app.include_router(ws_router)
