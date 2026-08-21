@@ -64,6 +64,21 @@ jobs:
           alembic upgrade head
           alembic check
 
+      - name: SAST
+        # A GATE, unlike pip-audit below, and the difference is who can fix it.
+        # A CVE in a transitive package waits on somebody else's release; a
+        # finding here is in code in this repo, and clearing one costs a
+        # `# nosec BXXX` with a sentence saying why -- which is the review this
+        # is for. Silencing without the sentence is the thing to catch in a
+        # diff, and a diff is where it now shows up.
+        #
+        # app and scripts, not tests: the suite is full of `assert` (B101) and
+        # fake credentials by design, and drowning the real findings in those
+        # is how a scanner stops being read.
+        run: |
+          pip install bandit
+          bandit -r app scripts
+
       - name: Known vulnerabilities in the locked dependencies
         # Advisory, not a gate: a CVE published in a transitive package is
         # worth knowing about today, but failing the build would block an

@@ -190,3 +190,110 @@ def test_degenerate_bodies_do_not_crash_the_watchdog(body):
     """It must fail loudly, never fail to run -- a watchdog that raises is a
     watchdog that reports nothing."""
     assert read_verdict(200, body)
+
+
+# --- the URL it is pointed at -----------------------------------------------
+#
+# The address comes from outside the script: a GitHub repo variable
+# (HEALTH_URL) on the scheduled run, argv on a manual one. urllib.urlopen
+# accepts more than http -- `file:///etc/passwd` opens a local file and
+# `ftp://` opens a socket -- so whatever is in that variable decides what this
+# process reads, and it reads it inside a job with a checkout of the repo.
+#
+# Nothing here is exploitable today: the variable is set by the repo owner, who
+# already has far more direct ways to run code in their own Actions job. The
+# reason to close it anyway is that this is the ONE script that keeps watch
+# when nobody is looking, and 「the watchdog opened a local file and reported it
+# healthy」 is a failure mode with no other detector behind it.
+
+
+def _never_called(monkeypatch):
+    """A urlopen that fails the test if anything reaches it.
+
+    Asserting on the RETURN VALUE would not test anything here: fetch() catches
+    everything and answers (None, None), and on this machine
+    file:///etc/passwd does not exist, so the bad-scheme tests passed green
+    before any check existed. What has to be true is that the call never
+    happens at all.
+    """
+    from scripts import watchdog
+
+    opened: list[str] = []
+    monkeypatch.setattr(
+        watchdog.urllib.request,
+        "urlopen",
+        lambda url, **_kw: opened.append(url) or _raise_stop(),
+    )
+    return opened
+
+
+def test_a_local_file_is_never_opened(monkeypatch):
+    from scripts.watchdog import fetch
+
+    opened = _never_called(monkeypatch)
+
+    assert fetch("file:///etc/passwd") == (None, None)
+    assert opened == [], "the watchdog opened a local file"
+
+
+def test_nor_any_other_scheme(monkeypatch):
+    from scripts.watchdog import fetch
+
+    opened = _never_called(monkeypatch)
+
+    assert fetch("ftp://example.com/x") == (None, None)
+    assert opened == []
+
+
+def test_a_scheme_less_address_is_refused_rather_than_guessed(monkeypatch):
+    """Prepending 「https://」 to whatever was typed is the kind of helpfulness
+    that silently points the watchdog at something else."""
+    from scripts.watchdog import fetch
+
+    opened = _never_called(monkeypatch)
+
+    assert fetch("example.com/healthz") == (None, None)
+    assert opened == []
+
+
+def test_the_ordinary_case_still_goes_through(monkeypatch):
+    from scripts import watchdog
+
+    class _Response:
+        status = 200
+
+        @staticmethod
+        def read():
+            return b'{"status": "ok", "checks": {}}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(watchdog.urllib.request, "urlopen", lambda *_a, **_kw: _Response())
+
+    assert watchdog.fetch("https://example.onrender.com/healthz")[0] == 200
+
+
+def test_plain_http_is_allowed_too(monkeypatch):
+    """A self-hosted copy on a LAN has no certificate. Refusing http would
+    make the watchdog unusable there, and no watchdog is worse than one on a
+    plaintext connection to a health endpoint that carries no secrets."""
+    from scripts import watchdog
+
+    called = []
+    monkeypatch.setattr(
+        watchdog.urllib.request,
+        "urlopen",
+        lambda url, **_kw: called.append(url) or _raise_stop(),
+    )
+
+    watchdog.fetch("http://192.168.1.10:8000/healthz")
+
+    assert called == ["http://192.168.1.10:8000/healthz"]
+
+
+def _raise_stop():
+    raise RuntimeError("stop here; the call itself is what is under test")

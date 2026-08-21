@@ -365,7 +365,15 @@ def compile_strategy(source_code: str, timeout_sec: float | None = None) -> Load
 
     namespace = _build_sandbox_namespace()
     try:
-        exec(compile(tree, "<strategy>", "exec"), namespace)
+        # Running owner-authored strategy code IS the feature, and this is
+        # the sandbox that exists to make it survivable. The tree
+        # has already been through _reject_unsafe_source() immediately above:
+        # an AST walk that refuses imports outside the allow-list, every name
+        # in _FORBIDDEN_NAMES, and every dunder. The namespace is built by
+        # _build_sandbox_namespace() rather than inherited. Removing the exec
+        # would remove the product; what is reviewable is the validator, and
+        # tests/test_indicators_sandbox.py is where that is held to account.
+        exec(compile(tree, "<strategy>", "exec"), namespace)  # nosec B102
     except StrategySecurityError:
         raise
     except Exception as exc:

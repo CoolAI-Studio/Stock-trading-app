@@ -153,9 +153,13 @@ _PLACEHOLDER_SECRETS = frozenset(
     }
 )
 
+# The VALUES are what goes wrong when the setting is missing, not secrets.
+# bandit reads any string literal beside a key it considers secret-ish as a
+# hardcoded password (B105); here the key is the setting's NAME and the value
+# is the sentence printed at boot when it is unset.
 _REQUIRED_SECRETS = {
-    "JWT_SECRET": "anyone could mint a login token for your account",
-    "TV_WEBHOOK_SECRET": "anyone could post fake TradingView signals",
+    "JWT_SECRET": "anyone could mint a login token for your account",  # nosec B105
+    "TV_WEBHOOK_SECRET": "anyone could post fake TradingView signals",  # nosec B105
 }
 
 

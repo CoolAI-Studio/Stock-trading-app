@@ -29,6 +29,7 @@ import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 
@@ -112,10 +113,38 @@ def read_verdict(status_code: int | None, body: str | None) -> list[str]:
     return problems
 
 
+# urlopen speaks more than http. `file:///etc/passwd` opens a local file and
+# `ftp://` opens a socket, and the address this script is pointed at comes from
+# outside it -- a GitHub repo variable (HEALTH_URL) on the scheduled run, argv
+# on a manual one.
+#
+# Nothing here is exploitable today: that variable is set by the repo owner,
+# who already has far more direct ways to run code in their own Actions job.
+# The reason to close it anyway is that this is the ONE thing keeping watch
+# when nobody is looking, and 「the watchdog opened a local file and reported
+# healthy」 is a failure with no other detector behind it.
+#
+# Plain http stays allowed: a self-hosted copy on a LAN has no certificate, and
+# no watchdog at all is worse than one on a plaintext connection to an endpoint
+# that carries no secrets.
+_ALLOWED_SCHEMES = ("http", "https")
+
+
 def fetch(url: str) -> tuple[int | None, str | None]:
     """The response, or (None, None) if nothing came back at all."""
+    if urllib.parse.urlparse(url).scheme not in _ALLOWED_SCHEMES:
+        # Not 「guess a scheme and carry on」: prepending https:// to whatever
+        # was typed is the kind of helpfulness that silently points the
+        # watchdog somewhere else and then reports that place healthy.
+        return None, None
     try:
-        with urllib.request.urlopen(url, timeout=TIMEOUT_SEC) as response:  # noqa: S310
+        # The scheme check at the top of this function is the audit this
+        # warns to do. bandit is static and cannot see a guard three lines
+        # up, so the annotation records that it was done rather than
+        # waving the finding away.
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310
+            url, timeout=TIMEOUT_SEC
+        ) as response:
             return response.status, response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         # A 503 is an ANSWER, and the most informative one there is -- the body

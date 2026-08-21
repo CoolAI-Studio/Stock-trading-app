@@ -65,7 +65,10 @@ class MockProvider:
                 # going down that same path is the point.
                 continue
             price = self._prices.setdefault(symbol, 100.0)
-            price = max(0.01, price * (1 + random.uniform(-0.002, 0.002)))
+            # A fake price walk for tests and offline dev. Nothing here is a
+            # token, a key or a nonce; the requirement is that the number
+            # moves, not that it be unguessable.
+            price = max(0.01, price * (1 + random.uniform(-0.002, 0.002)))  # nosec B311
             self._prices[symbol] = price
             quotes[symbol] = Quote(
                 symbol=symbol,
