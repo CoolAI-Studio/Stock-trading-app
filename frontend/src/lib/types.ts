@@ -670,3 +670,63 @@ export interface AiSettings {
    * 「one I pasted wrong six months ago」 without revealing it. */
   key_preview: string | null
 }
+
+/** A value a user can set on a strategy or an indicator. Lives here rather
+ * than in a component because both the strategy form and the chart's
+ * indicator picker hand these to the same kind of endpoint. */
+export type ParamValue = number | boolean | string
+
+/** One tuning knob on an indicator, as its author declared it. */
+export interface IndicatorParamSpec {
+  name: string
+  /** 'int' | 'float' | 'bool' | 'str'. Whole numbers must stay whole: the
+   * server refuses a float where an int was declared rather than letting
+   * range() raise deep inside the library. */
+  type: string
+  default: ParamValue
+}
+
+export interface IndicatorSpec {
+  name: string
+  title: string
+  category: string
+  /** The Chinese label for the category, for grouping in a menu. The raw
+   * `category` is an enum value and 「trend」 as a heading is the enum leaking
+   * onto the screen. */
+  category_label: string
+  /** One entry per output. macd yields three; sma yields one with an empty
+   * key. `pane` is decided on the SERVER -- see services/indicator_panes.py --
+   * because it cannot be derived from category, result type or value range,
+   * and a second answer computed here would silently squash the chart. */
+  outputs: { key: string; pane: string; scale: string }[]
+  /** Only the tuning knobs. The bar columns are bound from the candles the
+   * server already fetched. */
+  params: IndicatorParamSpec[]
+}
+
+export interface AvailableIndicators {
+  indicators: IndicatorSpec[]
+}
+
+export interface IndicatorSeriesResponse {
+  name: string
+  /** Empty for a single-output indicator. */
+  key: string
+  pane: string
+  /** Two series in one pane sharing this string share an axis. Decided on the
+   * server: everything an indicator returns shares it by default -- macd
+   * against its own signal line is the point of macd -- except where the
+   * scales genuinely differ, which is measured and declared there. */
+  scale: string
+  /** Warm-up positions are absent, not null: every indicator returns a list as
+   * long as its input with leading Nones, and a null is not a point a line
+   * renderer can draw. Each point carries its own time, so nothing has to be
+   * zipped by index against the candles. */
+  points: { time: string; value: number }[]
+}
+
+export interface IndicatorsResponse {
+  symbol: string
+  timeframe: string
+  series: IndicatorSeriesResponse[]
+}

@@ -10,7 +10,7 @@ import type { BarsResponse } from '../lib/types'
 // `instanceof` to tell a 404 from any other failure.
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
-  api: { get: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn() },
 }))
 
 /**
@@ -37,19 +37,62 @@ const setVolumeData = vi.fn()
 const remove = vi.fn()
 const fitContent = vi.fn()
 
+/** Every line series handed to the renderer, with the pane it went on.
+ *
+ * Recorded rather than read back from the DOM because the pane is the whole
+ * point and there is no DOM -- it is canvas. RSI runs 0-100 and OBV runs to
+ * +-7.6e7; either on the price axis flattens the candles into a line at the
+ * bottom of the chart. The pane index this component asks for IS the
+ * observable behaviour.
+ */
+type DrawnLine = { pane: number | undefined; options: Record<string, unknown>; data: unknown[] }
+const lines: DrawnLine[] = []
+const removeSeries = vi.fn((series: { entry?: DrawnLine }) => {
+  if (series?.entry) series.entry.data = []
+})
+const removePane = vi.fn()
+// The share of the height each pane asks for. Without it the library splits by
+// its own default and the candles shrink every time an oscillator is added.
+const stretch: number[] = []
+const panes = () =>
+  Array.from({ length: 1 + new Set(lines.filter((l) => l.pane).map((l) => l.pane)).size }, () => ({
+    setStretchFactor: (value: number) => stretch.push(value),
+  }))
+
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => ({
-    addSeries: vi.fn((definition: unknown) => ({
-      setData: definition === 'HISTOGRAM' ? setVolumeData : setData,
-      priceScale: () => ({ applyOptions: vi.fn() }),
-      applyOptions: vi.fn(),
-    })),
+    addSeries: vi.fn((definition: unknown, options: Record<string, unknown>, pane?: number) => {
+      if (definition === 'LINE') {
+        const entry: DrawnLine = { pane, options, data: [] }
+        lines.push(entry)
+        // The handle carries its entry so removeSeries can empty it. Without
+        // that, a removed line still counts as drawn and every 「the stale line
+        // is gone」 test is green for free.
+        return {
+          entry,
+          setData: (data: unknown[]) => {
+            entry.data = data
+          },
+          priceScale: () => ({ applyOptions: vi.fn() }),
+          applyOptions: vi.fn(),
+        }
+      }
+      return {
+        setData: definition === 'HISTOGRAM' ? setVolumeData : setData,
+        priceScale: () => ({ applyOptions: vi.fn() }),
+        applyOptions: vi.fn(),
+      }
+    }),
+    removeSeries,
+    panes,
+    removePane,
     timeScale: () => ({ fitContent }),
     applyOptions: vi.fn(),
     remove,
   })),
   CandlestickSeries: 'CANDLESTICK',
   HistogramSeries: 'HISTOGRAM',
+  LineSeries: 'LINE',
   ColorType: { Solid: 'solid' },
 }))
 
@@ -62,18 +105,86 @@ const BARS: BarsResponse = {
   ],
 }
 
+const CATALOGUE = {
+  indicators: [
+    {
+      name: 'sma',
+      title: '簡單移動平均',
+      category: 'trend',
+      category_label: '趨勢',
+      outputs: [{ key: '', pane: 'price', scale: 'sma' }],
+      params: [{ name: 'period', type: 'int', default: 20 }],
+    },
+    {
+      name: 'rsi',
+      title: '相對強弱指標',
+      category: 'momentum',
+      category_label: '動能',
+      outputs: [{ key: '', pane: 'own', scale: 'rsi' }],
+      params: [{ name: 'period', type: 'int', default: 14 }],
+    },
+    {
+      name: 'macd',
+      title: 'MACD',
+      category: 'trend',
+      category_label: '趨勢',
+      outputs: [
+        { key: 'macd', pane: 'own', scale: 'macd' },
+        { key: 'signal', pane: 'own', scale: 'macd' },
+        { key: 'histogram', pane: 'own', scale: 'macd' },
+      ],
+      params: [],
+    },
+  ],
+}
+
 function show(symbol = '0050.TW') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
+  const view = render(
     <QueryClientProvider client={client}>
       <PriceChart symbol={symbol} />
     </QueryClientProvider>,
+  )
+  // Switching symbol on the SAME mounted chart, which is what the dashboard
+  // does. Re-rendering from scratch would create a new canvas and hide exactly
+  // the stale-series bugs worth testing for.
+  return {
+    rerender: (next: string) =>
+      view.rerender(
+        <QueryClientProvider client={client}>
+          <PriceChart symbol={next} />
+        </QueryClientProvider>,
+      ),
+  }
+}
+
+/** Fail the BARS request only.
+ *
+ * `mockRejectedValue` fails every GET, including the indicator catalogue --
+ * which puts a second role="alert" on the page and makes a test about the
+ * chart's overlay assert against the picker's warning instead.
+ */
+function failBars(error: Error) {
+  vi.mocked(api.get).mockImplementation((path: string) =>
+    path.includes('/bars') ? Promise.reject(error) : (Promise.resolve(CATALOGUE) as never),
   )
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(api.get).mockResolvedValue(BARS as never)
+  lines.length = 0
+  stretch.length = 0
+  window.localStorage.clear()
+  // Path-aware, because this page now makes two different GETs: the candles
+  // and the indicator catalogue. One blanket mockResolvedValue answers the
+  // catalogue with a bars payload, the picker reads no indicators out of it,
+  // and every parameter box silently fails to render.
+  vi.mocked(api.get).mockImplementation((path: string) =>
+    path.includes('/indicators/available')
+      ? (Promise.resolve(CATALOGUE) as never)
+      : (Promise.resolve(BARS) as never),
+  )
+  vi.mocked(api.post).mockResolvedValue({ symbol: '0050.TW', timeframe: '1d', series: [] } as never)
 })
 
 
@@ -134,7 +245,11 @@ describe('台股也畫得出來', () => {
     show('台積電')
 
     await new Promise((r) => setTimeout(r, 50))
-    expect(api.get).not.toHaveBeenCalled()
+    // The bars endpoint specifically. The indicator catalogue is fetched too
+    // and has nothing to do with the symbol, so 「api.get was never called」
+    // would be asserting the wrong thing.
+    expect(vi.mocked(api.get).mock.calls.filter(([path]) => path.includes('/bars'))).toHaveLength(0)
+    expect(api.post).not.toHaveBeenCalled()
   })
 })
 
@@ -255,7 +370,7 @@ describe('元件本身', () => {
 describe('錯誤訊息要真的看得到', () => {
   it('覆蓋層要疊在圖表上面，不是被圖表蓋住', async () => {
     // lightweight-charts uses z-index up to 50, so anything less loses.
-    vi.mocked(api.get).mockRejectedValue(new Error('boom'))
+    failBars(new Error('boom'))
     show()
 
     const alert = await screen.findByRole('alert')
@@ -267,7 +382,7 @@ describe('錯誤訊息要真的看得到', () => {
     // A 404 is not a transient outage. It means the deployed backend is older
     // than the page asking it, and 「稍後重新整理」 would have somebody waiting
     // for something that will never happen on its own.
-    vi.mocked(api.get).mockRejectedValue(new ApiError(404, 'Not Found'))
+    failBars(new ApiError(404, 'Not Found'))
     show()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/Manual Deploy|重新部署/)
@@ -350,5 +465,298 @@ describe('分清楚是抓不到還是真的沒有', () => {
     show('9999.TW')
 
     expect(await screen.findByText(/查不到.*歷史/)).toBeInTheDocument()
+  })
+})
+
+
+// --- indicators, computed by the code the strategies use ---------------------------
+
+/**
+ * The owner's words: the chart had no indicators to choose from, and 「重點就是
+ * 要那些指標才有辦法下策略跟回測」.
+ *
+ * THE LINE IS NOT COMPUTED HERE. Every value comes from the server, from
+ * `spec.fn` -- the very function object the strategy sandbox hands to user
+ * code. A moving average in TypeScript would be a second implementation of the
+ * same idea, and the day the two disagreed the chart would be a picture of
+ * something that is not happening. That is worse than having no indicators.
+ */
+
+const SMA_SERIES = {
+  symbol: '0050.TW',
+  timeframe: '1d',
+  series: [
+    {
+      name: 'sma',
+      key: '',
+      pane: 'price',
+      scale: 'sma',
+      points: [{ time: '2026-08-19T00:00:00Z', value: 104 }],
+    },
+  ],
+}
+
+const RSI_SERIES = {
+  symbol: '0050.TW',
+  timeframe: '1d',
+  series: [
+    {
+      name: 'rsi',
+      key: '',
+      pane: 'own',
+      scale: 'rsi',
+      points: [{ time: '2026-08-19T00:00:00Z', value: 62 }],
+    },
+  ],
+}
+
+function withIndicators(selected: { name: string; params: Record<string, number> }[]) {
+  window.localStorage.setItem('chart-indicators', JSON.stringify(selected))
+}
+
+async function linesDrawn(count: number): Promise<DrawnLine[]> {
+  await vi.waitFor(() => expect(lines.filter((line) => line.data.length > 0)).toHaveLength(count))
+  return lines.filter((line) => line.data.length > 0)
+}
+
+describe('指標畫得出來，而且跟策略算的是同一份', () => {
+  it('改參數的時候不要每打一個字就打一次後端', async () => {
+    // This endpoint runs in the same process as the market loop, on a free
+    // dyno. Typing 「120」 into a period box is three keystrokes; unthrottled
+    // that is three full indicator computations over 300 candles, and the
+    // first two are answers nobody will ever see.
+    withIndicators([{ name: 'sma', params: { period: 20 } }])
+    vi.mocked(api.post).mockResolvedValue(SMA_SERIES as never)
+    show()
+
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+    const field = await screen.findByLabelText('sma period')
+    await userEvent.clear(field)
+    await userEvent.type(field, '120')
+
+    // Settled, then exactly one more request -- for the number that was
+    // actually landed on.
+    await vi.waitFor(
+      () => {
+        expect(api.post).toHaveBeenCalledTimes(2)
+        expect(vi.mocked(api.post).mock.calls[1][1]).toMatchObject({
+          indicators: [{ name: 'sma', params: { period: 120 } }],
+        })
+      },
+      { timeout: 3000 },
+    )
+  })
+
+  it('沒有選指標就不要多打一次後端', async () => {
+    // A free-tier dyno and a rate-limited quote provider. A request whose
+    // answer is already known to be empty should not leave the page.
+    show()
+
+    await drawn()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('選了就跟 K 棒同一個代號、同一個週期去要', async () => {
+    // A moving average computed over daily candles and drawn on a weekly chart
+    // is a wrong chart that looks right.
+    withIndicators([{ name: 'sma', params: { period: 20 } }])
+    vi.mocked(api.post).mockResolvedValue(SMA_SERIES as never)
+    show()
+
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalled())
+    expect(vi.mocked(api.post).mock.calls[0][0]).toBe('/api/market/indicators')
+    expect(vi.mocked(api.post).mock.calls[0][1]).toMatchObject({
+      symbol: '0050.TW',
+      timeframe: '1d',
+      indicators: [{ name: 'sma', params: { period: 20 } }],
+    })
+  })
+
+  it('均線跟 K 棒共用價格軸', async () => {
+    withIndicators([{ name: 'sma', params: { period: 20 } }])
+    vi.mocked(api.post).mockResolvedValue(SMA_SERIES as never)
+    show()
+
+    const [line] = await linesDrawn(1)
+    expect(line.pane ?? 0).toBe(0)
+  })
+
+  it('RSI 這種另外開一格，不能壓在價格軸上', async () => {
+    // 0-100 against candles in the hundreds is survivable; OBV at +-7.6e7 is
+    // not -- the candles become a flat line at the bottom. Same mistake, and
+    // the server is the one that decides which axis.
+    withIndicators([{ name: 'rsi', params: { period: 14 } }])
+    vi.mocked(api.post).mockResolvedValue(RSI_SERIES as never)
+    show()
+
+    const [line] = await linesDrawn(1)
+    expect(line.pane).toBeGreaterThan(0)
+  })
+
+  it('後端說在哪一格就在哪一格，前端不自己判斷', async () => {
+    // The same indicator name, moved by the server. If this page had a rule of
+    // its own, this would still land on the price axis.
+    withIndicators([{ name: 'sma', params: {} }])
+    vi.mocked(api.post).mockResolvedValue({
+      ...SMA_SERIES,
+      series: [{ ...SMA_SERIES.series[0], pane: 'own' }],
+    } as never)
+    show()
+
+    const [line] = await linesDrawn(1)
+    expect(line.pane).toBeGreaterThan(0)
+  })
+
+  it('一次三條線的指標，三條都畫，而且擠在同一格', async () => {
+    // macd, signal and histogram are one reading. Split across three panes
+    // they cannot be compared, which is the only thing anybody reads them for.
+    withIndicators([{ name: 'macd', params: {} }])
+    vi.mocked(api.post).mockResolvedValue({
+      symbol: '0050.TW',
+      timeframe: '1d',
+      series: ['macd', 'signal', 'histogram'].map((key) => ({
+        name: 'macd',
+        key,
+        pane: 'own',
+        scale: 'macd',
+        points: [{ time: '2026-08-19T00:00:00Z', value: 1 }],
+      })),
+    } as never)
+    show()
+
+    const drawnLines = await linesDrawn(3)
+    expect(new Set(drawnLines.map((line) => line.pane)).size).toBe(1)
+    // ...and that one pane is NOT the price axis. Without this the assertion
+    // above is satisfied by all three landing on pane 0, which is the exact
+    // bug it is meant to catch.
+    expect(drawnLines[0].pane).toBeGreaterThan(0)
+  })
+
+  it('畫上去的值就是後端算出來的值，前端不改它', async () => {
+    // The whole design rests on this: the number on the chart is the number a
+    // strategy would trade on. A test that only checks 「a line was drawn」
+    // would stay green if this page rounded, scaled or re-based it.
+    withIndicators([{ name: 'sma', params: {} }])
+    vi.mocked(api.post).mockResolvedValue(SMA_SERIES as never)
+    show()
+
+    const [line] = await linesDrawn(1)
+    expect((line.data[0] as { value: number }).value).toBe(104)
+  })
+
+  it('同一格裡尺度差太多的兩條線，各用各的軸', async () => {
+    // bollinger_bands' bandwidth runs 4.5-25 and percent_b runs -0.2-1.2.
+    // Sharing one axis makes percent_b a flat line on the floor -- the same
+    // failure the pane map exists to prevent, one magnitude smaller. The
+    // SERVER says which outputs may be measured against each other; this page
+    // does not decide it.
+    withIndicators([{ name: 'bollinger_bands', params: {} }])
+    vi.mocked(api.post).mockResolvedValue({
+      symbol: '0050.TW',
+      timeframe: '1d',
+      series: [
+        {
+          name: 'bollinger_bands',
+          key: 'bandwidth',
+          pane: 'own',
+          scale: 'bollinger_bands',
+          points: [{ time: '2026-08-19T00:00:00Z', value: 18 }],
+        },
+        {
+          name: 'bollinger_bands',
+          key: 'percent_b',
+          pane: 'own',
+          scale: 'bollinger_bands:percent_b',
+          points: [{ time: '2026-08-19T00:00:00Z', value: 0.4 }],
+        },
+      ],
+    } as never)
+    show()
+
+    const drawnLines = await linesDrawn(2)
+    // One strip, two axes.
+    expect(new Set(drawnLines.map((line) => line.pane)).size).toBe(1)
+    expect(drawnLines[0].options.priceScaleId).not.toBe(drawnLines[1].options.priceScaleId)
+  })
+
+  it('本來就該互相比較的線，共用一個軸', async () => {
+    // macd against its own signal line is the entire point of macd. Splitting
+    // them onto separate axes would destroy the comparison.
+    withIndicators([{ name: 'macd', params: {} }])
+    vi.mocked(api.post).mockResolvedValue({
+      symbol: '0050.TW',
+      timeframe: '1d',
+      series: ['macd', 'signal', 'histogram'].map((key) => ({
+        name: 'macd',
+        key,
+        pane: 'own',
+        scale: 'macd',
+        points: [{ time: '2026-08-19T00:00:00Z', value: 1 }],
+      })),
+    } as never)
+    show()
+
+    const drawnLines = await linesDrawn(3)
+    expect(new Set(drawnLines.map((line) => line.options.priceScaleId)).size).toBe(1)
+  })
+
+  it('時間用秒，跟 K 棒同一套', async () => {
+    withIndicators([{ name: 'sma', params: {} }])
+    vi.mocked(api.post).mockResolvedValue(SMA_SERIES as never)
+    show()
+
+    const [line] = await linesDrawn(1)
+    expect((line.data[0] as { time: number }).time).toBe(
+      Math.floor(Date.parse('2026-08-19T00:00:00Z') / 1000),
+    )
+  })
+
+  it('後端沒回指標就不要留著上一次的線', async () => {
+    // The same bug that put another company's candles under a 「查不到 AAPL」
+    // message: a stale line left on the canvas is a plausible, well-formed,
+    // wrong chart.
+    //
+    // IT HAS TO DRAW ONE FIRST. Mocking an empty answer from the very first
+    // call makes this pass before the component has mounted -- green, and
+    // proving nothing about removal.
+    withIndicators([{ name: 'sma', params: {} }])
+    vi.mocked(api.post).mockResolvedValue(SMA_SERIES as never)
+    const { rerender } = show()
+    await linesDrawn(1)
+
+    // Now the same page asks again -- a different symbol, a refetch -- and the
+    // answer has no series in it.
+    vi.mocked(api.post).mockResolvedValue({ symbol: 'AAPL', timeframe: '1d', series: [] } as never)
+    rerender('AAPL')
+
+    await vi.waitFor(() => expect(lines.filter((line) => line.data.length > 0)).toHaveLength(0))
+  })
+
+  it('加了指標之後，K 棒那一格不會被壓扁', async () => {
+    // Panes divide the chart's height by stretch factor, and the default gives
+    // the price pane twice an indicator's. Three oscillators and the candles
+    // are down to a third of what they were -- on a laptop that is the chart
+    // becoming unreadable as a reward for using the feature.
+    withIndicators([{ name: 'rsi', params: {} }])
+    vi.mocked(api.post).mockResolvedValue(RSI_SERIES as never)
+    show()
+
+    await linesDrawn(1)
+    await vi.waitFor(() => expect(stretch.length).toBe(2))
+    expect(stretch[0]).toBeGreaterThan(stretch[1] * 3)
+  })
+
+  it('算不出來就說一聲，不要讓 K 棒跟著消失', async () => {
+    // A bad period is a 422 about the indicator, not about the price history.
+    // Blanking the candles over it would lose the part that still works.
+    withIndicators([{ name: 'sma', params: { period: 9999 } }])
+    vi.mocked(api.post).mockRejectedValue(new ApiError(422, 'sma 算不出來'))
+    show()
+
+    expect(await drawn()).toHaveLength(2)
+    // Specifically an alert, and specifically the server's own sentence. A
+    // loose /指標/ match is satisfied by the 「要畫線、疊指標的話」 footer that
+    // was already on this page, which is a green test for a broken feature.
+    expect(await screen.findByRole('alert')).toHaveTextContent('sma 算不出來')
   })
 })

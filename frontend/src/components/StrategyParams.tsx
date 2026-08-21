@@ -16,8 +16,12 @@
  */
 
 import { useEffect, useState } from 'react'
+import type { ParamValue } from '../lib/types'
 
-export type ParamValue = number | boolean | string
+// Re-exported: it was defined here first and the strategy pages import it
+// from here. The definition moved to lib/types.ts when the chart's
+// indicator picker needed the same shape.
+export type { ParamValue }
 
 /** A number box that lets you clear it and type a new number.
  *

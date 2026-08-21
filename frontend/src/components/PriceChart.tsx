@@ -3,15 +3,18 @@ import {
   CandlestickSeries,
   ColorType,
   HistogramSeries,
+  LineSeries,
   createChart,
   type IChartApi,
+  type ISeriesApi,
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../lib/api'
 import { looksUnpriceable } from '../lib/symbol'
 import { tradingViewSymbol } from '../lib/tradingView'
-import type { BarsResponse, DataSource } from '../lib/types'
+import type { BarsResponse, DataSource, IndicatorsResponse } from '../lib/types'
+import { ChartIndicators, type SelectedIndicator } from './ChartIndicators'
 
 /**
  * The chart, drawn from data this app already has.
@@ -34,8 +37,15 @@ import type { BarsResponse, DataSource } from '../lib/types'
  * implementable -- it has to be one or the other. This is the one that works
  * for every symbol the app can price.
  *
- * WHAT IS LOST, said plainly: drawing tools and the indicator UI. The link at
- * the bottom goes to the real thing for anyone who wants them.
+ * INDICATORS ARE COMPUTED ON THE SERVER, by `spec.fn` -- the very function
+ * object the strategy sandbox hands to user code. Not 「the same formula」: the
+ * same object. A moving average implemented in TypeScript here would be a
+ * second implementation of the same idea, and the first day the two disagreed
+ * this chart would be a picture of something that is not happening, which is
+ * worse than drawing no indicators at all.
+ *
+ * WHAT IS LOST, said plainly: drawing tools. The link at the bottom goes to
+ * the real thing for anyone who wants them.
  */
 
 const TIMEFRAMES: [value: string, label: string][] = [
@@ -52,6 +62,34 @@ const CHART_HEIGHT_PX = 460
 const UP = '#ef4444'
 const DOWN = '#22c55e'
 
+// How long a parameter box has to sit still before the chart asks the server
+// again. This endpoint runs in the same process as the market loop on a free
+// dyno, and typing 「120」 into a period box is three keystrokes -- three full
+// computations over 300 candles, two of which nobody will ever see.
+//
+// Only PARAMETERS wait. Adding or removing an indicator is a deliberate click
+// and goes immediately; making that feel laggy to save a request nobody was
+// going to send anyway would be paying in the wrong currency.
+const PARAM_SETTLE_MS = 400
+
+// Each extra pane costs height. Enough to read a shape in, not so much that
+// four of them push the candles off a laptop screen.
+const INDICATOR_PANE_HEIGHT_PX = 110
+
+// Assigned in order, and stable for as long as the selection is: an indicator
+// that changes colour when a different one is removed is unreadable. Picked to
+// stay apart from the red/green candles.
+const LINE_COLOURS = [
+  '#38bdf8',
+  '#f59e0b',
+  '#a78bfa',
+  '#f472b6',
+  '#4ade80',
+  '#facc15',
+  '#22d3ee',
+  '#fb923c',
+]
+
 export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?: DataSource }) {
   const [timeframe, setTimeframe] = useState('1d')
   const containerRef = useRef<HTMLDivElement>(null)
@@ -64,6 +102,29 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   const unpriceable = looksUnpriceable(symbol)
 
   const [renderFailed, setRenderFailed] = useState(false)
+  // Restored from the last visit, so somebody's moving average is still there
+  // after a reload. Read once, in the initialiser: reading it on every render
+  // would fight the state it is seeding.
+  const [indicators, setIndicators] = useState<SelectedIndicator[]>(() =>
+    ChartIndicators.restore(),
+  )
+  const indicatorSeriesRef = useRef<ISeriesApi<'Line'>[]>([])
+
+  // What the chart has actually asked the server for, as opposed to what the
+  // boxes currently say. See PARAM_SETTLE_MS.
+  const [settled, setSettled] = useState<SelectedIndicator[]>(indicators)
+  const settledNamesRef = useRef(indicators.map((entry) => entry.name).join(','))
+
+  useEffect(() => {
+    const names = indicators.map((entry) => entry.name).join(',')
+    if (names !== settledNamesRef.current) {
+      settledNamesRef.current = names
+      setSettled(indicators)
+      return
+    }
+    const timer = window.setTimeout(() => setSettled(indicators), PARAM_SETTLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [indicators])
 
   const query = useQuery({
     queryKey: ['bars', symbol, timeframe, dataSource],
@@ -78,6 +139,25 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
         `/api/market/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}` +
           (dataSource ? `&data_source=${dataSource}` : ''),
       ),
+  })
+
+  const indicatorQuery = useQuery({
+    // Keyed on the params too: changing a period from 20 to 60 has to refetch,
+    // and keying only on the names would serve the 20 forever.
+    queryKey: ['indicators', symbol, timeframe, dataSource, JSON.stringify(settled)],
+    // A free-tier dyno and a rate-limited quote provider. With nothing picked
+    // there is nothing to ask for, and the request should not leave the page.
+    enabled: !unpriceable && settled.length > 0,
+    // Same reasoning as the bars query: the failures this sees are a 422 about
+    // a parameter and a 404 from an older backend, both permanent.
+    retry: false,
+    queryFn: () =>
+      api.post<IndicatorsResponse>('/api/market/indicators', {
+        symbol,
+        timeframe,
+        ...(dataSource ? { data_source: dataSource } : {}),
+        indicators: settled,
+      }),
   })
 
   // Created once and reused. Tearing the canvas down on every data change
@@ -180,6 +260,124 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
     chartRef.current?.timeScale().fitContent()
   }, [query.data])
 
+  // The indicator lines. Torn down and rebuilt whenever the answer changes,
+  // rather than updated in place: the SET of series changes with the selection
+  // (macd is three lines, sma is one), and reconciling that by hand is how a
+  // line for an indicator nobody has selected any more stays on the canvas.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    for (const series of indicatorSeriesRef.current) {
+      // Wrapped: a series belonging to a chart that has already been removed
+      // throws, and the cleanup is not worth unmounting the dashboard for.
+      try {
+        chart.removeSeries(series)
+      } catch {
+        /* already gone with the chart */
+      }
+    }
+    indicatorSeriesRef.current = []
+    // Panes are indexed, so they have to go from the back. Removing pane 1
+    // first renumbers pane 2 to 1 and the second removal takes the wrong one.
+    for (let index = chart.panes().length - 1; index >= 1; index -= 1) {
+      try {
+        chart.removePane(index)
+      } catch {
+        /* already gone */
+      }
+    }
+
+    const series = indicatorQuery.data?.series
+    if (!series?.length) {
+      // Back to the plain height. Skipping this leaves the canvas as tall as
+      // it was with three oscillators on it while the container div shrinks
+      // back to CHART_HEIGHT_PX, and the candles are drawn outside the border
+      // and clipped.
+      chart.applyOptions({ height: CHART_HEIGHT_PX })
+      return
+    }
+
+    // One pane per INDICATOR, not per output: macd, signal and histogram are a
+    // single reading, and split across three strips they cannot be compared,
+    // which is the only thing anybody reads them for.
+    const panes = new Map<string, number>()
+    // Which scale group already owns each pane's own labelled axis. The FIRST
+    // group in a pane keeps the default scale so its numbers stay on screen --
+    // an RSI with no 0/50/100 to read against is half an RSI. Any further
+    // group in the same pane gets an axis of its own, unlabelled but
+    // independent, which is what stops bollinger's percent_b (-0.2 to 1.2)
+    // being flattened by its bandwidth (4.5 to 25).
+    const primaryScale = new Map<number, string>()
+    let colour = 0
+
+    for (const entry of series) {
+      let pane = 0
+      if (entry.pane !== 'price') {
+        const existing = panes.get(entry.name)
+        if (existing !== undefined) {
+          pane = existing
+        } else {
+          // The pane index the server's answer implies. Created by asking for
+          // it: lightweight-charts adds the pane when a series names one that
+          // does not exist yet.
+          pane = panes.size + 1
+          panes.set(entry.name, pane)
+        }
+      }
+
+      // Price-pane series always share the candles' axis -- that is what
+      // makes a moving average readable against them.
+      let priceScaleId: string | undefined
+      if (entry.pane !== 'price') {
+        const owner = primaryScale.get(pane)
+        if (owner === undefined) primaryScale.set(pane, entry.scale)
+        else if (owner !== entry.scale) priceScaleId = entry.scale
+      }
+
+      const line = chart.addSeries(
+        LineSeries,
+        {
+          color: LINE_COLOURS[colour % LINE_COLOURS.length],
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: entry.pane !== 'price',
+          title: entry.key ? `${entry.name}.${entry.key}` : entry.name,
+          ...(priceScaleId ? { priceScaleId } : {}),
+        },
+        pane,
+      )
+      colour += 1
+
+      line.setData(
+        // SECONDS, like the candles. A millisecond timestamp here plots the
+        // line around the year 57000 -- off the visible range, so the line
+        // just does not appear and nothing says why.
+        entry.points.map((point) => ({
+          time: (Date.parse(point.time) / 1000) as UTCTimestamp,
+          value: point.value,
+        })),
+      )
+      indicatorSeriesRef.current.push(line)
+    }
+
+    // Give the new strips somewhere to live. Without this they are carved out
+    // of the candles' height and the price chart shrinks every time an
+    // oscillator is added.
+    chart.applyOptions({ height: CHART_HEIGHT_PX + panes.size * INDICATOR_PANE_HEIGHT_PX })
+
+    // And divide that height the way it was asked for. Panes split by stretch
+    // FACTOR, not by pixels, and the default gives the price pane only twice
+    // an indicator's -- so three oscillators would leave the candles on a
+    // third of the chart even after it grew. Expressed in the same pixel
+    // numbers as the height above so the two cannot drift apart.
+    const layout = chart.panes()
+    layout[0]?.setStretchFactor(CHART_HEIGHT_PX)
+    for (let index = 1; index < layout.length; index += 1) {
+      layout[index]?.setStretchFactor(INDICATOR_PANE_HEIGHT_PX)
+    }
+  }, [indicatorQuery.data])
+
   const tvSymbol = tradingViewSymbol(symbol, dataSource)
   // Optional chaining rather than `query.data.bars.length`: a response whose
   // shape is not what this version expects -- an older backend, a proxy
@@ -195,6 +393,14 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   // than the page asking it, and 「稍後重新整理」 would leave somebody waiting
   // for something that never happens on its own.
   const notFound = query.error instanceof ApiError && query.error.status === 404
+  // The container is a plain div and lightweight-charts draws inside it, so it
+  // has to be told to grow too -- otherwise the extra panes are drawn outside
+  // the border and clipped.
+  const extraPanes = new Set(
+    (indicatorQuery.data?.series ?? [])
+      .filter((entry) => entry.pane !== 'price')
+      .map((entry) => entry.name),
+  ).size
 
   return (
     <div className="space-y-2">
@@ -216,6 +422,21 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
         ))}
       </div>
 
+      <ChartIndicators selected={indicators} onChange={setIndicators} />
+
+      {/* An indicator that could not be computed is a problem with the
+          indicator, not with the price history. Said next to the chart rather
+          than over it, so the candles -- which are fine -- stay readable. */}
+      {indicatorQuery.isError && (
+        <p role="alert" className="text-xs text-amber-400">
+          {indicatorQuery.error instanceof ApiError && indicatorQuery.error.status === 422
+            ? indicatorQuery.error.message
+            : indicatorQuery.error instanceof ApiError && indicatorQuery.error.status === 404
+              ? '後端還沒有指標功能 —— 部署的後端版本比這個畫面舊。去 Render 按一次 Manual Deploy。'
+              : '指標算不出來 —— 稍後重新整理看看。K 棒和報價不受影響。'}
+        </p>
+      )}
+
       <div className="relative">
         <div
           ref={containerRef}
@@ -223,7 +444,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
           aria-label={
             query.data?.bars?.length ? `${symbol} 價格走勢圖` : `${symbol} 價格走勢圖（目前沒有資料）`
           }
-          style={{ height: CHART_HEIGHT_PX }}
+          style={{ height: CHART_HEIGHT_PX + extraPanes * INDICATOR_PANE_HEIGHT_PX }}
           className="rounded border border-slate-800"
         />
 
@@ -262,7 +483,8 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
       </div>
 
       <p className="text-xs text-slate-500">
-        資料來自這個 app 自己的行情來源，跟報價與提醒用的是同一份。要畫線、疊指標的話{' '}
+        指標是後端算的，跟策略、回測用的是同一份程式，所以圖上看到的就是策略會用到的數字。
+        要畫趨勢線的話{' '}
         <a
           href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`}
           target="_blank"
