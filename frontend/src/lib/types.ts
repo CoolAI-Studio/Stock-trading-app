@@ -543,3 +543,27 @@ export interface SymbolSearchResponse {
    * week produces exactly the same empty result as a typo. */
   us_listings_generated_at: string | null
 }
+
+/** GET /api/setup/status -- what a fresh deployment still needs.
+ *
+ * Only served while something IS missing; the endpoint 404s once there is
+ * nothing left to configure, which is why a 404 reads as success on the setup
+ * page rather than as an error. */
+export interface SetupStatus {
+  missing: {
+    name: string
+    /** What breaks if this stays empty, in the owner's language. A list of
+     * variable names is what render.yaml already gave them; the reason is the
+     * part that decides whether they bother. */
+    why: string
+    how: string
+    /** Non-null means the app can produce this value itself -- the difference
+     * between a two-minute setup and installing Python. Null means only the
+     * deployer can supply it (DATABASE_URL points at somebody else's service),
+     * and offering a button would be a lie. */
+    generator: string | null
+  }[]
+  /** Where to paste the answers. Named rather than assumed: the audience has
+   * just met Render and does not know env vars live under Environment. */
+  where: string
+}

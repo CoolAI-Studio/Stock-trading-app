@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, getToken, login, setToken, setUnauthorizedHandler } from './api'
+import {
+  ApiError,
+  api,
+  getToken,
+  login,
+  setSetupRequiredHandler,
+  setToken,
+  setUnauthorizedHandler,
+} from './api'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -134,5 +142,58 @@ describe('login', () => {
 
     await expect(login('me@example.com', 'wrong')).rejects.toBeInstanceOf(ApiError)
     expect(getToken()).toBeNull()
+  })
+})
+
+// --- a deployment that has not been configured yet ---------------------------
+//
+// The backend stays up in setup mode and answers 503 with `setup_required` on
+// every real route, so that a stranger's brand-new deploy has something to say
+// instead of a 502 from a dead process. Every page in this app would otherwise
+// render its own generic 「載入失敗」 and leave them there.
+
+describe('setup mode', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+    setToken(null)
+    setUnauthorizedHandler(() => {})
+    setSetupRequiredHandler(() => {})
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('calls the setup handler when the backend says it is not configured', async () => {
+    const handler = vi.fn()
+    setSetupRequiredHandler(handler)
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ detail: '還沒設定完成', setup_required: true }, 503),
+    )
+
+    await expect(api.get('/api/positions')).rejects.toBeInstanceOf(ApiError)
+
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it('leaves an ordinary 503 alone', async () => {
+    // Render's own 「service unavailable」 during a cold start looks like this.
+    // Redirecting to a setup page over it would tell somebody their configured
+    // deployment is unconfigured.
+    const handler = vi.fn()
+    setSetupRequiredHandler(handler)
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: 'upstream busy' }, 503))
+
+    await expect(api.get('/api/positions')).rejects.toBeInstanceOf(ApiError)
+
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('does not clear the token -- nothing is wrong with the session', async () => {
+    setToken('still-good')
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ detail: '還沒設定完成', setup_required: true }, 503),
+    )
+
+    await expect(api.get('/api/positions')).rejects.toBeInstanceOf(ApiError)
+
+    expect(getToken()).toBe('still-good')
   })
 })

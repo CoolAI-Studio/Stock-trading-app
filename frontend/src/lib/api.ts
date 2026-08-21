@@ -8,6 +8,7 @@ export const SESSION_EXPIRED_KEY = 'session-expired'
 
 let inMemoryToken: string | null = null
 let unauthorizedHandler: (() => void) | null = null
+let setupRequiredHandler: (() => void) | null = null
 
 export function getToken(): string | null {
   if (inMemoryToken === null) {
@@ -29,6 +30,17 @@ export function setToken(token: string | null): void {
  * depending on the router. */
 export function setUnauthorizedHandler(handler: () => void): void {
   unauthorizedHandler = handler
+}
+
+/** Called when the backend reports it has not been configured yet -- lets the
+ * app send somebody to the setup page without api.ts depending on the router,
+ * the same seam the 401 handler above uses.
+ *
+ * Without it every page renders its own generic 「載入失敗」 over a deployment
+ * whose only real problem is an unfilled blank, and the person who just clicked
+ * 「Deploy to Render」 has no way to find that out. */
+export function setSetupRequiredHandler(handler: () => void): void {
+  setupRequiredHandler = handler
 }
 
 export class ApiError extends Error {
@@ -70,6 +82,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     setToken(null)
     unauthorizedHandler?.()
     throw new ApiError(401, await parseErrorDetail(response))
+  }
+
+  if (response.status === 503) {
+    // Recognised by the FLAG, not by the status. Render answers a plain 503
+    // during a cold start on the free tier, and sending somebody to a setup
+    // page over that would tell them their working deployment is
+    // unconfigured. The token is deliberately left alone -- nothing is wrong
+    // with the session; the deployment simply has a blank in it.
+    const body = await response
+      .clone()
+      .json()
+      .catch(() => null)
+    if (body?.setup_required === true) {
+      setupRequiredHandler?.()
+    }
   }
 
   if (!response.ok) {

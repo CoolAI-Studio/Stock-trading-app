@@ -297,3 +297,15 @@ def test_plain_http_is_allowed_too(monkeypatch):
 
 def _raise_stop():
     raise RuntimeError("stop here; the call itself is what is under test")
+
+
+def test_the_watchdog_explains_an_unconfigured_deployment():
+    """The state a stranger's brand-new deploy is in. 「health check failed」
+    would send them to a dashboard to work it out; what they need is 「go and
+    finish the setup page」."""
+    from scripts.watchdog import read_verdict
+
+    problems = read_verdict(503, '{"checks": {"setup": {"status": "fail"}}}')
+
+    assert len(problems) == 1
+    assert "設定" in problems[0], problems[0]

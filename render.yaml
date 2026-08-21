@@ -12,9 +12,16 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: SECRET_ENCRYPTION_KEY
-        sync: false # must be a real Fernet key -- see backend/.env.example for how to generate one
+        # Leave it blank on the first deploy. The backend then comes up in
+        # SETUP MODE -- the API is locked, but the frontend's /setup page
+        # lists what is missing and has a button that generates this value
+        # for you. No Python on your own machine required.
+        sync: false
       - key: VAPID_PUBLIC_KEY
-        sync: false # run `python backend/scripts/generate_vapid_keys.py`, paste both values in
+        # Also blank-able on the first deploy: /setup generates the pair.
+        # Only needed for phone push notifications -- leaving both halves
+        # empty is a valid configuration if you only use Telegram or email.
+        sync: false
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_SUBJECT

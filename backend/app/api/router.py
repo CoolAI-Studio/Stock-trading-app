@@ -14,6 +14,7 @@ from app.api.routers import (
     orders,
     positions,
     risk,
+    setup,
     strategies,
     symbols,
     watchlist,
@@ -22,6 +23,10 @@ from app.api.routers import (
 )
 
 api_router = APIRouter()
+# First, and always mounted: it is the only thing an unconfigured
+# deployment can serve, and it 404s the moment there is nothing left to
+# configure. See routers/setup.py.
+api_router.include_router(setup.router)
 api_router.include_router(auth.router)
 api_router.include_router(alerts.router)
 api_router.include_router(strategies.router)
