@@ -339,7 +339,12 @@ def tick_once(
         loaded_by_id: dict[int, LoadedStrategy] = {}
         for strategy in strategies:
             try:
-                loaded_by_id[strategy.id] = _registry.get_or_load(strategy.id, strategy.source_code)
+                # The owner's tuned parameters, not just the source. Loading
+                # without them would store a setting the form displays and the
+                # running strategy ignores.
+                loaded_by_id[strategy.id] = _registry.get_or_load(
+                    strategy.id, strategy.source_code, params=strategy.params
+                )
             except Exception as exc:
                 _record_strategy_error(session, strategy, exc, events)
 

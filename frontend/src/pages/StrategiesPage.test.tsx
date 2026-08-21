@@ -46,6 +46,7 @@ const STRATEGY: Strategy = {
   alert_only: false,
   default_quantity: '1',
   warmup_bars: 30,
+  params: {},
   last_signal: null,
   last_signal_at: null,
   last_run_at: null,
@@ -448,6 +449,7 @@ describe('StrategiesPage', () => {
         alert_only: false,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
         source_code: SAVED_SOURCE,
       }),
     )
@@ -496,6 +498,7 @@ describe('StrategiesPage', () => {
         alert_only: true,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
       }),
     )
   })
@@ -528,6 +531,7 @@ describe('StrategiesPage', () => {
         alert_only: true,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
         source_code: SAVED_SOURCE,
       }),
     )
@@ -797,6 +801,7 @@ describe('StrategiesPage', () => {
         alert_only: false,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
       }),
     )
   })
@@ -856,6 +861,7 @@ describe('StrategiesPage', () => {
         alert_only: false,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
         capital: '50000',
         stop_loss_pct: null,
         take_profit_pct: null,
@@ -915,6 +921,7 @@ describe('StrategiesPage', () => {
         alert_only: false,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
         source_code: SAVED_SOURCE,
         capital: null,
         stop_loss_pct: null,
@@ -969,6 +976,7 @@ describe('StrategiesPage', () => {
         alert_only: false,
         default_quantity: '1',
         data_source: 'yfinance',
+        params: {},
         capital: null,
         stop_loss_pct: '0',
         take_profit_pct: null,

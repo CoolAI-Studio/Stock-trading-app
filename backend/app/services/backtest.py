@@ -629,6 +629,7 @@ def run_backtest(
     timeframe: Timeframe | None = None,
     assumptions: BacktestAssumptions | None = None,
     stored_warmup_bars: int = DEFAULT_WARMUP_BARS,
+    params: dict | None = None,
 ) -> BacktestResult:
     """Replay `bars` through `source_code` and score the result.
 
@@ -646,7 +647,10 @@ def run_backtest(
     sandbox, and BacktestError if it compiles but fails mid-replay.
     """
     assumptions = assumptions or BacktestAssumptions()
-    loaded = compile_strategy(source_code)
+    # The same parameters the live strategy runs under, or the sweep's
+    # candidate set. A backtest of the author's defaults, when the owner has
+    # tuned them, scores code nobody is running.
+    loaded = compile_strategy(source_code, params=params)
 
     if loaded.entry_point == "on_bar":
         warmup = effective_warmup(loaded, stored_warmup_bars)

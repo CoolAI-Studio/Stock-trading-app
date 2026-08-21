@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
 import { SymbolInput } from '../components/SymbolInput'
+import { StrategyParams, type ParamValue } from '../components/StrategyParams'
 import { Pager } from '../components/Pager'
 import { StrategyScorecard } from '../components/StrategyScorecard'
 import { ExportButton } from '../components/ExportButton'
@@ -436,6 +437,7 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
   const [riskValues, setRiskValues] = useState(() => overridesOf(strategy))
   const [sourceCode, setSourceCode] = useState<string | null>(null)
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
+  const [params, setParams] = useState<Record<string, ParamValue>>(strategy.params ?? {})
   const [saveError, setSaveError] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
@@ -478,6 +480,7 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
       if (riskOverride || hasRiskOverrides(strategy)) {
         Object.assign(payload, overridePayload(riskValues, riskOverride))
       }
+      payload.params = params
       return api.patch<Strategy>(`/api/strategies/${strategy.id}`, payload)
     },
     onSuccess: () => {
@@ -545,6 +548,15 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
         />
       </div>
 
+      {/* Rendered off the VALIDATOR's answer: it is the only thing that knows
+          what the current source declares. Validate, then tune. */}
+      {validation?.declared_params && (
+        <StrategyParams
+          declared={validation.declared_params}
+          value={params}
+          onChange={setParams}
+        />
+      )}
       {validation && <ValidationSummary validation={validation} formSymbol={symbol} />}
       {saveError && <p className="text-red-400">{saveError}</p>}
 
@@ -692,6 +704,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [riskValues, setRiskValues] = useState(emptyOverrides)
   const [description, setDescription] = useState('')
   const [validation, setValidation] = useState<StrategyValidateResult | null>(null)
+  const [params, setParams] = useState<Record<string, ParamValue>>({})
   const [createError, setCreateError] = useState<string | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
   // What the AI asked instead of writing code, and what the owner replies.
@@ -785,6 +798,7 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         alert_only: alertOnly,
         default_quantity: quantity,
         data_source: dataSource,
+        params,
         // Left out entirely while the toggle is off: the columns default to
         // NULL, which is inherit, so an untouched form sends what it always
         // sent.
@@ -929,6 +943,15 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
         />
       </div>
 
+      {/* Rendered off the VALIDATOR's answer: it is the only thing that knows
+          what the current source declares. Validate, then tune. */}
+      {validation?.declared_params && (
+        <StrategyParams
+          declared={validation.declared_params}
+          value={params}
+          onChange={setParams}
+        />
+      )}
       {validation && <ValidationSummary validation={validation} formSymbol={symbol} />}
       {createError && <p className="text-red-400">{createError}</p>}
 

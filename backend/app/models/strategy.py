@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +32,14 @@ class Strategy(TimestampMixin, Base):
     # volume) have ephemeral disks; a redeploy would silently wipe on-disk
     # strategy files.
     source_code: Mapped[str] = mapped_column(Text)
+    # The owner's overrides for the parameters the SOURCE declares in
+    # self.params. Only the values that differ from the author's defaults
+    # live here, so a strategy whose code changes its default picks the new
+    # one up rather than being pinned to a value copied at save time.
+    #
+    # Empty for every strategy written before this existed, and for every
+    # strategy that declares no parameters -- which is most of them.
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
     code_hash: Mapped[str] = mapped_column(String(64))
 
     is_active: Mapped[bool] = mapped_column(default=False)

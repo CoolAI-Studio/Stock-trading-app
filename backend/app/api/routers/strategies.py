@@ -60,6 +60,9 @@ def _validate(source_code: str, sample_prices: list[float] | None = None) -> Str
         # did happen, later, from a different field, with nothing connecting
         # it to the symbol the code had chosen.
         "symbol_problem": symbol_search.looks_unpriceable(loaded.symbol or ""),
+        # What the form needs to render a field per parameter, with the
+        # author's own defaults already in the boxes.
+        "declared_params": loaded.declared_params,
         "entry_point": loaded.entry_point,
         # Left out for a tick strategy: it has no candles, and reporting the
         # default would read as a choice the code never made.
@@ -85,6 +88,23 @@ def _validate(source_code: str, sample_prices: list[float] | None = None) -> Str
     return StrategyValidateResult(ok=True, sample_signals=signals, **detected)
 
 
+def _check_params(source_code: str, params: dict | None) -> None:
+    """Refuse an override the code does not declare, before it is stored.
+
+    Checked here rather than trusted from the form: a stored setting for a
+    parameter that no longer exists is a value the owner believes is doing
+    something, and the only moment anybody would notice is never.
+    """
+    if not params:
+        return
+    try:
+        compile_strategy(source_code, params=params)
+    except StrategyValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
 def _to_generate_result(
     source_code: str, validation: StrategyValidateResult, repair_note: str | None = None
 ) -> StrategyGenerateResult:
@@ -105,6 +125,7 @@ def _to_generate_result(
         detected_name=validation.detected_name,
         detected_symbol=validation.detected_symbol,
         symbol_problem=validation.symbol_problem,
+        declared_params=validation.declared_params,
         # Carried through so the editor can say which candle the strategy
         # decided to work in: "周線" was the owner's word, and a strategy that
         # quietly came back daily reads identically in the source box.
@@ -216,6 +237,7 @@ def create_strategy(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=validation.error
         )
+    _check_params(payload.source_code, payload.params)
 
     strategy = Strategy(
         user_id=user.id,
@@ -227,6 +249,7 @@ def create_strategy(
         default_quantity=payload.default_quantity,
         warmup_bars=payload.warmup_bars,
         alert_only=payload.alert_only,
+        params=payload.params,
         # Straight from the shared list so a knob added to the overrides can
         # never be accepted by the schema and then dropped on the floor here.
         **{field: getattr(payload, field) for field in risk_resolver.OVERRIDABLE_FIELDS},
@@ -271,6 +294,11 @@ def update_strategy(
     for field, value in data.items():
         setattr(strategy, field, value)
 
+    # Same for the parameters, and for the same reason: a patch may change the
+    # source, or the parameters, or both, and only the merged row says which
+    # code the stored overrides will actually be handed to.
+    _check_params(strategy.source_code, strategy.params)
+
     # Checked on the MERGED row, not on the payload. A patch that changes only
     # the symbol, or only the data source, cannot be judged by the schema --
     # the other half is on the stored row -- and either edit alone can produce
@@ -283,7 +311,10 @@ def update_strategy(
     # A source edit already recompiles -- the registry keys on a content hash.
     # Editing the symbol does not, and the instance's accumulated prices
     # belong to the old symbol, so they would seed the new one's average.
-    if "symbol" in data or "source_code" in data:
+    if "symbol" in data or "source_code" in data or "params" in data:
+        # params too: the registry keys on them, but releasing here is what
+        # makes the change take effect on the very next tick rather than
+        # whenever something else happened to invalidate the entry.
         release_strategy(strategy.id)
 
     try:

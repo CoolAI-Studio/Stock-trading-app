@@ -209,6 +209,10 @@ class LoadedStrategy:
     # None means the source did not declare one, so the stored per-strategy
     # setting decides. See _effective_warmup() in market_loop.
     warmup_bars: int | None = None
+    # The defaults the SOURCE declared, not the values in force. The form shows
+    # 「default 5, you set 20」, and reporting the override here would lose the
+    # author's answer the moment somebody changed it.
+    declared_params: dict = field(default_factory=dict, compare=False)
     # Newest candle this instance has already been shown. Lives here, beside
     # the instance whose state it describes, so it is dropped the moment the
     # source changes and the strategy has to warm up again from scratch.
@@ -348,7 +352,83 @@ def _read_warmup_bars(instance: object) -> int | None:
     return declared
 
 
-def compile_strategy(source_code: str, timeout_sec: float | None = None) -> LoadedStrategy:
+# What a parameter may be. Anything a form can render and JSON can carry --
+# and nothing else, because a parameter that shows up in the API and has no
+# input box is a parameter nobody can ever change, which is the situation this
+# whole feature exists to end.
+_PARAM_TYPES = (bool, int, float, str)
+
+
+def _read_params(instance: object) -> dict:
+    """The defaults the author declared, checked at compile time.
+
+    Compile time rather than first tick: the author is looking at the editor
+    now, and a shape error that surfaces during a live poll surfaces as a
+    strategy that switched itself off.
+    """
+    declared = getattr(instance, "params", None)
+    if declared is None:
+        return {}
+    if not isinstance(declared, dict):
+        raise StrategyValidationError(
+            f"self.params = {declared!r} must be a dict of名稱 to default value, "
+            'for example {"window": 5}.'
+        )
+    for key, value in declared.items():
+        if not isinstance(key, str):
+            raise StrategyValidationError(f"self.params 的鍵 {key!r} 必須是字串。")
+        if not isinstance(value, _PARAM_TYPES):
+            raise StrategyValidationError(
+                f"self.params[{key!r}] 是 {type(value).__name__}，沒有辦法在畫面上編輯。"
+                "只能用數字、真假值或文字。"
+            )
+    return dict(declared)
+
+
+def _apply_params(instance: object, declared: dict, overrides: dict) -> None:
+    """Merge the owner's settings into the instance's own dict.
+
+    AFTER __init__, because that is the only injection point that does not
+    change the constructor signature every existing strategy already uses. The
+    consequence is a real one and is documented everywhere this is described: a
+    value copied out of self.params into another attribute during __init__ will
+    not see the override. Read the dict where the decision is made.
+    """
+    for key, value in overrides.items():
+        if key not in declared:
+            # Refused, not dropped. It means the source was edited and this
+            # stored setting is now about something that no longer exists;
+            # keeping it quietly leaves a value in the database that the owner
+            # believes is doing something.
+            raise StrategyValidationError(
+                f"這個策略沒有叫做 {key!r} 的參數。"
+                f"它宣告的是：{', '.join(sorted(declared)) or '（沒有參數）'}。"
+            )
+        default = declared[key]
+        if isinstance(default, bool):
+            ok = isinstance(value, bool)
+        elif isinstance(default, int):
+            # bool is a subclass of int, so True would otherwise pass as a
+            # number -- and a checkbox value in a numeric field compares in
+            # ways nobody predicts.
+            ok = isinstance(value, int) and not isinstance(value, bool)
+        elif isinstance(default, float):
+            # A whole number typed into a box whose default is 1.5 is not a
+            # mistake, and JSON has no way to write 「2.0」.
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        else:
+            ok = isinstance(value, str)
+        if not ok:
+            raise StrategyValidationError(
+                f"參數 {key!r} 應該是 {type(default).__name__}，但收到 "
+                f"{type(value).__name__}（{value!r}）。"
+            )
+        instance.params[key] = value
+
+
+def compile_strategy(
+    source_code: str, timeout_sec: float | None = None, params: dict | None = None
+) -> LoadedStrategy:
     """Compiles user-authored strategy source into a live `LoadedStrategy`.
 
     Expects `class Strategy: def __init__(self): self.name=...;
@@ -392,6 +472,10 @@ def compile_strategy(source_code: str, timeout_sec: float | None = None) -> Load
         if not hasattr(instance, attr):
             raise StrategyValidationError(f"Strategy instance is missing required '{attr}'.")
 
+    declared = _read_params(instance)
+    if params:
+        _apply_params(instance, declared, params)
+
     return LoadedStrategy(
         name=instance.name,
         symbol=instance.symbol,
@@ -401,6 +485,7 @@ def compile_strategy(source_code: str, timeout_sec: float | None = None) -> Load
         entry_point=_detect_entry_point(instance),
         timeframe=_read_timeframe(instance),
         warmup_bars=_read_warmup_bars(instance),
+        declared_params=declared,
     )
 
 
@@ -432,15 +517,28 @@ class StrategyRegistry:
 
     def __init__(self) -> None:
         self._cache: dict[int, LoadedStrategy] = {}
+        # The parameters each cached instance was built with. Kept alongside
+        # rather than on LoadedStrategy: what is cached is the SOURCE's answer,
+        # and this is the question that was asked of it.
+        self._params: dict[int, dict] = {}
 
-    def get_or_load(self, strategy_id: int, source_code: str) -> LoadedStrategy:
+    def get_or_load(
+        self, strategy_id: int, source_code: str, params: dict | None = None
+    ) -> LoadedStrategy:
         current_hash = code_hash(source_code)
+        # The parameters are part of what 「this strategy」 means. Keyed on the
+        # source alone, saving a new value would leave the old instance
+        # running: the form would show 20 and the strategy would keep using 5,
+        # forever, with nothing anywhere saying so.
+        current_params = dict(params or {})
         cached = self._cache.get(strategy_id)
         if cached is not None and cached.code_hash == current_hash:
-            return cached
+            if self._params.get(strategy_id) == current_params:
+                return cached
 
-        loaded = compile_strategy(source_code)
+        loaded = compile_strategy(source_code, params=params)
         self._cache[strategy_id] = loaded
+        self._params[strategy_id] = current_params
         return loaded
 
     def invalidate(self, strategy_id: int) -> None:
@@ -451,6 +549,7 @@ class StrategyRegistry:
         symbol, for one -- the accumulated `self.prices` belong to the old
         symbol and would seed the new one's moving average)."""
         self._cache.pop(strategy_id, None)
+        self._params.pop(strategy_id, None)
 
     def is_cached(self, strategy_id: int) -> bool:
         return strategy_id in self._cache

@@ -53,6 +53,10 @@ class StrategyCreate(StrategyRiskOverrides):
     default_quantity: Decimal = Decimal(1)
     warmup_bars: int = Field(default=30, ge=0)
     alert_only: bool = False
+    # Only the values that differ from the author's defaults. Storing the whole
+    # merged dict would pin the strategy to whatever the defaults were on the
+    # day it was saved, so a later edit to the code could never change one.
+    params: dict = Field(default_factory=dict)
 
     @field_validator("symbol")
     @classmethod
@@ -80,6 +84,7 @@ class StrategyUpdate(StrategyRiskOverrides):
     default_quantity: Decimal | None = None
     warmup_bars: int | None = Field(default=None, ge=0)
     alert_only: bool | None = None
+    params: dict | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -109,6 +114,9 @@ class StrategyRead(BaseModel):
     data_source: DataSource
     is_active: bool
     alert_only: bool
+    # What the owner tuned. Empty for a strategy that declares no parameters,
+    # which is most of them.
+    params: dict = Field(default_factory=dict)
     default_quantity: MoneyStr
     warmup_bars: int
     last_signal: str | None
@@ -160,6 +168,11 @@ class StrategyValidateResult(BaseModel):
     # different field, with nothing connecting it to the symbol the AI
     # chose.
     symbol_problem: str | None = None
+    # The parameters the SOURCE declares, with the author's defaults. The
+    # form cannot render a field per parameter without being told what they
+    # are; and these are the DEFAULTS, not the values in force, so the page
+    # can show 「預設 5，你設成 20」.
+    declared_params: dict = Field(default_factory=dict)
     # Which entry point the source turned out to use, "on_tick" or "on_bar".
     # Reported because the two read almost alike, and a strategy that quietly
     # got the wrong one looks exactly like a strategy that works.

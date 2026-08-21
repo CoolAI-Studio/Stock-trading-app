@@ -50,6 +50,10 @@ export interface Strategy extends StrategyRiskOverrides {
   alert_only: boolean
   default_quantity: string
   warmup_bars: number
+  /** Only what the owner changed. Empty for a strategy that declares no
+   * parameters, which is most of them. Storing the whole merged dict would pin
+   * the strategy to whatever the defaults were the day it was saved. */
+  params: Record<string, number | boolean | string>
   last_signal: string | null
   last_signal_at: string | null
   last_run_at: string | null
@@ -93,6 +97,11 @@ export interface StrategyValidateResult {
    * the refusal only arrived at save time from a different field with nothing
    * connecting it to the symbol the AI had chosen. */
   symbol_problem: string | null
+  /** What the SOURCE declares in self.params, with the author's own defaults.
+   * The form cannot render a field per parameter without being told what they
+   * are -- and these are the DEFAULTS, not the values in force, so the page can
+   * show 「預設 5，你設成 20」. */
+  declared_params: Record<string, number | boolean | string>
   /** "on_tick" (every quote) or "on_bar" (once per closed candle). The two
    * read almost alike in source, so the form says which one it turned out to
    * be rather than leaving it to be inferred. */

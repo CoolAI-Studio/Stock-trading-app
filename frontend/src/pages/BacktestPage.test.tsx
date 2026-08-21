@@ -41,6 +41,7 @@ const STRATEGY: Strategy = {
   alert_only: false,
   default_quantity: '1',
   warmup_bars: 30,
+  params: {},
   last_signal: null,
   last_signal_at: null,
   last_run_at: null,
