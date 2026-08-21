@@ -61,10 +61,140 @@ class Timeframe(StrEnum):
     MINUTE_1 = "1m"
     MINUTE_5 = "5m"
     MINUTE_15 = "15m"
+    MINUTE_30 = "30m"
     HOUR_1 = "1h"
+    # Native on BOTH sources, not resampled from 1h. Yahoo lists 4h in its own
+    # supported set, so the boundaries are the exchange's own -- which matters
+    # most here, because a 6.5-hour US session does not divide into four-hour
+    # candles, and any boundary this app chose for itself would disagree with
+    # every other chart the owner looks at.
+    HOUR_4 = "4h"
+    # CRYPTO ONLY. Yahoo answers 「interval=12h is not supported」 and returns
+    # nothing at all; Binance serves it natively. See SUPPORTED_TIMEFRAMES --
+    # offering this on a stock would produce an empty frame, which this app
+    # reports as 「暫時抓不到…可能是被限流了」: a transient sentence for a
+    # permanent condition, telling somebody to wait for something that will
+    # never happen.
+    HOUR_12 = "12h"
     DAY_1 = "1d"
     WEEK_1 = "1wk"
     MONTH_1 = "1mo"
+
+
+# Which candle sizes each source actually serves.
+#
+# DECLARED, NOT DERIVED, and the reason is the same one that governs indicator
+# panes: a choice that cannot work must never be offered. Measured by asking the
+# providers themselves --
+#
+#   Yahoo returns its own list in an error message:
+#     [1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 4h, 1d, 5d, 1wk, 1mo, 3mo]
+#   Binance serves 1s, 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d,
+#     1w, 1M.
+#
+# So 12h is crypto-only. Asking Yahoo for it returns an EMPTY FRAME rather than
+# an error, which this app's provider layer -- correctly, for every other case
+# -- reports as a failed fetch. The page then says 「暫時抓不到…可能是被限流
+# 了」, which would send somebody back to wait for a condition that is
+# permanent. Refusing the pair up front is the only honest answer.
+SUPPORTED_TIMEFRAMES: dict[DataSource, tuple[Timeframe, ...]] = {
+    DataSource.YFINANCE: (
+        Timeframe.MINUTE_1,
+        Timeframe.MINUTE_5,
+        Timeframe.MINUTE_15,
+        Timeframe.MINUTE_30,
+        Timeframe.HOUR_1,
+        Timeframe.HOUR_4,
+        Timeframe.DAY_1,
+        Timeframe.WEEK_1,
+        Timeframe.MONTH_1,
+    ),
+    DataSource.BINANCE: (
+        Timeframe.MINUTE_1,
+        Timeframe.MINUTE_5,
+        Timeframe.MINUTE_15,
+        Timeframe.MINUTE_30,
+        Timeframe.HOUR_1,
+        Timeframe.HOUR_4,
+        Timeframe.HOUR_12,
+        Timeframe.DAY_1,
+        Timeframe.WEEK_1,
+        Timeframe.MONTH_1,
+    ),
+}
+
+# What the owner reads. 「4h」 is the string the provider wants; 四小時線 is the
+# thing a person recognises. Served from the API so that the chart, the
+# strategy form and the backtest form cannot drift into three different names
+# for one candle.
+TIMEFRAME_LABELS: dict[Timeframe, str] = {
+    Timeframe.MINUTE_1: "1 分線",
+    Timeframe.MINUTE_5: "5 分線",
+    Timeframe.MINUTE_15: "15 分線",
+    Timeframe.MINUTE_30: "30 分線",
+    Timeframe.HOUR_1: "1 小時線",
+    Timeframe.HOUR_4: "4 小時線",
+    Timeframe.HOUR_12: "12 小時線",
+    Timeframe.DAY_1: "日線",
+    Timeframe.WEEK_1: "週線",
+    Timeframe.MONTH_1: "月線",
+}
+
+# How far back each source will actually go, per interval, in CANDLES.
+#
+# Yahoo caps intraday history hard and, past the cap, hands back an empty frame
+# rather than a shorter one. The app lets a chart ask for up to MAX_CHART_BARS,
+# so without this it would ask for 1000 four-hour candles, receive 119, and
+# report success -- a silently shortened chart, which this codebase treats as
+# worse than an error. Measured against the real API, generous by a little
+# rather than optimistic.
+_MAX_BARS: dict[DataSource, dict[Timeframe, int]] = {
+    # A LOWER BOUND, quoted for the SHORTEST session this app models (Taiwan,
+    # 4.5 hours). A US symbol yields more. Measured 30m/60d: AAPL 775 candles,
+    # 0050.TW 531 -- 46% fewer for the same request, so a table written from
+    # the US session would overstate Taiwan, and this number exists precisely
+    # to say 「this depth is not available」 before the short answer arrives.
+    DataSource.YFINANCE: {
+        Timeframe.MINUTE_1: 1_300,
+        Timeframe.MINUTE_5: 3_100,
+        Timeframe.MINUTE_15: 1_000,
+        Timeframe.MINUTE_30: 520,
+        Timeframe.HOUR_1: 3_500,
+        Timeframe.HOUR_4: 1_400,
+        Timeframe.DAY_1: 1_250,  # 5y of trading days, not calendar days
+        Timeframe.WEEK_1: 500,  # 10y
+        # The real ceiling is 「how long has this been listed」, which no table
+        # knows. Measured 168 for AAPL at period=max.
+        Timeframe.MONTH_1: 1_200,
+    },
+    DataSource.BINANCE: {
+        # Binance serves a flat 1000 per request and this app makes one
+        # request, so every interval has the same ceiling.
+        timeframe: 1_000
+        for timeframe in (
+            Timeframe.MINUTE_1,
+            Timeframe.MINUTE_5,
+            Timeframe.MINUTE_15,
+            Timeframe.MINUTE_30,
+            Timeframe.HOUR_1,
+            Timeframe.HOUR_4,
+            Timeframe.HOUR_12,
+            Timeframe.DAY_1,
+            Timeframe.WEEK_1,
+            Timeframe.MONTH_1,
+        )
+    },
+}
+
+
+def supports_timeframe(data_source: DataSource, timeframe: Timeframe) -> bool:
+    """Whether this source serves this candle size at all."""
+    return timeframe in SUPPORTED_TIMEFRAMES.get(data_source, ())
+
+
+def max_bars_available(data_source: DataSource, timeframe: Timeframe) -> int:
+    """How many candles of this size the source will actually part with."""
+    return _MAX_BARS.get(data_source, {}).get(timeframe, 0)
 
 
 # Daily is the least surprising thing to hand a strategy that never said
@@ -107,7 +237,10 @@ _FIXED_DURATION: dict[Timeframe, timedelta] = {
     Timeframe.MINUTE_1: timedelta(minutes=1),
     Timeframe.MINUTE_5: timedelta(minutes=5),
     Timeframe.MINUTE_15: timedelta(minutes=15),
+    Timeframe.MINUTE_30: timedelta(minutes=30),
     Timeframe.HOUR_1: timedelta(hours=1),
+    Timeframe.HOUR_4: timedelta(hours=4),
+    Timeframe.HOUR_12: timedelta(hours=12),
     Timeframe.DAY_1: timedelta(days=1),
     Timeframe.WEEK_1: timedelta(weeks=1),
 }
@@ -201,17 +334,69 @@ def bars_from_closes(
     return bars
 
 
-def closed_bars(bars: list[Bar], now: datetime | None = None) -> list[Bar]:
+def closed_bars(
+    bars: list[Bar],
+    now: datetime | None = None,
+    data_source: DataSource | None = None,
+) -> list[Bar]:
     """Drop the candle that is still being built.
 
     Providers append the in-progress candle to the end of the history and
     update it on every request, so only the last row can be partial.
+
+    INTRADAY CANDLES ARE CLAMPED TO THE SESSION, when the caller says which
+    source the symbol came from. Yahoo aligns intraday candles to each
+    exchange's own open, and a session rarely divides evenly:
+        AAPL     4h candles at 09:30 and 13:30 New York -- the second is 2.5h
+        0050.TW  4h candles at 09:00 and 13:00 Taipei   -- the second is 30 MIN
+    Measured against the real API, not assumed. bar_end() adds a flat four
+    hours because it is deliberately calendar arithmetic -- backtests use it as
+    a step size and must keep that -- so without this clamp the candle that
+    finished for good at 13:30 Taipei is withheld until 17:00, and a 「4 小時線
+    收盤」 alert fires three and a half hours late. 1h has always had a
+    thirty-minute version of the same lateness.
+
+    Only INTRADAY, and only when a session is known. A daily candle is final
+    when the DAY ends, not when the session does: releasing it at 13:30 would
+    hand a strategy a candle Yahoo may still adjust after hours. A market with
+    no session (crypto) keeps the plain arithmetic -- 4h divides 24h exactly,
+    so there is no short candle, and clamping to a session that does not exist
+    would release one that is still moving.
     """
     if not bars:
         return []
     now = now or datetime.now(UTC)
     last = bars[-1]
-    return bars[:-1] if bar_end(last.timestamp, last.timeframe) > now else bars
+    return bars[:-1] if _bar_end_in_session(last, data_source) > now else bars
+
+
+# Intraday only. Anything a whole day or longer is final when its calendar
+# period ends, whatever the exchange did in between.
+_INTRADAY = frozenset(
+    {
+        Timeframe.MINUTE_1,
+        Timeframe.MINUTE_5,
+        Timeframe.MINUTE_15,
+        Timeframe.MINUTE_30,
+        Timeframe.HOUR_1,
+        Timeframe.HOUR_4,
+        Timeframe.HOUR_12,
+    }
+)
+
+
+def _bar_end_in_session(bar: Bar, data_source: DataSource | None) -> datetime:
+    """When this candle really stops moving, session close included."""
+    plain = bar_end(bar.timestamp, bar.timeframe)
+    if data_source is None or bar.timeframe not in _INTRADAY:
+        return plain
+
+    # Imported here: market_calendar reads the symbol rules, which import from
+    # this module.
+    from app.services.market_calendar import session_close_after
+
+    close = session_close_after(bar.symbol, data_source, bar.timestamp)
+    return min(plain, close) if close is not None else plain
 
 
 # Binance quote assets this app deals in, longest first so USDT is matched

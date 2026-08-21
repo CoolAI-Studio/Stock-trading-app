@@ -110,3 +110,25 @@ class IndicatorSpecRequest(BaseModel):
 
 class AvailableIndicators(BaseModel):
     indicators: list[dict]
+
+
+class TimeframeOption(BaseModel):
+    """One candle size, as the provider spells it and as a person reads it."""
+
+    value: str
+    label: str
+    # How many candles this source will actually part with. Yahoo caps intraday
+    # history hard and hands back an empty frame past the cap rather than a
+    # shorter one, so a chart that asked for 1000 four-hour candles would get
+    # 119 and call it success.
+    max_bars: int
+
+
+class SourceTimeframes(BaseModel):
+    data_source: DataSource
+    # Finest first. A dropdown that runs 日 週 月 1分 4小時 is one nobody can scan.
+    timeframes: list[TimeframeOption]
+
+
+class TimeframesRead(BaseModel):
+    sources: list[SourceTimeframes]

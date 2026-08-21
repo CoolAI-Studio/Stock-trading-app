@@ -19,7 +19,12 @@ _BINANCE_INTERVAL: dict[Timeframe, str] = {
     Timeframe.MINUTE_1: "1m",
     Timeframe.MINUTE_5: "5m",
     Timeframe.MINUTE_15: "15m",
+    Timeframe.MINUTE_30: "30m",
     Timeframe.HOUR_1: "1h",
+    Timeframe.HOUR_4: "4h",
+    # The one Yahoo will not serve at all, and the reason SUPPORTED_TIMEFRAMES
+    # is keyed by source rather than being one global list.
+    Timeframe.HOUR_12: "12h",
     Timeframe.DAY_1: "1d",
     Timeframe.WEEK_1: "1w",
     Timeframe.MONTH_1: "1M",

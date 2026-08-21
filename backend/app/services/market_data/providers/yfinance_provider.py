@@ -17,7 +17,14 @@ _PERIOD_FOR: dict[Timeframe, str] = {
     Timeframe.MINUTE_1: "5d",
     Timeframe.MINUTE_5: "60d",
     Timeframe.MINUTE_15: "60d",
+    Timeframe.MINUTE_30: "60d",
     Timeframe.HOUR_1: "730d",
+    # 730d, NOT 60d and NEVER "max". Measured for AAPL: 60d gives 119 candles,
+    # 730d gives ~1450, and "max" gives 168 -- yfinance's period="max" branch
+    # only recognises a fixed list of intervals and 4h is not on it, so it
+    # falls through to a 99-year default that Yahoo then truncates. 60d would
+    # not even cover DEFAULT_BAR_LIMIT.
+    Timeframe.HOUR_4: "730d",
     Timeframe.DAY_1: "5y",
     Timeframe.WEEK_1: "10y",
     Timeframe.MONTH_1: "max",

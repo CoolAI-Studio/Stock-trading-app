@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
 from app.models.backtest import BacktestRun
+from app.models.enums import DataSource
 from app.models.position import Position
 from app.models.strategy import Strategy
 from app.models.user import User
@@ -24,7 +25,13 @@ from app.schemas.strategy import (
 )
 from app.services import risk_resolver, strategy_performance, symbol_search
 from app.services.ai_provider import get_ai_provider
-from app.services.market_data.base import bars_from_closes
+from app.services.market_data.base import (
+    SUPPORTED_TIMEFRAMES,
+    TIMEFRAME_LABELS,
+    Timeframe,
+    bars_from_closes,
+    supports_timeframe,
+)
 from app.services.market_loop import release_strategy
 from app.services.strategy_generator import (
     build_repair_prompt,
@@ -135,6 +142,37 @@ def _to_generate_result(
     )
 
 
+def _check_timeframe_pair(source_code: str, data_source: DataSource) -> None:
+    """The candle a strategy declares must be one its own source actually serves.
+
+    _read_timeframe checks the value against the enum and never sees the
+    symbol, so 「self.timeframe = '12h'」 on a US stock compiles happily -- and
+    then the market loop fetches nothing for it on every tick, forever. No
+    error, no alert, no way to notice. A strategy that silently never runs is
+    worse than one that fails loudly, because the owner believes they are being
+    watched. 「警告不能停擺」.
+    """
+    validation = _validate(source_code)
+    if validation.timeframe is None:
+        return
+    # The validator reports the value, not the member -- coerced here so the
+    # label lookup and the support check both work on the same type.
+    timeframe = Timeframe(validation.timeframe)
+    if supports_timeframe(data_source, timeframe):
+        return
+    offered = "、".join(
+        TIMEFRAME_LABELS[option] for option in SUPPORTED_TIMEFRAMES.get(data_source, ())
+    )
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=(
+            f"這個策略用的是 {TIMEFRAME_LABELS.get(timeframe, timeframe.value)}，"
+            f"但 {data_source.value} 沒有提供這個週期，策略會抓不到 K 棒而完全不動作。"
+            f"可以改用：{offered}。"
+        ),
+    )
+
+
 def _get_owned_strategy(db: Session, user: User, strategy_id: int) -> Strategy:
     strategy = (
         db.query(Strategy).filter(Strategy.id == strategy_id, Strategy.user_id == user.id).first()
@@ -238,6 +276,7 @@ def create_strategy(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=validation.error
         )
     _check_params(payload.source_code, payload.params)
+    _check_timeframe_pair(payload.source_code, payload.data_source)
 
     strategy = Strategy(
         user_id=user.id,
@@ -298,6 +337,10 @@ def update_strategy(
     # source, or the parameters, or both, and only the merged row says which
     # code the stored overrides will actually be handed to.
     _check_params(strategy.source_code, strategy.params)
+    # Against the MERGED row: a patch may change the source, the symbol, the
+    # source, or any pair of them, and only the merged result says which candle
+    # will be asked of which provider.
+    _check_timeframe_pair(strategy.source_code, strategy.data_source)
 
     # Checked on the MERGED row, not on the payload. A patch that changes only
     # the symbol, or only the data source, cannot be judged by the schema --

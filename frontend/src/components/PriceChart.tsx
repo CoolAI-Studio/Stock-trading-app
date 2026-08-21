@@ -12,6 +12,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../lib/api'
 import { looksUnpriceable } from '../lib/symbol'
+import { useTimeframes } from '../lib/timeframes'
 import { tradingViewSymbol } from '../lib/tradingView'
 import type { BarsResponse, DataSource, IndicatorsResponse } from '../lib/types'
 import { ChartIndicators, type SelectedIndicator } from './ChartIndicators'
@@ -47,12 +48,6 @@ import { ChartIndicators, type SelectedIndicator } from './ChartIndicators'
  * WHAT IS LOST, said plainly: drawing tools. The link at the bottom goes to
  * the real thing for anyone who wants them.
  */
-
-const TIMEFRAMES: [value: string, label: string][] = [
-  ['1d', '日'],
-  ['1wk', '週'],
-  ['1mo', '月'],
-]
 
 const CHART_HEIGHT_PX = 460
 
@@ -92,6 +87,33 @@ const LINE_COLOURS = [
 
 export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?: DataSource }) {
   const [timeframe, setTimeframe] = useState('1d')
+  // Which candle sizes THIS symbol's source actually serves. Asked of the
+  // server rather than listed here: Yahoo refuses 12h outright while Binance
+  // serves it, so a list in this file would offer a stock user a button whose
+  // only possible answer is 「暫時抓不到…可能是被限流了」 -- a transient
+  // sentence for a permanent condition.
+  const timeframes = useTimeframes(dataSource)
+  // Named when a switch of symbol forced a switch of candle, so the chart never
+  // silently draws one interval under a button that reads another.
+  const [movedFrom, setMovedFrom] = useState<string | null>(null)
+
+  // The NAME of the candle currently selected, remembered while it is still
+  // resolvable. By the time a switch of source makes it unsupported, the
+  // option list is already the new source's and the label is gone -- so the
+  // notice would have to say 「12h」 to somebody who reads 十二小時線.
+  const currentLabel = useRef('日線')
+  useEffect(() => {
+    const found = timeframes.options.find((option) => option.value === timeframe)
+    if (found) currentLabel.current = found.label
+  }, [timeframe, timeframes.options])
+
+  useEffect(() => {
+    if (timeframes.isPending || timeframes.supports(timeframe)) return
+    setMovedFrom(currentLabel.current)
+    // Daily is the one interval every source serves.
+    setTimeframe(timeframes.options.some((o) => o.value === '1d') ? '1d' : timeframes.options[0].value)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataSource, timeframes.isPending])
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<{ candles: ReturnType<IChartApi['addSeries']> ; volume: ReturnType<IChartApi['addSeries']> } | null>(null)
@@ -405,12 +427,15 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1">
-        {TIMEFRAMES.map(([value, label]) => (
+        {timeframes.options.map(({ value, label }) => (
           <button
             key={value}
             type="button"
             aria-pressed={timeframe === value}
-            onClick={() => setTimeframe(value)}
+            onClick={() => {
+              setMovedFrom(null)
+              setTimeframe(value)
+            }}
             className={`rounded px-3 py-1 text-sm ${
               timeframe === value
                 ? 'bg-sky-700 font-medium text-white'
@@ -421,6 +446,12 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
           </button>
         ))}
       </div>
+
+      {movedFrom && (
+        <p role="status" className="text-xs text-amber-400">
+          「{symbol}」的資料來源沒有{movedFrom}，已改用日線。
+        </p>
+      )}
 
       <ChartIndicators selected={indicators} onChange={setIndicators} />
 

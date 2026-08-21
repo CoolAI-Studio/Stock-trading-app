@@ -105,6 +105,34 @@ const BARS: BarsResponse = {
   ],
 }
 
+const TIMEFRAMES = {
+  sources: [
+    {
+      data_source: 'yfinance',
+      timeframes: [
+        { value: '1m', label: '1 分線', max_bars: 2800 },
+        { value: '5m', label: '5 分線', max_bars: 4600 },
+        { value: '15m', label: '15 分線', max_bars: 1550 },
+        { value: '30m', label: '30 分線', max_bars: 780 },
+        { value: '1h', label: '1 小時線', max_bars: 5000 },
+        { value: '4h', label: '4 小時線', max_bars: 120 },
+        { value: '1d', label: '日線', max_bars: 10000 },
+        { value: '1wk', label: '週線', max_bars: 5000 },
+        { value: '1mo', label: '月線', max_bars: 1200 },
+      ],
+    },
+    {
+      data_source: 'binance',
+      timeframes: [
+        { value: '1h', label: '1 小時線', max_bars: 1000 },
+        { value: '4h', label: '4 小時線', max_bars: 1000 },
+        { value: '12h', label: '12 小時線', max_bars: 1000 },
+        { value: '1d', label: '日線', max_bars: 1000 },
+      ],
+    },
+  ],
+}
+
 const CATALOGUE = {
   indicators: [
     {
@@ -166,7 +194,11 @@ function show(symbol = '0050.TW') {
  */
 function failBars(error: Error) {
   vi.mocked(api.get).mockImplementation((path: string) =>
-    path.includes('/bars') ? Promise.reject(error) : (Promise.resolve(CATALOGUE) as never),
+    path.includes('/bars')
+      ? Promise.reject(error)
+      : path.includes('/timeframes')
+        ? (Promise.resolve(TIMEFRAMES) as never)
+        : (Promise.resolve(CATALOGUE) as never),
   )
 }
 
@@ -179,11 +211,11 @@ beforeEach(() => {
   // and the indicator catalogue. One blanket mockResolvedValue answers the
   // catalogue with a bars payload, the picker reads no indicators out of it,
   // and every parameter box silently fails to render.
-  vi.mocked(api.get).mockImplementation((path: string) =>
-    path.includes('/indicators/available')
-      ? (Promise.resolve(CATALOGUE) as never)
-      : (Promise.resolve(BARS) as never),
-  )
+  vi.mocked(api.get).mockImplementation((path: string) => {
+    if (path.includes('/indicators/available')) return Promise.resolve(CATALOGUE) as never
+    if (path.includes('/timeframes')) return Promise.resolve(TIMEFRAMES) as never
+    return Promise.resolve(BARS) as never
+  })
   vi.mocked(api.post).mockResolvedValue({ symbol: '0050.TW', timeframe: '1d', series: [] } as never)
 })
 
@@ -286,9 +318,8 @@ describe('週期切換', () => {
   it('可以換成週線', async () => {
     const user = userEvent.setup()
     show()
-    await vi.waitFor(() => expect(api.get).toHaveBeenCalled())
 
-    await user.click(screen.getByRole('button', { name: '週' }))
+    await user.click(await screen.findByRole('button', { name: '週線' }))
 
     await vi.waitFor(() =>
       expect(vi.mocked(api.get).mock.calls.at(-1)?.[0]).toContain('timeframe=1wk'),
@@ -298,7 +329,7 @@ describe('週期切換', () => {
   it('現在選的是哪一個要看得出來', async () => {
     show()
 
-    const day = await screen.findByRole('button', { name: '日' })
+    const day = await screen.findByRole('button', { name: '日線' })
     expect(day).toHaveAttribute('aria-pressed', 'true')
   })
 })
@@ -758,5 +789,90 @@ describe('指標畫得出來，而且跟策略算的是同一份', () => {
     // loose /指標/ match is satisfied by the 「要畫線、疊指標的話」 footer that
     // was already on this page, which is a green test for a broken feature.
     expect(await screen.findByRole('alert')).toHaveTextContent('sma 算不出來')
+  })
+})
+
+
+// --- the candle sizes the owner asked for -------------------------------------------
+
+/**
+ * 「K線的單位不夠細，通常還要有小時 (譬如4hr / 12hr)，分鐘 (1/5/15/30分)」.
+ *
+ * The buttons come from the SERVER, per data source, because the set differs:
+ * Yahoo refuses 12h outright and Binance serves it. A list hard-coded here
+ * would offer a stock user a candle that answers 「暫時抓不到…可能是被限流
+ * 了」 -- a transient sentence for a permanent condition.
+ */
+describe('K 棒週期', () => {
+  it('分鐘、小時、日週月都選得到，不再只有三個', async () => {
+    show()
+
+    expect(await screen.findByRole('button', { name: '15 分線' })).toBeInTheDocument()
+    for (const label of ['1 分線', '30 分線', '4 小時線', '日線', '月線']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
+    }
+  })
+
+  it('按鈕是後端給的，前端不自己列一份', async () => {
+    show()
+
+    await screen.findByRole('button', { name: '4 小時線' })
+    expect(vi.mocked(api.get).mock.calls.some(([p]) => p.includes('/timeframes'))).toBe(true)
+  })
+
+  it('看美股時不出現 12 小時線 —— Yahoo 根本不提供', async () => {
+    show()
+
+    await screen.findByRole('button', { name: '4 小時線' })
+    expect(screen.queryByRole('button', { name: '12 小時線' })).not.toBeInTheDocument()
+  })
+
+  it('看加密貨幣時才出現 12 小時線', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <PriceChart symbol="BTCUSDT" dataSource="binance" />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('button', { name: '12 小時線' })).toBeInTheDocument()
+  })
+
+  it('選了週期就用那個週期去要資料', async () => {
+    show()
+
+    await userEvent.click(await screen.findByRole('button', { name: '4 小時線' }))
+
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(api.get).mock.calls.some(([p]) => p.includes('timeframe=4h')),
+      ).toBe(true),
+    )
+  })
+
+  it('從加密貨幣的 12 小時線換到美股，不會默默改畫別的週期', async () => {
+    // Silently falling back to 日線 while the pressed button still reads 12
+    // 小時線 is a chart that disagrees with its own label -- the plausible,
+    // well-formed, WRONG chart this codebase treats as worse than a blank one.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <PriceChart symbol="BTCUSDT" dataSource="binance" />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: '12 小時線' }))
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <PriceChart symbol="AAPL" dataSource="yfinance" />
+      </QueryClientProvider>,
+    )
+
+    // It moved to a candle this source has...
+    await vi.waitFor(() =>
+      expect(screen.getByRole('button', { name: '日線' })).toHaveAttribute('aria-pressed', 'true'),
+    )
+    // ...and said so, rather than leaving the reader to notice.
+    expect(screen.getByRole('status')).toHaveTextContent(/12 小時線/)
   })
 })

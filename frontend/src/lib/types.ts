@@ -730,3 +730,20 @@ export interface IndicatorsResponse {
   timeframe: string
   series: IndicatorSeriesResponse[]
 }
+
+export interface TimeframeOption {
+  /** What the provider is asked for: 「4h」. */
+  value: string
+  /** What the owner reads: 四小時線. Served by the API so the chart, the
+   * strategy form and the backtest form cannot drift into three names for one
+   * candle. */
+  label: string
+  /** How many candles this source will actually part with. Yahoo caps intraday
+   * history hard and hands back an empty frame past the cap rather than a
+   * shorter one. */
+  max_bars: number
+}
+
+export interface TimeframesResponse {
+  sources: { data_source: DataSource; timeframes: TimeframeOption[] }[]
+}

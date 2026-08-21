@@ -57,6 +57,32 @@ _TAIWAN = _Session("Asia/Taipei", time(9, 0), time(13, 30))
 _US = _Session("America/New_York", time(9, 30), time(16, 0))
 
 
+def session_close_after(
+    symbol: str, data_source: DataSource, opened_at: datetime
+) -> datetime | None:
+    """When the trading day containing `opened_at` stops accepting trades.
+
+    None means 「this market never closes」 (crypto) or 「cannot tell」, and the
+    caller must then fall back to plain calendar arithmetic rather than
+    inventing a close.
+
+    Used by closed_bars() to release an intraday candle that the session cut
+    short. Yahoo aligns intraday candles to each exchange's own open, so a
+    Taiwanese 4h candle opening at 13:00 is finished at 13:30 -- and the flat
+    four-hour arithmetic would otherwise hold it back until 17:00.
+    """
+    session = _session_for(symbol, data_source)
+    if session is None:
+        return None
+    local = opened_at.astimezone(session.tz)
+    return local.replace(
+        hour=session.closes.hour,
+        minute=session.closes.minute,
+        second=0,
+        microsecond=0,
+    )
+
+
 def _session_for(symbol: str, data_source: DataSource) -> _Session | None:
     """None means "cannot tell", which callers must read as open."""
     upper = symbol.upper()

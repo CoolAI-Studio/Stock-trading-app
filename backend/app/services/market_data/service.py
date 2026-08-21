@@ -59,7 +59,12 @@ _DEFAULT_BAR_TTL_SEC: dict[Timeframe, float] = {
     Timeframe.MINUTE_1: 30.0,
     Timeframe.MINUTE_5: 60.0,
     Timeframe.MINUTE_15: 120.0,
+    Timeframe.MINUTE_30: 240.0,
     Timeframe.HOUR_1: 300.0,
+    # Never longer than the candle itself lasts: a 4-hour candle cached for
+    # five would draw a bar that closed before the one after it.
+    Timeframe.HOUR_4: 900.0,
+    Timeframe.HOUR_12: 1800.0,
     Timeframe.DAY_1: 900.0,
     Timeframe.WEEK_1: 3600.0,
     Timeframe.MONTH_1: 3600.0,
@@ -291,7 +296,13 @@ class MarketDataService:
         _, _, cached = self._bar_cache.get(key, (None, 0, []))
 
         try:
-            fetched = closed_bars(self._providers[data_source].get_bars(symbol, timeframe, limit))
+            fetched = closed_bars(
+                self._providers[data_source].get_bars(symbol, timeframe, limit),
+                # Passed through so an intraday candle the session cut short is
+                # released when the session ends rather than a flat interval
+                # later. Without this argument the clamp exists but never runs.
+                data_source=data_source,
+            )
         except BarFetchError as exc:
             # A FAILURE IS NOT AN ANSWER, and this line is the whole reason the
             # bug existed. The old code could not tell 「asked, and there is

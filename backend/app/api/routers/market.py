@@ -13,9 +13,18 @@ from app.schemas.market import (
     IndicatorSeriesRead,
     IndicatorsRead,
     QuoteRead,
+    SourceTimeframes,
+    TimeframeOption,
+    TimeframesRead,
 )
 from app.services import chart_indicators, indicator_panes, symbol_search
-from app.services.market_data.base import Timeframe
+from app.services.market_data.base import (
+    SUPPORTED_TIMEFRAMES,
+    TIMEFRAME_LABELS,
+    Timeframe,
+    max_bars_available,
+    supports_timeframe,
+)
 from app.services.market_data.service import (
     DEFAULT_BAR_LIMIT,
     MarketDataService,
@@ -89,6 +98,8 @@ def get_bars(
         # Japanese company's price history and draw it convincingly.
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
 
+    _refuse_unsupported(data_source, timeframe)
+
     bars = service.get_bars(cleaned, timeframe, data_source, limit=limit)
     return BarsRead(
         symbol=cleaned,
@@ -108,6 +119,57 @@ def get_bars(
             )
             for bar in bars
         ],
+    )
+
+
+def _refuse_unsupported(data_source: DataSource, timeframe: Timeframe) -> None:
+    """A candle this source does not serve is refused before the network.
+
+    Yahoo answers an unsupported interval with an EMPTY FRAME, not an error, so
+    without this the request becomes a failed fetch and the page says 「暫時抓
+    不到…可能是被限流了」 -- a transient sentence for a permanent condition,
+    which sends the reader off to wait for something that will never change.
+    """
+    if supports_timeframe(data_source, timeframe):
+        return
+    offered = "、".join(
+        TIMEFRAME_LABELS[option] for option in SUPPORTED_TIMEFRAMES.get(data_source, ())
+    )
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=(
+            f"{TIMEFRAME_LABELS.get(timeframe, timeframe.value)}"
+            f"這個資料來源沒有提供。可以選：{offered}。"
+        ),
+    )
+
+
+@router.get("/timeframes", response_model=TimeframesRead)
+def list_timeframes(
+    user: User = Depends(get_current_active_user),
+) -> TimeframesRead:
+    """Which candle sizes each source serves, finest first, with a name.
+
+    Served from here rather than listed in the page, for the same reason the
+    indicator panes are: a second list in TypeScript drifts the first time an
+    interval is added, and the drift shows up as a button that answers 「抓不
+    到」 for a candle that was never available.
+    """
+    return TimeframesRead(
+        sources=[
+            SourceTimeframes(
+                data_source=source,
+                timeframes=[
+                    TimeframeOption(
+                        value=timeframe.value,
+                        label=TIMEFRAME_LABELS[timeframe],
+                        max_bars=max_bars_available(source, timeframe),
+                    )
+                    for timeframe in timeframes
+                ],
+            )
+            for source, timeframes in SUPPORTED_TIMEFRAMES.items()
+        ]
     )
 
 
@@ -142,6 +204,8 @@ def compute_indicators(
     problem = symbol_search.looks_unpriceable(cleaned)
     if problem:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
+
+    _refuse_unsupported(payload.data_source, payload.timeframe)
 
     bars = service.get_bars(cleaned, payload.timeframe, payload.data_source, limit=payload.limit)
     try:

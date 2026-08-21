@@ -29,7 +29,13 @@ const TIMEFRAME_LABEL: Record<string, string> = {
   '1m': '1 分線',
   '5m': '5 分線',
   '15m': '15 分線',
-  '1h': '小時線',
+  '30m': '30 分線',
+  '1h': '1 小時線',
+  '4h': '4 小時線',
+  // Crypto only -- Yahoo refuses the interval outright. The strategy save
+  // endpoint refuses the pair, so this label exists to name an existing
+  // crypto strategy rather than to offer 12h on a stock.
+  '12h': '12 小時線',
   '1d': '日線',
   '1wk': '週線',
   '1mo': '月線',
