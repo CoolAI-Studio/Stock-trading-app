@@ -165,3 +165,165 @@ describe('引導流程', () => {
     await waitFor(() => expect(screen.getByText('儀表板')).toBeInTheDocument())
   })
 })
+
+/**
+ * 階段 2B：讓 AI 幫忙。
+ *
+ * 這一段的規格有一條是硬的：**AI 產生的東西一定要他按下確認才會寫進去**。
+ * 他讀不懂那段程式碼，而「看起來完成、實際上做別的事」正是他抓不到的那一種錯。
+ *
+ * 另一條是：任何一步失敗都要退回「我自己選」，不是停在那裡。引導不能因為一個
+ * 選填功能而卡死——那會讓 AI 事實上變成必需品。
+ */
+describe('引導流程：讓 AI 幫我', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function serveAi({
+    configured = true,
+    generate,
+  }: {
+    configured?: boolean
+    generate?: unknown
+  } = {}) {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.includes('ai-settings')) return Promise.resolve({ configured }) as never
+      if (path.includes('templates')) return Promise.resolve([TEMPLATE]) as never
+      return Promise.resolve([]) as never
+    })
+    vi.mocked(api.post).mockImplementation((path: string) => {
+      if (path.includes('generate')) return Promise.resolve(generate) as never
+      return Promise.resolve({ id: 9, name: 'AI 的提醒', is_active: true }) as never
+    })
+  }
+
+  it('還沒設定 AI 金鑰的時候，不要給一個按了會失敗的輸入框', async () => {
+    serveAi({ configured: false })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+
+    expect(await screen.findByRole('link', { name: /設定 AI 金鑰/ })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/用一句話說/)).not.toBeInTheDocument()
+  })
+
+  it('設定好了就直接在這裡問他要什麼', async () => {
+    serveAi({ generate: { ok: true, source_code: 'class Strategy: pass', detected_name: '台積電到價', detected_symbol: '2330.TW' } })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+    await user.type(await screen.findByLabelText(/用一句話說/), '台積電跌到 900 提醒我')
+    await user.click(screen.getByRole('button', { name: '讓 AI 想一個' }))
+
+    await waitFor(() =>
+      expect(vi.mocked(api.post).mock.calls.some(([p]) => String(p).includes('generate'))).toBe(
+        true,
+      ),
+    )
+  })
+
+  it('AI 想好了也不會直接寫進去 —— 要他按確認', async () => {
+    serveAi({
+      generate: {
+        ok: true,
+        source_code: 'class Strategy: pass',
+        detected_name: '台積電到價',
+        detected_symbol: '2330.TW',
+      },
+    })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+    await user.type(await screen.findByLabelText(/用一句話說/), '台積電跌到 900 提醒我')
+    await user.click(screen.getByRole('button', { name: '讓 AI 想一個' }))
+
+    expect(await screen.findByText(/台積電到價/)).toBeInTheDocument()
+    // 還沒建立任何東西：只有 generate 被呼叫過。
+    const created = vi
+      .mocked(api.post)
+      .mock.calls.filter(([p]) => String(p) === '/api/strategies')
+    expect(created).toHaveLength(0)
+  })
+
+  it('按下確認之後才建立，而且只會通知、不會下單', async () => {
+    serveAi({
+      generate: {
+        ok: true,
+        source_code: 'class Strategy: pass',
+        detected_name: '台積電到價',
+        detected_symbol: '2330.TW',
+      },
+    })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+    await user.type(await screen.findByLabelText(/用一句話說/), '台積電跌到 900 提醒我')
+    await user.click(screen.getByRole('button', { name: '讓 AI 想一個' }))
+    await user.click(await screen.findByRole('button', { name: /建立這則提醒/ }))
+
+    await waitFor(() => {
+      const call = vi.mocked(api.post).mock.calls.find(([p]) => String(p) === '/api/strategies')
+      expect(call).toBeTruthy()
+      expect(call![1]).toMatchObject({ alert_only: true, symbol: '2330.TW' })
+    })
+  })
+
+  it('AI 反過來問問題的時候，讓他回答，而不是當成失敗', async () => {
+    serveAi({
+      generate: { ok: false, question: '你要看的是收盤價還是盤中價？' },
+    })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+    await user.type(await screen.findByLabelText(/用一句話說/), '台積電跌就提醒我')
+    await user.click(screen.getByRole('button', { name: '讓 AI 想一個' }))
+
+    expect(await screen.findByText(/收盤價還是盤中價/)).toBeInTheDocument()
+    expect(await screen.findByLabelText(/你的回答/)).toBeInTheDocument()
+  })
+
+  it('AI 失敗的時候給得出一條走得完的路', async () => {
+    // 規格：任何一步失敗一律退回「我自己選」，不是停在那裡——否則一個選填的
+    // 功能就變成了必需品。
+    serveAi({ generate: { ok: false, error: '這個模型現在沒有回應。' } })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+    await user.type(await screen.findByLabelText(/用一句話說/), '隨便')
+    await user.click(screen.getByRole('button', { name: '讓 AI 想一個' }))
+
+    expect(await screen.findByText(/這個模型現在沒有回應/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /改用現成的範本/ }))
+    expect(await screen.findByText('到價提醒')).toBeInTheDocument()
+  })
+
+  it('程式碼沒問題但代號永遠不會有報價的時候，要說出來', async () => {
+    // 這個陷阱後端的 schema 自己寫著：編輯器印「偵測到：均線（2330）」是綠的，
+    // 而拒絕在存檔時從另一個欄位才出現，中間沒有任何東西把兩件事連起來。
+    serveAi({
+      generate: {
+        ok: true,
+        source_code: 'class Strategy: pass',
+        detected_name: '均線',
+        detected_symbol: '2330',
+        symbol_problem: '2330 少了 .TW，這樣抓不到報價。',
+      },
+    })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
+    await user.type(await screen.findByLabelText(/用一句話說/), '均線')
+    await user.click(screen.getByRole('button', { name: '讓 AI 想一個' }))
+
+    expect(await screen.findByText(/少了 .TW/)).toBeInTheDocument()
+  })
+})
+
