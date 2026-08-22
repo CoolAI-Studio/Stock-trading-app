@@ -8,27 +8,68 @@ import yfinance as yf
 from app.models.enums import DataSource
 from app.services.market_data.base import Bar, BarFetchError, Quote, Timeframe, currency_for
 
-# How far back to ask for each interval. Yahoo caps intraday history hard --
-# roughly 7 days of 1m, 60 days of anything else under an hour, 2 years of
-# hourly -- and asking beyond the cap returns an empty frame rather than a
-# shorter one, so these are ceilings, not preferences. The daily-and-slower
-# windows are simply generous enough that a 200-period indicator warms up.
-_PERIOD_FOR: dict[Timeframe, str] = {
-    Timeframe.MINUTE_1: "5d",
-    Timeframe.MINUTE_5: "60d",
-    Timeframe.MINUTE_15: "60d",
-    Timeframe.MINUTE_30: "60d",
-    Timeframe.HOUR_1: "730d",
-    # 730d, NOT 60d and NEVER "max". Measured for AAPL: 60d gives 119 candles,
-    # 730d gives ~1450, and "max" gives 168 -- yfinance's period="max" branch
-    # only recognises a fixed list of intervals and 4h is not on it, so it
-    # falls through to a 99-year default that Yahoo then truncates. 60d would
-    # not even cover DEFAULT_BAR_LIMIT.
-    Timeframe.HOUR_4: "730d",
-    Timeframe.DAY_1: "5y",
-    Timeframe.WEEK_1: "10y",
-    Timeframe.MONTH_1: "max",
+# HOW FAR BACK TO ASK, AS A FUNCTION OF HOW MUCH WAS ASKED FOR.
+#
+# It used to be a fixed table -- daily was "5y" -- and `limit` was ignored
+# entirely: the frame came back at whatever depth the table said, then
+# `.tail(limit)` trimmed it. So a backtest asking for 2,000 daily candles got
+# five years and no indication that it had been shortened, and a range that
+# started before that window came back empty and was blamed on the symbol.
+#
+# A bigger constant would only move the day it happens. The depth has to be a
+# function of the request, which is exactly the lesson service.py already paid
+# for one layer up: 「a shallower cached window cannot answer a deeper
+# question」.
+
+# Yahoo's hard walls. Past these it returns an EMPTY frame rather than a
+# shorter one, so asking for one day more turns data into no data. Measured,
+# not guessed: roughly 7 days of 1m, 60 days of anything else under an hour,
+# 2 years of hourly. 4h shares the hourly wall (and must never be asked as
+# "max": yfinance's max branch only recognises a fixed interval list, 4h is
+# not on it, and the fallthrough gives 168 candles for AAPL).
+_MAX_DAYS: dict[Timeframe, int | None] = {
+    Timeframe.MINUTE_1: 7,
+    Timeframe.MINUTE_5: 60,
+    Timeframe.MINUTE_15: 60,
+    Timeframe.MINUTE_30: 60,
+    Timeframe.HOUR_1: 730,
+    Timeframe.HOUR_4: 730,
+    # No wall worth clamping to: daily and slower go back decades.
+    Timeframe.DAY_1: None,
+    Timeframe.WEEK_1: None,
+    Timeframe.MONTH_1: None,
 }
+
+# Calendar days one candle of each timeframe covers, generously. Daily is 1.5
+# rather than 1 because a week holds five trading days, not seven, and a year
+# holds about 252 -- asking for exactly `limit` days would come up a fifth
+# short before a single holiday.
+_CALENDAR_DAYS_PER_CANDLE: dict[Timeframe, float] = {
+    Timeframe.MINUTE_1: 1 / 300,
+    Timeframe.MINUTE_5: 1 / 60,
+    Timeframe.MINUTE_15: 1 / 20,
+    Timeframe.MINUTE_30: 1 / 10,
+    Timeframe.HOUR_1: 1 / 5,
+    Timeframe.HOUR_4: 1.0,
+    Timeframe.DAY_1: 1.5,
+    Timeframe.WEEK_1: 7.5,
+    Timeframe.MONTH_1: 32.0,
+}
+
+# A floor, so a small request still warms up a 200-period indicator and still
+# covers a long weekend.
+_MIN_DAYS = 30
+
+
+def _period_days(timeframe: Timeframe, limit: int) -> int:
+    """How many calendar days of history to ask for, for `limit` candles."""
+    cap = _MAX_DAYS[timeframe]
+    if cap is not None:
+        # The wall IS the best answer: anything less is a shorter frame for no
+        # reason, anything more is an empty one.
+        return cap
+    wanted = int(limit * _CALENDAR_DAYS_PER_CANDLE[timeframe]) + 1
+    return max(wanted, _MIN_DAYS)
 
 
 logger = logging.getLogger("app.market_data.yfinance")
@@ -102,7 +143,7 @@ class YFinanceProvider:
     def get_bars(self, symbol: str, timeframe: Timeframe, limit: int) -> list[Bar]:
         try:
             frame = yf.Ticker(symbol).history(
-                period=_PERIOD_FOR[timeframe],
+                period=f"{_period_days(timeframe, limit)}d",
                 interval=timeframe.value,
                 auto_adjust=True,
             )

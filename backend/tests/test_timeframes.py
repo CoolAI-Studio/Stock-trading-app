@@ -104,10 +104,12 @@ def test_a_finer_candle_is_not_cached_longer_than_it_lives():
 
 
 def test_every_timeframe_yahoo_supports_has_a_history_window():
-    from app.services.market_data.providers.yfinance_provider import _PERIOD_FOR
+    """區間現在是 limit 的函數而不是一張固定的表（原本那張表讓深一點的回測被
+    靜默截斷），所以問的方式跟著改：每一個支援的週期都要算得出一個正數。"""
+    from app.services.market_data.providers.yfinance_provider import _period_days
 
     missing = [
-        tf.value for tf in SUPPORTED_TIMEFRAMES[DataSource.YFINANCE] if tf not in _PERIOD_FOR
+        tf.value for tf in SUPPORTED_TIMEFRAMES[DataSource.YFINANCE] if _period_days(tf, 300) <= 0
     ]
 
     assert not missing, f"no period for: {missing}"
@@ -148,11 +150,12 @@ def test_the_history_window_covers_the_deepest_chart_request():
     So where the cap makes the full depth impossible, the app must know it
     rather than discover it one short answer at a time.
     """
+    from app.api.routers.market import MAX_CHART_BARS
     from app.services.market_data.base import max_bars_available
-    from app.services.market_data.providers.yfinance_provider import _PERIOD_FOR
+    from app.services.market_data.providers.yfinance_provider import _period_days
 
     for timeframe in SUPPORTED_TIMEFRAMES[DataSource.YFINANCE]:
-        assert _PERIOD_FOR[timeframe]
+        assert _period_days(timeframe, MAX_CHART_BARS) > 0
         assert max_bars_available(DataSource.YFINANCE, timeframe) > 0
 
 
