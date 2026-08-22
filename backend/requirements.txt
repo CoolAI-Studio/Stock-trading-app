@@ -23,7 +23,7 @@ pytest-asyncio>=0.24
 ruff>=0.16
 
 # Optional cloud Postgres driver (needed once DATABASE_URL points at Neon/Supabase/etc.)
-psycopg2-binary>=2.9
+psycopg2-binary>=2.9.12
 
 # Optional: only needed if AI_PROVIDER=anthropic is selected (default provider is
 # the plain-httpx OpenAI-compatible client, which needs no extra SDK)
