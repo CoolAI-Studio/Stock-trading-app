@@ -495,7 +495,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
               <p role="alert" className="text-red-400">
                 {notFound
                   ? '後端還沒有這個功能 —— 部署的後端版本比這個畫面舊。去 Render 按一次 Manual Deploy，等它跑完再重新整理。'
-                  : '讀不到歷史資料。可能是後端還沒醒（Render 免費方案冷啟動要一分鐘左右），或者行情來源暫時不通 —— 稍後重新整理看看。'}
+                  : '讀不到歷史資料。可能是後端還沒醒（免費方案的冷啟動常常要一分鐘左右），或者行情來源暫時不通 —— 稍後重新整理看看。'}
               </p>
             ) : fetchFailed ? (
               <p role="alert" className="text-amber-300">

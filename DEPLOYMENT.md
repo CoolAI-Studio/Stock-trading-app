@@ -1,18 +1,35 @@
-# 部署指南（Render 免費方案 + Neon + Vercel + UptimeRobot）
+# 部署指南（以 Render ＋ Neon ＋ Vercel 的免費方案為例）
 
-全部走免費方案，不需要信用卡。以下每一步需要你自己動手（帳號註冊、環境變數填寫），我沒辦法幫你操作瀏覽器登入這些平台。
+全部走免費方案，不需要信用卡。以下每一步需要你自己動手（帳號註冊、環境變數填寫），
+沒有人能幫你操作瀏覽器登入這些平台。
+
+**這是一條走得通的路，不是唯一的一條。** 這個 app 需要的是三樣東西，不是三個品牌：
+
+| 要的東西 | 這份文件用的例子 | 換成別的可以嗎 |
+| --- | --- | --- |
+| 一個能跑 Docker 容器的地方（後端） | Render | 可以：Railway、Fly.io、Koyeb、Heroku、或你自己的機器。映像檔是 `backend/Dockerfile` |
+| 一個 Postgres | Neon | 可以：Supabase、任何付費方案、自架的都行 |
+| 一個放靜態網站的地方（前端） | Vercel | 可以：Cloudflare Pages、Netlify、任何 CDN |
+
+底下的步驟寫的是 Render／Neon／Vercel 的選單名稱，因為那是有截圖式指路的唯一辦法。
+換平台的話，每一步問的東西是一樣的（「把這個值放進環境變數」），只是那一頁在你的
+平台上可能叫 Variables、Config Vars 或 Secrets。**設定頁自己會照你實際用的平台講話**——
+它認得出 Render、Railway、Fly.io、Heroku、Koyeb，認不出來就講通用的說法。
+
+換平台唯一要注意的技術限制：這個後端**只能跑一個行程**（`--workers 1`），因為背景盯盤
+的迴圈是行程內的單例，開兩份會把每一個訊號通知兩次。
 
 ## 順序
 
-1. Neon（資料庫）
-2. Render（後端 API + 背景 worker）
-3. Vercel（前端網頁）
-4. UptimeRobot（保活，讓 Render 免費方案的背景 worker 不休眠）
+1. 資料庫（本文用 Neon）
+2. 後端 API + 背景 worker（本文用 Render）
+3. 前端網頁（本文用 Vercel）
+4. 保活（本文用 UptimeRobot，讓免費方案的背景 worker 不休眠）
 5. 回頭把兩邊的網址互相填好
 
 ---
 
-## 1. Neon — 建立免費 Postgres 資料庫
+## 1. 建立 Postgres 資料庫（本文用 Neon 免費方案）
 
 1. 前往 <https://console.neon.tech> 註冊（可以用 GitHub 帳號登入）。
 2. 建立一個新專案（Project），資料庫名稱隨意，例如 `trading_app`。
@@ -26,7 +43,7 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 
 ---
 
-## 2. Render — 部署後端
+## 2. 部署後端（本文用 Render）
 
 ### 2a. 把專案推上 GitHub（Render 需要接 GitHub repo）
 
@@ -57,7 +74,7 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 
 ---
 
-## 3. Vercel — 部署前端
+## 3. 部署前端（本文用 Vercel）
 
 1. 前往 <https://vercel.com/new> 註冊/登入（用 GitHub 帳號）。
 2. 選擇同一個 GitHub repo，Root Directory 設定為 `frontend`。
@@ -74,7 +91,7 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 
 ---
 
-## 4. UptimeRobot — 讓背景 worker 不休眠
+## 4. 讓背景 worker 不休眠（本文用 UptimeRobot）
 
 Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控不會執行），用免費的外部監控服務每 5 分鐘 ping 一次來保持喚醒：
 
@@ -168,7 +185,7 @@ Render（`RENDER_GIT_COMMIT`）、Heroku／Dokku（`SOURCE_VERSION`）、Railway
 | 環境變數 | 弄丟的話會怎樣 | 能重新產生嗎 |
 | --- | --- | --- |
 | **`SECRET_ENCRYPTION_KEY`** | **最嚴重。** 已經存進去的通知管道（Telegram bot token、LINE token、Email 密碼）和券商 API 金鑰，會全部永久無法解密。而且連「在網頁上刪掉重設」都做不到——刪除和修改這兩個動作都得先把那一欄讀出來、確認是不是你的資料，一讀就會失敗。剩下的辦法只有請人直接進資料庫，把那兩張表整批刪掉重來。 | **不行。** 這把鑰匙是唯一的，沒有備用鑰匙、沒有客服可以幫你解。 |
-| `DATABASE_URL` | 後端連不到資料庫 | 可以，回 Neon 主控台重新複製一次 |
+| `DATABASE_URL` | 後端連不到資料庫 | 可以，回你的資料庫服務主控台重新複製一次 |
 | `JWT_SECRET` | 所有人被登出 | 可以，換一組新的、重新登入就好 |
 | `TV_WEBHOOK_SECRET` | TradingView 送來的訊號會被擋掉 | 可以，但換完要回 TradingView 把每個警報訊息裡的 `secret` 也一起改掉 |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | 瀏覽器推播失效 | 可以，但重新產生後每台裝置都要回「通知」頁重新訂閱一次 |
@@ -282,12 +299,12 @@ Render 的 Events 只說「哪一次部署」，不說「那是哪一版程式�
 
 ## 檢查清單
 
-- [ ] Neon 資料庫建立完成，拿到連線字串
+- [ ] Postgres 資料庫建立完成，拿到連線字串
 - [ ] GitHub repo 建立並推送完成
-- [ ] Render Blueprint 部署完成，`/healthz` 回應正常
-- [ ] Vercel 部署完成，能打開登入頁
-- [ ] 後端 `CORS_ORIGINS` 已更新成 Vercel 網址
-- [ ] UptimeRobot 監控已設定
+- [ ] 後端部署完成，`/healthz` 回應正常
+- [ ] 前端部署完成，能打開登入頁
+- [ ] 後端 `CORS_ORIGINS` 已更新成前端網址
+- [ ] 保活監控已設定（免費方案才需要）
 - [ ] 已建立自己的登入帳號，且 `ALLOW_REGISTRATION` 已改回 `false`
 - [ ] （選用）已設定 `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`，瀏覽器推播通知可以用
 - [ ] **`SECRET_ENCRYPTION_KEY` 等金鑰已存進密碼管理器，而且存了兩份不同地方**（見第 7 節）

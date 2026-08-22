@@ -1,6 +1,5 @@
 import base64
 import logging
-import os
 import sys
 from functools import lru_cache
 
@@ -150,19 +149,26 @@ class Settings(BaseSettings):
     def public_base_url(self) -> str:
         """This deployment's own address, derived when nobody supplied one.
 
-        Render injects RENDER_EXTERNAL_URL with the service's own
-        https://...onrender.com address, so requiring somebody to copy that URL
-        back into the service it came from is a step that exists for no reason
-        -- and a step a first-time deployer skips, which produces a TradingView
-        webhook pointed at localhost and no sign of why nothing arrives.
+        Most container platforms hand the service its own address in the
+        environment, so requiring somebody to copy that URL back into the
+        service it came from is a step that exists for no reason -- and a step
+        a first-time deployer skips, which produces a TradingView webhook
+        pointed at localhost and no sign anywhere of why nothing arrives.
 
-        A FALLBACK, never an override: a custom domain is exactly the case
-        Render's variable does not know about, so an explicit value wins.
+        WHICH platform is deliberately not this module's business:
+        services.hosting knows the names, and knowing more than one is the
+        difference between 「this works」 and 「this works if you chose the
+        same host I did」.
+
+        A FALLBACK, never an override: a custom domain is exactly the case no
+        platform variable knows about, so an explicit value wins.
         """
         explicit = (self.PUBLIC_BASE_URL or "").strip()
         if explicit and explicit != LOCAL_BASE_URL:
             return explicit
-        return (os.environ.get("RENDER_EXTERNAL_URL") or "").strip() or explicit
+        from app.services.hosting import public_url
+
+        return public_url() or explicit
 
     @property
     def cors_origins_list(self) -> list[str]:

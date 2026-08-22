@@ -581,8 +581,12 @@ export interface SetupStatus {
      * and two of these cannot be KNOWN until the step before has happened. */
     step: number
   }[]
-  /** Where to paste the answers. Named rather than assumed: the audience has
-   * just met Render and does not know env vars live under Environment. */
+  /** Where to paste the answers, in the words of the platform this deployment
+   * is actually on -- the backend works that out from the environment
+   * (services/hosting.py). The audience has just met their hosting platform
+   * and does not know environment variables live behind a menu; naming the
+   * WRONG platform's menu is worse than being vague, because they will go
+   * looking for it. */
   where: string
 }
 
@@ -660,8 +664,8 @@ export interface BarsResponse {
 export interface AiSettings {
   configured: boolean
   /** Where the setting in force came from. 「It works and I never set it here」
-   * sends somebody hunting through Render for a value they do not remember
-   * typing. */
+   * sends somebody hunting through their hosting platform's settings for a
+   * value they do not remember typing. */
   source: 'database' | 'env' | 'none'
   provider: string
   base_url: string

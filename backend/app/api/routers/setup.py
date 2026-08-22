@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from app.api.deps import optional_current_user
 from app.config import settings
 from app.models.user import User
-from app.services import setup_state
+from app.services import hosting, setup_state
 
 router = APIRouter(prefix="/setup", tags=["setup"])
 
@@ -54,9 +54,11 @@ class MissingSettingRead(BaseModel):
 
 class SetupStatus(BaseModel):
     missing: list[MissingSettingRead]
-    # Where to paste the answers. Named rather than assumed, because the whole
-    # audience for this page is somebody who has just met Render for the first
-    # time and does not know that env vars live under Settings -> Environment.
+    # Where to paste the answers. Named rather than left to the reader,
+    # because the audience for this page has just met their hosting platform
+    # for the first time and does not know that environment variables live
+    # behind a menu -- and named for the platform they are ACTUALLY on, which
+    # services.hosting works out from the environment.
     where: str
 
 
@@ -94,10 +96,11 @@ def _guard(user: User | None = None) -> list:
 def setup_status(user: User | None = Depends(optional_current_user)) -> SetupStatus:
     return SetupStatus(
         missing=[MissingSettingRead(**vars(item)) for item in _guard(user)],
-        where=(
-            "Render 後台 → 你的服務 → 左邊選單 Environment → 找到同名的欄位貼上去 → "
-            "存檔之後 Render 會自動重新部署，大約一兩分鐘。"
-        ),
+        # Asked, not assumed. This used to be Render's menu path for
+        # everybody, which is a wrong instruction for anybody who deployed
+        # somewhere else -- and being wrong here is worse than being vague,
+        # because they will go looking for the page it names.
+        where=hosting.detect().env_where,
     )
 
 

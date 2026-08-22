@@ -4,7 +4,7 @@ WHY THIS EXISTS. The README hands a stranger two deploy buttons; render.yaml
 then asks them for seven values, and two of those -- SECRET_ENCRYPTION_KEY and
 the VAPID pair -- are produced by running a Python script on their own machine.
 Somebody who wants stock alerts on their phone does not have Python. They leave
-the blanks empty, Render builds, the process dies at import
+the blanks empty, the platform builds, the process dies at import
 (config.enforce_required_secrets), and what they get is a 502 and a stack trace
 in a log they will never find.
 
@@ -13,7 +13,8 @@ a button that produces the value -- is exactly what a dead process cannot serve.
 
 THIS MODULE IS THE READ-ONLY HALF. It answers 「what is still missing」 and 「here
 is a fresh value of the right shape」. It writes nothing, anywhere: the human
-copies the value into Render, which is the only place that can persist it.
+copies the value into the platform's own environment settings, which is the
+only place that can persist it.
 
 IT NEVER REPORTS A CONFIGURED VALUE. The endpoints that use it are
 unauthenticated by necessity -- there is no login before there is a JWT_SECRET
@@ -30,6 +31,7 @@ import secrets
 from dataclasses import dataclass
 
 from app.config import _PLACEHOLDER_SECRETS, LOCAL_BASE_URL, Settings
+from app.services import hosting
 
 # Long enough that guessing is not a strategy, and the same shape the existing
 # hint in config.py tells people to generate by hand.
@@ -100,12 +102,15 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                 name="DATABASE_URL",
                 why=(
                     "沒有資料庫，這個系統存不了任何東西：帳號、策略、持倉、通知設定全部都"
-                    "存不下來。目前用的是預設的本機檔案，而在 Render 上那個檔案每次重新"
+                    "存不下來。目前用的是預設的本機檔案，而在雲端平台上那個檔案每次重新"
                     "部署都會被清空 —— 東西會不見，而且不會有任何提示。"
                 ),
                 how=(
-                    "去 neon.tech 註冊一個免費帳號、建立一個資料庫，把它給你的連線字串"
-                    "（postgresql://... 開頭）貼進 Render 的這個欄位。免費方案就夠用。"
+                    "你需要一個 Postgres 連線字串（postgresql://... 開頭），"
+                    f"把它貼進{hosting.paste_target()}的這一格。"
+                    "任何一家的 Postgres 都可以，這個 app 不在乎是誰家的："
+                    "免費的例如 Neon、Supabase；要更穩的可以用付費方案，"
+                    "或是自己架的 Postgres 也一樣可以。"
                 ),
                 generator=None,
                 step=1,
@@ -124,7 +129,10 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     else "這個值的格式不對，會在你第一次要存通知設定的時候才出錯 —— "
                     "那時候你不會知道原因出在這裡。"
                 ),
-                how="按下面的「產生」，把產生出來的值貼回 Render。不需要在自己電腦上裝任何東西。",
+                how=(
+                    f"按下面的「產生」，把產生出來的值貼回{hosting.paste_target()}。"
+                    "不需要在自己電腦上裝任何東西。"
+                ),
                 generator="fernet",
                 step=2,
             )
@@ -147,7 +155,8 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     name=name,
                     why=why,
                     how=(
-                        "Render 通常會自動幫你產生這一個。如果它是空的，按下面的「產生」再貼回去。"
+                        "有些平台（例如 Render）會自動幫你產生這一個。"
+                        f"如果它是空的，按下面的「產生」，再把值貼回{hosting.paste_target()}。"
                     ),
                     generator="token",
                     step=2,
@@ -178,7 +187,8 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "所以不用手機推播的話留白也可以。"
                 ),
                 how=(
-                    "按下面的「產生」會一次給你完整的一對，兩個值都要貼回 Render："
+                    "按下面的「產生」會一次給你完整的一對，兩個值都要貼回"
+                    f"{hosting.paste_target()}："
                     "VAPID_PUBLIC_KEY 和 VAPID_PRIVATE_KEY。"
                     "另外 VAPID_SUBJECT 填你自己的信箱，格式是 mailto:you@example.com。"
                 ),
@@ -197,7 +207,8 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "實際上一則都收不到。"
                 ),
                 how=(
-                    "按下面的「產生」會一次給你完整的一對，兩個值都要貼回 Render。"
+                    "按下面的「產生」會一次給你完整的一對，兩個值都要貼回"
+                    f"{hosting.paste_target()}。"
                     "如果你不打算用手機推播，把兩個欄位都清空也是合法的設定。"
                 ),
                 generator="vapid",
@@ -220,8 +231,10 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "照著貼的話 TradingView 的訊號永遠不會送到，而且畫面上不會有任何提示。"
                 ),
                 how=(
-                    "在 Render 上通常不用填 —— 系統會自動用 Render 給這個服務的網址。"
-                    "只有在你另外接了自訂網域的時候才需要手動填。"
+                    "多數平台（Render、Railway、Koyeb、Fly.io）不用填 —— 系統會自動用"
+                    "平台給這個服務的網址。只有在平台沒有給、或是你另外接了自訂網域的"
+                    "時候才需要手動填；那種情況把完整網址（https:// 開頭）貼進來，"
+                    "或是設一個叫 APP_PUBLIC_URL 的環境變數也可以。"
                 ),
                 generator=None,
                 blocking=False,
@@ -239,9 +252,9 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "而錯誤訊息藏在開發者工具裡，不會有人去看。"
                 ),
                 how=(
-                    "等前端（Vercel）部署完，把它給你的網址（https://xxx.vercel.app）"
-                    "貼進 Render 的這個欄位。這一格一定是最後填的，因為在前端存在之前"
-                    "沒有人知道那個網址。"
+                    "等前端部署完（Vercel、Cloudflare Pages、Netlify 都可以），"
+                    f"把它給你的網址（https:// 開頭）貼進{hosting.paste_target()}的這一格。"
+                    "這一格一定是最後填的，因為在前端存在之前沒有人知道那個網址。"
                 ),
                 generator=None,
                 blocking=False,

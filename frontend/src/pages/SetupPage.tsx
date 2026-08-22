@@ -147,8 +147,8 @@ export function SetupPage() {
 
       {failed && (
         <p role="alert" className="rounded border border-red-800 bg-red-950/40 px-3 py-2 text-red-300">
-          讀不到設定狀態。可能是後端還在啟動（Render 免費方案冷啟動要一分鐘左右），
-          稍等一下重新整理；如果一直這樣，去 Render 的 Logs 看看服務有沒有起來。
+          讀不到設定狀態。可能是後端還在啟動（免費方案的冷啟動常常要一分鐘左右），
+          稍等一下重新整理；如果一直這樣，去你的部署平台看那個服務的 Log，確認它有沒有起來。
         </p>
       )}
 
