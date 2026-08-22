@@ -5,6 +5,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { OnboardingGate } from './components/OnboardingGate'
+import { SetupGuidePage } from './pages/SetupGuidePage'
 import { WelcomePage } from './pages/WelcomePage'
 import { StrategiesPage } from './pages/StrategiesPage'
 import { OrdersPage } from './pages/OrdersPage'
@@ -63,6 +64,7 @@ function App() {
               }
             />
             <Route path="/welcome" element={<WelcomePage />} />
+            <Route path="/guide" element={<SetupGuidePage />} />
             <Route path="/strategies" element={<StrategiesPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/positions" element={<PositionsPage />} />

@@ -8,6 +8,9 @@ import { WorkerHealthBanner } from './WorkerHealthBanner'
 
 const NAV_ITEMS = [
   { to: '/', label: '儀表板', end: true },
+  // 設定引導排在前面：它是新使用者唯一真正需要走完的一頁，而不是十二個項目
+  // 裡的第十三個。
+  { to: '/guide', label: '設定引導' },
   { to: '/strategies', label: '策略' },
   { to: '/backtest', label: '回測' },
   { to: '/orders', label: '訂單' },
