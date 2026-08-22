@@ -463,7 +463,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
           {indicatorQuery.error instanceof ApiError && indicatorQuery.error.status === 422
             ? indicatorQuery.error.message
             : indicatorQuery.error instanceof ApiError && indicatorQuery.error.status === 404
-              ? '後端還沒有指標功能 —— 部署的後端版本比這個畫面舊。去 Render 按一次 Manual Deploy。'
+              ? '後端還沒有指標功能 —— 線上的後端比這個畫面舊。部署是自動的（CI 全綠就會部署），等一兩分鐘重新整理通常就好；一直這樣就去 GitHub 的 Actions 看最後一次有沒有失敗。'
               : '指標算不出來 —— 稍後重新整理看看。K 棒和報價不受影響。'}
         </p>
       )}
@@ -494,7 +494,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
             ) : query.isError ? (
               <p role="alert" className="text-red-400">
                 {notFound
-                  ? '後端還沒有這個功能 —— 部署的後端版本比這個畫面舊。去 Render 按一次 Manual Deploy，等它跑完再重新整理。'
+                  ? '後端還沒有這個功能 —— 線上的後端比這個畫面舊。部署是自動的，等一兩分鐘重新整理；一直這樣就去 GitHub 的 Actions 看最後一次有沒有失敗。'
                   : '讀不到歷史資料。可能是後端還沒醒（免費方案的冷啟動常常要一分鐘左右），或者行情來源暫時不通 —— 稍後重新整理看看。'}
               </p>
             ) : fetchFailed ? (

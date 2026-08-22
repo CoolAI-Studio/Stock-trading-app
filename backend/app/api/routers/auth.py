@@ -17,6 +17,31 @@ from app.schemas.user import UserRead
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+@router.get("/registration-open")
+def registration_open(db: Session = Depends(get_db)) -> dict[str, bool]:
+    """Is this deployment still waiting for its owner?
+
+    THE BROWSER CANNOT WORK THIS OUT ANY OTHER WAY, and without it the install
+    stops one step from the end. /api/setup/status answers 404 once the
+    environment variables are filled in, and 「設定填完了，但還沒有人認領」 is
+    exactly the state a fresh deployment sits in. The frontend needs to know
+    whether to show a 「建立你的帳號」 screen or a login form, and guessing
+    wrong means either a form nobody can use or no way in at all.
+
+    NOT A NEW DISCLOSURE. POST /api/auth/register already answers 403 to a
+    stranger the moment an owner exists, so 「this deployment is claimed」 is
+    public today. This says the same thing without asking anybody to attempt a
+    write, and says nothing else -- one boolean, no address, no count.
+
+    THE SAME TWO CONDITIONS THE DOOR ITSELF USES, in the same order, because a
+    flag that disagrees with the door is worse than no flag: it either shows a
+    form that 403s or hides the only way in.
+    """
+    if db.query(User.id).first() is not None:
+        return {"open": False}
+    return {"open": bool(settings.ALLOW_REGISTRATION or settings.ALLOW_FIRST_ACCOUNT)}
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
     """Create the one account this deployment gets, and then close for good.

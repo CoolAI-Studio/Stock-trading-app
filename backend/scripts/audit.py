@@ -69,6 +69,11 @@ if str(BACKEND_ROOT) not in sys.path:
 PUBLIC_ON_PURPOSE: dict[str, str] = {
     "POST /api/auth/login": "登入本身，沒有它就沒有人進得來",
     "POST /api/auth/register": "只在還沒有任何帳號時有用；有了擁有者之後它自己回 403",
+    "GET /api/auth/registration-open": (
+        "問的人本來就沒有帳號——那正是問題本身。而且它說的事情註冊端點已經在說了："
+        "有擁有者之後 register 就回 403，所以「這個部署被認領了沒有」本來就是公開的。"
+        "它只回一個布林值，沒有地址、沒有數量。"
+    ),
     "GET /healthz": "部署平台的健康檢查和外部看門狗都沒有憑證，公開是刻意的",
     "GET /api/setup/status": "設定沒填完時前端要說得出缺什麼，而那時還沒有帳號可登入",
     "POST /api/setup/generate": "設定頁的「產生金鑰」按鈕，同樣發生在有帳號之前",

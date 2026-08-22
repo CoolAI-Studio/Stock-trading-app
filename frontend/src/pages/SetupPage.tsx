@@ -156,7 +156,9 @@ export function SetupPage() {
         <div className="rounded border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-emerald-300">
           <p className="font-medium">設定完成，可以開始用了。</p>
           <p className="mt-1 text-sm">
-            重新整理這一頁就會回到登入畫面。第一次使用要先建立帳號 —— 詳細步驟見 DEPLOYMENT.md。
+            重新整理這一頁就會回到登入畫面。這個部署還沒有任何帳號的話，那一頁會直接讓你
+            建立第一個——就在網頁上，不用打指令，也不用再改任何設定。建立完成之後註冊就會
+            自己關起來，別人進不來。
           </p>
         </div>
       )}

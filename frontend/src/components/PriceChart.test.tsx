@@ -409,14 +409,21 @@ describe('錯誤訊息要真的看得到', () => {
     expect(overlay.className).toMatch(/z-\[?\d/)
   })
 
-  it('後端沒有這個端點時，講的是「去按 Manual Deploy」而不是「稍後再試」', async () => {
+  it('後端沒有這個端點時，說的是「線上的後端比較舊」而不是「稍後再試」', async () => {
     // A 404 is not a transient outage. It means the deployed backend is older
     // than the page asking it, and 「稍後重新整理」 would have somebody waiting
     // for something that will never happen on its own.
+    //
+    // 「去按 Manual Deploy」 was the old wording, and it is now wrong twice
+    // over: deploys are automatic (CI calls the deploy hook once every job is
+    // green), and the button it named belongs to one hosting company. What
+    // somebody can actually act on is the CI run.
     failBars(new ApiError(404, 'Not Found'))
     show()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Manual Deploy|重新部署/)
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/線上的後端比這個畫面舊/)
+    expect(alert).not.toHaveTextContent(/Manual Deploy/)
   })
 })
 

@@ -92,14 +92,21 @@ describe('還沒設定完的部署', () => {
     expect(await screen.findByText(/完成你的部署設定/)).toBeInTheDocument()
   })
 
-  it('連登入頁上的請求也算數 —— 那是還沒有帳號的人唯一會停在的地方', async () => {
+  it('連登入頁也會被帶去設定頁 —— 那是還沒有帳號的人唯一會停在的地方', async () => {
+    // It used to be that this could only assert 「the route is reachable」:
+    // the login page made no request until somebody pressed a button, so an
+    // unconfigured deployment showed a login form for an account that could
+    // not exist, and nothing pointed at the setup page.
+    //
+    // It now asks whether the deployment has an owner yet (it has to, to know
+    // whether to offer 「建立帳號」), and that request carries the same
+    // setup_required flag as every other one -- so the redirect happens on
+    // the one page a brand-new deployment actually lands on.
     unconfiguredBackend()
 
     show('/login')
-    // The login page itself does not call the API until submit, so this
-    // asserts the route exists and is reachable rather than that it redirects
-    // with no request having been made.
-    expect(await screen.findByRole('button', { name: /登入/ })).toBeInTheDocument()
+
+    expect(await screen.findByText(/完成你的部署設定/)).toBeInTheDocument()
   })
 })
 
