@@ -3,6 +3,7 @@ import { useAuth } from '../context/useAuth'
 import { useWebSocket } from '../lib/useWebSocket'
 import { InstallPrompt } from './InstallPrompt'
 import { PushSelfHeal } from './PushSelfHeal'
+import { NoChannelBanner } from './NoChannelBanner'
 import { WorkerHealthBanner } from './WorkerHealthBanner'
 
 const NAV_ITEMS = [
@@ -72,6 +73,9 @@ export function Layout() {
           repair itself. */}
       <PushSelfHeal />
       <WorkerHealthBanner />
+      {/* 同一種失效的另一半：worker 在跑、策略啟用中、/healthz 全綠——而沒有
+          任何一個啟用中的通知管道，條件成立時還是不會有人知道。 */}
+      <NoChannelBanner />
       <main className="p-4 sm:p-6">
         <Outlet />
       </main>
