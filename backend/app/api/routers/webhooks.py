@@ -14,7 +14,6 @@ from app.config import settings
 from app.db.session import get_db
 from app.models.enums import OrderSide, OrderSource
 from app.models.mixins import utcnow
-from app.models.strategy import Strategy
 from app.models.user import User
 from app.models.webhook import TradingViewWebhookLog
 from app.schemas.webhook import (
@@ -77,33 +76,39 @@ async def _read_bounded_body(request: Request) -> bytes | None:
 
 
 def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User | None:
-    """Attributes an inbound alert to a user. There's no per-user webhook
-    secret in v1 (TV_WEBHOOK_SECRET is one shared value), so this is really
-    about a single-owner deployment -- prefer a strategy that matches the
-    alert's symbol (and name, if given) for forward-compatibility, falling
-    back to the only user in the DB."""
-    query = db.query(Strategy).filter(Strategy.symbol == symbol)
-    if strategy_name:
-        by_name = query.filter(Strategy.name == strategy_name).first()
-        if by_name is not None:
-            return db.get(User, by_name.user_id)
-    by_symbol = query.first()
-    if by_symbol is not None:
-        return db.get(User, by_symbol.user_id)
+    """Whose alert this is. On a single-owner deployment: the owner. Otherwise:
+    nobody, and the alert is rejected with a reason in the log.
 
-    # The fallback is 「the only account there is」, and it is now spelled that
-    # way rather than 「the first account ever created」. Those are the same
-    # thing on a single-owner deployment and nothing changes there.
-    #
-    # They stop being the same the moment a second account exists, and then
-    # order_by(User.id).first() means THE OWNER: anybody holding the shared
-    # TV_WEBHOOK_SECRET could post an alert for a symbol nobody has a strategy
-    # for and have it land in the owner's account, as an order and a
-    # notification. There is one secret for the whole deployment, so the
-    # payload cannot say who it is from. Guessing is not available to an app
-    # that decides whose money moves.
+    WHAT WAS REMOVED, AND WHY IT CANNOT COME BACK IN THIS SHAPE. This used to
+    look for a Strategy whose symbol (and optionally name) matched, and
+    attribute the alert to whoever owned that row:
+
+        db.query(Strategy).filter(Strategy.symbol == symbol) ... .first()
+
+    No user_id condition, no ORDER BY. `Strategy`'s unique key is
+    `(user_id, name)`, so a second account can hold a strategy with the same
+    symbol AND the same name -- and which row `.first()` returns is a fact
+    about the database, not about who the alert is for.
+
+    The attacker never needs TV_WEBHOOK_SECRET: the secret arrives on the
+    OWNER'S OWN TradingView request. And the worst case was deterministic
+    rather than lucky -- TradingView alerts are configured on TradingView, so
+    the owner often has no matching Strategy row at all, which made the
+    intruder's row the only match. Every alert would land in their ledger,
+    with nothing on the owner's side saying so.
+
+    So the guess is gone. It never carried information: with one account the
+    answer is that account either way, and with two the query could only be
+    right by luck. Per-account webhook tokens (a path like
+    /api/webhooks/tradingview/{token}) are the real fix and remove the
+    question entirely; until then, refusing is the only honest answer.
+    """
     users = db.query(User).order_by(User.id).limit(2).all()
-    return users[0] if len(users) == 1 else None
+    if len(users) != 1:
+        # Deliberately including the empty case: an alert for a deployment
+        # with no account at all belongs to nobody.
+        return None
+    return users[0]
 
 
 def _prune_audit_log(db: Session) -> None:
