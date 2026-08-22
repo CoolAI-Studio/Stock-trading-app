@@ -385,7 +385,20 @@ def tick_once(
             service.upsert_quotes(session, fetched)
             quotes.update(fetched)
             if fetched:
-                events.append(Event(type="quote.update", data={"symbols": sorted(fetched)}))
+                # EMPTY, deliberately. This event has no user_id, so
+                # ws/broadcast.py sends it to every open connection -- and
+                # `fetched` is the union of every account's strategy and
+                # position symbols. The old comment said 「a symbol quote is
+                # the same for everyone watching it」, which is true of the
+                # PRICE and false of 「who is watching what」: a holdings list
+                # is one of the most personal things in this app, and it was
+                # going out every five seconds.
+                #
+                # Nothing is lost: the frontend only ever reacted by
+                # invalidating its own quote query (lib/useWebSocket.ts) and
+                # refetching with its own credentials. It never read the
+                # payload.
+                events.append(Event(type="quote.update", data={}))
 
         # Only meaningful when something was actually asked for: an account
         # with no strategies and no positions requests nothing, and that is
