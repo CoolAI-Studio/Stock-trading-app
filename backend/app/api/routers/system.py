@@ -195,11 +195,34 @@ def system_status(
     if notifications["reached_nobody"] or notifications["given_up"]:
         overall = _worse(overall, _WARN)
 
+    # HOW MANY ACCOUNTS THIS DEPLOYMENT HAS, because the owner should not have
+    # to go and find out.
+    #
+    # Registration closes itself once there is an owner, but that only stops
+    # NEW accounts -- it cannot remove one created while the door was still
+    # open, and every 「your data is yours」 guarantee rests on there being
+    # exactly one. Checking used to mean opening the database console and
+    # running a SELECT, which CLAUDE.md is explicit about: never send this
+    # reader somewhere else for a value the app already knows.
+    account_count = db.query(User.id).count()
+    accounts = {
+        "count": account_count,
+        "expected": 1,
+        "status": _OK if account_count <= 1 else _WARN,
+    }
+    if account_count > 1:
+        accounts["detail"] = (
+            f"這個部署有 {account_count} 個帳號，但它是設計給一個人用的。"
+            "多出來的帳號是在「註冊自動關閉」這個修補之前建立的——"
+            "請確認每一個都是你自己的，不是的話要移除。"
+        )
+
     return {
         "overall": overall,
         "worker": worker,
         "market_data": market_data,
         "notifications": notifications,
+        "accounts": accounts,
         "assistant_available": _assistant_available(db, user.id),
     }
 

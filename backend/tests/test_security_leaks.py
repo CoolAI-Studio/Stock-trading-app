@@ -289,3 +289,38 @@ def test_but_the_probe_still_says_that_something_is_stale(client, monkeypatch):
 
     assert body["checks"]["symbols"]["status"] != "ok"
     assert body["checks"]["symbols"].get("stale_count", 0) >= 1
+
+
+# --- the app says how many accounts it has, so nobody has to go and look -------------
+
+
+def test_the_status_page_says_how_many_accounts_this_deployment_has(auth_client):
+    """CLAUDE.md: 「永遠不要叫他去別的地方拿一個值。」
+
+    Registration closes itself once a deployment has an owner, but that only
+    stops NEW accounts -- it cannot remove one created while the door was
+    still open. Checking meant opening the Neon console, finding the SQL
+    editor and running a SELECT, which for this app's audience is the same
+    instruction as 「go and run this in a terminal」.
+
+    The app already knows the number. It should be the one saying it.
+    """
+    body = auth_client.get("/api/system/status").json()
+
+    assert body["accounts"]["count"] == 1
+    assert body["accounts"]["expected"] == 1
+
+
+def test_and_says_so_loudly_when_there_is_more_than_one(auth_client, db_session):
+    """One account is the whole basis of 「your data is yours」. A second one is
+    not a statistic to display quietly -- it is the thing the owner has to act
+    on, and it is invisible from every other screen."""
+    from app.core.security import hash_password
+
+    db_session.add(User(email="unexpected@example.com", hashed_password=hash_password("x" * 12)))
+    db_session.commit()
+
+    body = auth_client.get("/api/system/status").json()
+
+    assert body["accounts"]["count"] == 2
+    assert body["accounts"]["status"] != "ok"
