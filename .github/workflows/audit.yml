@@ -1,0 +1,75 @@
+# 資料外流稽查：每週一次，而且問的是「線上那一份」。
+#
+# 每次 push 的稽查已經在 ci.yml 裡（backend job 的一個關卡），跑的是這個工作目錄
+# 的程式碼。這裡多做的是 CI 做不到的那一半：
+#
+#   1. 沒有人推東西的那幾天也照樣問一次。安全問題不是只在有人改程式的時候出現——
+#      依賴套件會被公告漏洞，而部署設定會被某個人在某個後台改掉。
+#   2. 稽查「真的部署出去的那一份」。工作目錄裡是什麼，跟公開網路上跑著什麼，
+#      是兩件可以不一樣的事，而只有從外面打得到的檢查看得出差別。
+#
+# 這一份是唯讀的：只有 GET，不會在誰的線上資料庫裡寫任何東西。要真的去試註冊
+# 那扇門，得自己加 --live-write-probe（門開著的話它會建立一個帳號，所以預設不做）。
+#
+# 壞掉的時候 GitHub 會寄信給 repo 擁有者，那封信就是這個檔案的全部意義。
+
+name: Audit
+
+on:
+  schedule:
+    # 每週一 03:17 UTC。挑一個不是整點的時間：GitHub 的排程器在整點最壅塞，
+    # 而這個檢查不在乎早幾分鐘晚幾分鐘。
+    - cron: "17 3 * * 1"
+  # 讓擁有者可以隨時自己按一次——沒被驗證過的警報器不算警報器。
+  workflow_dispatch:
+
+concurrency:
+  group: audit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+
+      - name: Install dependencies
+        run: pip install -r requirements.lock
+
+      - name: 稽查這份程式碼
+        # 誘餌、跨帳號掃描、沙箱逃逸樣本、倉庫全文掃描。
+        run: python scripts/audit.py
+
+      - name: 稽查線上那一份（唯讀）
+        # 用 watchdog 已經在用的 HEALTH_URL，不需要多設定任何東西。
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "::notice::HEALTH_URL 沒有設定，略過「線上那一份」的稽查。"
+            echo "要啟用：Settings → Secrets and variables → Actions → Variables，"
+            echo "新增 HEALTH_URL，值是你後端的 .../healthz"
+            exit 0
+          fi
+          python scripts/audit.py --url "$HEALTH_URL"
+
+      - name: 相依套件的已知漏洞
+        # ci.yml 裡這一項是 continue-on-error（不擋住一個跟它無關的修正）。
+        # 這裡是關卡：這個 job 存在的理由就是「沒有人在改程式的時候也要有人看」，
+        # 而一個上週還乾淨的相依套件今天被公告漏洞，正是那種沒有人會發現的事。
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.lock --desc

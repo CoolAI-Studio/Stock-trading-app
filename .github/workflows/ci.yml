@@ -92,6 +92,19 @@ jobs:
       - name: Tests
         run: pytest -q
 
+      - name: 資料外流稽查
+        # A GATE, and a different kind of check from everything above it. The
+        # isolation tests are hand-written lists, and a list cannot miss what
+        # was never put on it: add a router with no dependency tomorrow and
+        # every one of them stays green, because none of them knows it exists.
+        #
+        # This reads the operations off the running app and the tables off the
+        # model registry, plants a canary in every secret and every row the
+        # owner has, and then sweeps the whole surface anonymously and as a
+        # second account. A new public endpoint fails this build until somebody
+        # writes down why it is public.
+        run: python scripts/audit.py
+
   frontend:
     name: frontend (tsc + oxlint + vitest + build)
     runs-on: ubuntu-latest
