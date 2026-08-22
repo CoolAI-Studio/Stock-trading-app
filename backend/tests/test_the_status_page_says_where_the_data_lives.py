@@ -97,4 +97,3 @@ def test_and_says_something_usable_when_it_cannot_tell(auth_client):
     assert body["platform"]["env_where"]
     for company in ("Render", "Heroku", "Railway", "Fly.io", "Koyeb"):
         assert company not in body["platform"]["env_where"]
-
