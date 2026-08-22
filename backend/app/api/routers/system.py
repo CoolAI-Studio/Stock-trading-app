@@ -37,7 +37,7 @@ from app.models.enums import NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationLog
 from app.models.user import User
-from app.services import ai_settings, setup_state, worker_health
+from app.services import ai_settings, hosting, setup_state, worker_health
 from app.services.ai_provider import get_ai_provider
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -217,12 +217,55 @@ def system_status(
             "請確認每一個都是你自己的，不是的話要移除。"
         )
 
+    # WHERE THE DATA LIVES, because the owner has no way to know from any other
+    # screen. That value was typed into a hosting platform's form, possibly
+    # weeks ago, possibly never -- and 「never」 lands on the default file
+    # database, which looks identical to a working Postgres until the redeploy
+    # that empties it.
+    #
+    # NEVER THE CONNECTION STRING. It carries the password and this block is
+    # rendered on a page.
+    url = (settings.DATABASE_URL or "").strip()
+    if url.startswith("sqlite"):
+        kind = "sqlite"
+    elif url.startswith(("postgres://", "postgresql://", "postgresql+")):
+        kind = "postgres"
+    else:
+        kind = "other"
+    # Only a platform's disk is the ephemeral one. The same file on somebody's
+    # own machine is exactly where they put it, and calling that temporary
+    # would be telling them to fix something that is not broken.
+    host = hosting.detect()
+    on_a_platform = host is not hosting.GENERIC
+    ephemeral = kind == "sqlite" and on_a_platform
+    database = {
+        "kind": kind,
+        "ephemeral": ephemeral,
+        "status": _WARN if ephemeral else _OK,
+        "detail": (
+            "資料存在容器裡的一個檔案，而這個平台每次重新部署都會換一個新的容器"
+            "——帳號、策略、通知設定會一起不見，而且不會有任何提示。"
+            "去開一個 Postgres（免費的例如 Neon、Supabase），把連線字串放進 DATABASE_URL。"
+            if ephemeral
+            else (
+                "資料存在本機的一個檔案裡。在自己的機器上這沒有問題，"
+                "但那是一個檔案——記得跟其他重要檔案一起備份，這個系統不會替你備份它。"
+                if kind == "sqlite"
+                else "資料存在 Postgres 裡。"
+            )
+        ),
+    }
+
     return {
         "overall": overall,
         "worker": worker,
         "market_data": market_data,
         "notifications": notifications,
         "accounts": accounts,
+        "database": database,
+        # 「那一格要去哪裡填」，用這個部署實際所在平台的說法。設定引導照這個講；
+        # 對 Fly.io 的使用者說「Render 後台」比含糊更糟——他會真的去找那一頁。
+        "platform": {"name": host.name, "env_where": host.env_where},
         "assistant_available": _assistant_available(db, user.id),
     }
 
