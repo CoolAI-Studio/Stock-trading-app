@@ -16,10 +16,12 @@ nothing here to be forbidden from, and a route that exists but refuses invites
 somebody to keep knocking.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from app.api.deps import optional_current_user
 from app.config import settings
+from app.models.user import User
 from app.services import setup_state
 
 router = APIRouter(prefix="/setup", tags=["setup"])
@@ -62,18 +64,36 @@ class GenerateRequest(BaseModel):
     kind: str
 
 
-def _guard() -> list:
-    """The list, or 404 once there is nothing left to configure."""
-    missing = setup_state.missing_settings(settings)
-    if not missing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="這個部署已經設定完成。")
-    return missing
+def _guard(user: User | None = None) -> list:
+    """The list, or 404 once a stranger has no business being here.
+
+    GATED ON THE BLOCKING LIST, not on everything missing. These endpoints have
+    no authentication -- deliberately, because during setup nobody has an
+    account yet -- so the window in which they answer has to be exactly the
+    window in which they are the only way in.
+
+    Gating on the full list kept them open on any deployment with an optional
+    value unset, which is most of them: the push keys are blank by default, and
+    so are CORS_ORIGINS and PUBLIC_BASE_URL. That left an unauthenticated
+    endpoint telling any passer-by which settings this deployment never
+    configured.
+
+    A LOGGED-IN OWNER still gets the list afterwards, and that is not a
+    loophole -- it is the other half of the fix. Somebody who skipped push
+    notifications during setup has to be able to turn them on later, and this
+    generator is the only thing that produces a pair the app will boot on.
+    """
+    if setup_state.blocking_settings(settings) or user is not None:
+        missing = setup_state.missing_settings(settings)
+        if missing:
+            return missing
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="這個部署已經設定完成。")
 
 
 @router.get("/status", response_model=SetupStatus)
-def setup_status() -> SetupStatus:
+def setup_status(user: User | None = Depends(optional_current_user)) -> SetupStatus:
     return SetupStatus(
-        missing=[MissingSettingRead(**vars(item)) for item in _guard()],
+        missing=[MissingSettingRead(**vars(item)) for item in _guard(user)],
         where=(
             "Render 後台 → 你的服務 → 左邊選單 Environment → 找到同名的欄位貼上去 → "
             "存檔之後 Render 會自動重新部署，大約一兩分鐘。"
@@ -82,13 +102,16 @@ def setup_status() -> SetupStatus:
 
 
 @router.post("/generate")
-def generate(payload: GenerateRequest) -> dict[str, str]:
+def generate(
+    payload: GenerateRequest,
+    user: User | None = Depends(optional_current_user),
+) -> dict[str, str]:
     """A fresh value of the right shape, for the deployer to copy.
 
     Produced with the same library the boot check validates against, so a
     generated value cannot be one this app then refuses to start on.
     """
-    _guard()
+    _guard(user)
     try:
         return setup_state.generate(payload.kind)
     except ValueError as exc:

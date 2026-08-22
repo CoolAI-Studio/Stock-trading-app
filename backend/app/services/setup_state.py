@@ -155,6 +155,38 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
             )
 
     ok, half = _vapid_ok(s)
+    if ok and not (s.VAPID_PUBLIC_KEY or "").strip():
+        # LISTED EVEN THOUGH IT IS NOT A FAULT. _vapid_ok calls a pair of empty
+        # boxes a valid deployment, and it is right -- web push is one channel
+        # of four, and somebody using only Telegram must not be told their
+        # setup is incomplete.
+        #
+        # But 「not incomplete」 was implemented as 「not shown」, and so the row
+        # never rendered and the button that generates the pair never appeared.
+        # README tells the reader to leave both blank and press a button on the
+        # next page. There was no button. This app is for somebody who wants
+        # alerts on their phone; that button is the feature.
+        #
+        # Non-blocking, and the wording says so, so nothing calls the
+        # deployment broken over it.
+        missing.append(
+            MissingSetting(
+                name="VAPID_PUBLIC_KEY",
+                why=(
+                    "手機推播（瀏覽器通知）用的一對金鑰。現在是空的，所以手機收不到"
+                    "推播 —— 其他通知管道（Email、Telegram）不受影響，"
+                    "所以不用手機推播的話留白也可以。"
+                ),
+                how=(
+                    "按下面的「產生」會一次給你完整的一對，兩個值都要貼回 Render："
+                    "VAPID_PUBLIC_KEY 和 VAPID_PRIVATE_KEY。"
+                    "另外 VAPID_SUBJECT 填你自己的信箱，格式是 mailto:you@example.com。"
+                ),
+                generator="vapid",
+                blocking=False,
+                step=3,
+            )
+        )
     if not ok:
         missing.append(
             MissingSetting(

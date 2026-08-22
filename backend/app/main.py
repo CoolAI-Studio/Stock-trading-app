@@ -106,13 +106,28 @@ async def _lock_until_configured(request, call_next):
         # database session through Depends, and a missing DATABASE_URL is one
         # of the things setup mode exists to report. A probe that 500s on the
         # way to saying 「not configured」 says nothing.
+        # 200, NOT 503, and this is the whole reason a first deploy works.
+        #
+        # render.yaml points healthCheckPath here. A first deploy has no
+        # previous version to fall back to, so a probe that never passes is a
+        # deploy Render marks as FAILED -- and the setup page that exists to
+        # explain what is missing goes down with it, at exactly the moment it
+        # is the only useful thing in the app. Measured on a blank deployment
+        # by scripts/deploy_smoke.py; this was one of three places a new user
+        # stopped.
+        #
+        # 503 was chosen so the external watchdog would notice, and that
+        # concern is real -- 「警告不能停擺」 needs an outside observer. It is
+        # answered by the BODY instead: `status: "setup"` is neither "ok" nor
+        # "fail", so the watchdog can say 「still being set up」 without a
+        # hosting platform reading it as a dead container.
         return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status.HTTP_200_OK,
             content={
-                "status": "fail",
+                "status": "setup",
                 "checks": {
                     "setup": {
-                        "status": "fail",
+                        "status": "setup",
                         "detail": "尚未完成設定，API 已鎖住。請開啟前端頁面照指示填完設定。",
                     }
                 },

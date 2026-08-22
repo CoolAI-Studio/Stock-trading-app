@@ -125,13 +125,24 @@ def test_neither_of_them_stops_the_app_from_starting(monkeypatch):
 
 
 def test_a_configured_pair_is_not_nagged_about(monkeypatch):
+    """About THIS pair specifically, not about the advisory list being empty.
+
+    The push keys now appear as an advisory whenever they are blank -- which is
+    the documented default -- because 「not a fault」 had been implemented as
+    「not shown」 and the button that generates them therefore never appeared.
+    See test_first_deploy_comes_up.py. So the assertion is about the two
+    settings this test is named for.
+    """
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
     settings = _settings(
         CORS_ORIGINS="https://my-app.vercel.app",
         PUBLIC_BASE_URL="https://my-app.onrender.com",
     )
 
-    assert _advisory(settings) == {}
+    advisory = _advisory(settings)
+
+    assert "CORS_ORIGINS" not in advisory
+    assert "PUBLIC_BASE_URL" not in advisory
 
 
 def test_the_blocking_ones_are_still_blocking():

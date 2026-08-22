@@ -327,13 +327,27 @@ def test_the_health_probe_still_answers_and_says_it_is_unconfigured(client, monk
     """The external watchdog is the only thing watching an unconfigured
     deployment. Answered without touching the database, because a missing
     DATABASE_URL is one of the things being reported -- a probe that 500s on
-    the way to saying 「not configured」 says nothing."""
+    the way to saying 「not configured」 says nothing.
+
+    THE STATUS CODE CHANGED, from 503 to 200, and the reasoning is worth
+    keeping. 503 was chosen so the watchdog would notice -- but render.yaml
+    points its healthCheckPath at this same URL, and a first deploy has no
+    previous version to fall back to, so a probe that never passes is a deploy
+    Render marks as FAILED. The setup page then goes down with it, at exactly
+    the moment it is the only useful thing in the app. Measured on a blank
+    deployment by scripts/deploy_smoke.py.
+
+    The watchdog's need is met by the BODY instead: 「setup」 is neither ok nor
+    fail, so it can still tell 「still being set up」 from 「running fine」
+    without a hosting platform reading it as a dead container.
+    """
     _setup_mode(monkeypatch)
 
     resp = client.get("/healthz")
 
-    assert resp.status_code == 503
-    assert resp.json()["checks"]["setup"]["status"] == "fail"
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "setup"
+    assert resp.json()["checks"]["setup"]["status"] == "setup"
 
 
 def test_nothing_is_locked_once_the_deployment_is_configured(auth_client):

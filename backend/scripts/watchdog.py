@@ -82,6 +82,19 @@ def read_verdict(status_code: int | None, body: str | None) -> list[str]:
             "不是這個 app 的健康檢查格式。這個網址現在指向的可能不是你的後端。"
         ]
 
+    # A deployment that is UP but never finished setup sends no alerts at all,
+    # and that is exactly the silence this watchdog exists to break. It used to
+    # be caught for free, because /healthz answered 503 while setup was
+    # incomplete -- but render.yaml probes the same URL, and a first deploy
+    # whose probe never passes is a deploy Render marks as failed. So the probe
+    # answers 200 now and says 「setup」 in the body, and the verdict has to
+    # read the body rather than the code.
+    if isinstance(payload, dict) and payload.get("status") == "setup":
+        return [
+            "這個部署還沒完成設定，所以它不會發出任何提醒。"
+            "打開前端頁面，照設定頁上的指示把缺少的值填完。"
+        ]
+
     checks = payload.get("checks") if isinstance(payload, dict) else None
     if not isinstance(checks, dict):
         return [

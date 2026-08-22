@@ -343,3 +343,39 @@ def test_it_still_says_clearly_whether_the_backend_is_up(capsys, monkeypatch):
     printed = capsys.readouterr().out
     assert code == 1
     assert "提醒" in printed or "問題" in printed
+
+
+# --- a deployment stuck in setup mode sends no alerts at all --------------------------
+
+
+def test_an_unconfigured_deployment_is_reported_as_a_problem():
+    """/healthz used to answer 503 while setup was incomplete, and the watchdog
+    caught that for free. It now answers 200 -- deliberately, because
+    render.yaml probes the same URL and a first deploy that never passes is a
+    deploy Render marks as failed.
+
+    That change removed the only outside observer of a deployment that is up
+    but not configured, and a deployment that is not configured sends NO
+    alerts. Silence from an alerting product is the failure it exists to
+    prevent, so the status has to be read, not the code.
+    """
+    import json
+
+    from scripts.watchdog import run_check
+
+    body = json.dumps({"status": "setup", "checks": {"setup": {"status": "setup"}}})
+
+    problems = run_check(lambda: (200, body))
+
+    assert problems, "a deployment stuck in setup mode was reported as healthy"
+    assert any("設定" in problem for problem in problems)
+
+
+def test_a_configured_and_healthy_deployment_is_still_quiet():
+    import json
+
+    from scripts.watchdog import run_check
+
+    body = json.dumps({"status": "ok", "checks": {"worker": {"status": "ok"}}})
+
+    assert run_check(lambda: (200, body)) == []

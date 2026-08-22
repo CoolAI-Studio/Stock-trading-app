@@ -125,3 +125,58 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Everything above tests the CODE. This tests the thing a new person actually
+  # does: press Deploy, leave the optional boxes blank, open the URL.
+  #
+  # Nobody had ever walked that path -- all the confidence in it came from
+  # reading render.yaml, which is not evidence. The first run of this job found
+  # three places a new user stops, two of them the app's own fault.
+  #
+  # It runs the REAL image, because the one failure that matters most cannot be
+  # reproduced any other way: the CMD is `alembic upgrade head && uvicorn`, so a
+  # database that is unreachable means uvicorn never starts and no port is ever
+  # bound -- and the setup page that exists to explain a missing DATABASE_URL is
+  # then unreachable for exactly the reason it exists.
+  first-deploy:
+    name: first deploy (blank config, real container)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image that actually ships
+        run: docker build -t trading-app-backend:ci ./backend
+
+      - name: Start it the way a brand-new deploy starts it
+        # Every optional value blank, exactly what the README tells somebody to
+        # submit. No JWT_SECRET, no encryption key, no push keys.
+        run: |
+          docker run -d --name first-deploy -p 8000:8000 \
+            -e PORT=8000 \
+            -e DATABASE_URL=sqlite:////tmp/first-deploy.db \
+            -e JWT_SECRET= \
+            -e SECRET_ENCRYPTION_KEY= \
+            -e TV_WEBHOOK_SECRET= \
+            -e VAPID_PUBLIC_KEY= \
+            -e VAPID_PRIVATE_KEY= \
+            trading-app-backend:ci
+
+      - name: Wait for it to answer
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then
+              echo "up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::容器 30 秒內沒有回應任何請求。新使用者拿到的會是一個死掉的網址。"
+          docker logs first-deploy
+          exit 1
+
+      - name: Can a new user get past the first screen?
+        run: python backend/scripts/deploy_smoke.py http://localhost:8000
+
+      - name: Container log (on failure)
+        if: failure()
+        run: docker logs first-deploy
+
