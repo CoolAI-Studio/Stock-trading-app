@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
+from app.api.routers.market import _refuse_unsupported
 from app.db.session import get_db
 from app.models.backtest import BacktestRun
 from app.models.enums import DataSource
@@ -48,7 +49,10 @@ def _resolve_strategy(db: Session, user: User, strategy_id: int) -> Strategy:
 
 
 def _resolve_timeframe(
-    requested: Timeframe | None, entry_point: str, declared: Timeframe
+    requested: Timeframe | None,
+    entry_point: str,
+    declared: Timeframe,
+    data_source: DataSource,
 ) -> Timeframe:
     """Which candle size the replay runs at.
 
@@ -71,8 +75,16 @@ def _resolve_timeframe(
                     "要換週期請改策略原始碼。"
                 ),
             )
+        _refuse_unsupported(data_source, declared)
         return declared
-    return requested or DEFAULT_TIMEFRAME
+    chosen = requested or DEFAULT_TIMEFRAME
+    # 同一道閘門，跟 market.py 的兩個端點和策略的建立／修改用的是同一支函式。
+    # 沒有它的時候，Yahoo 對一個不支援的 interval 回的是「空的 frame」而不是
+    # 錯誤——所以請求不會壞，它會成功地測完零根 K 棒，然後回一份讀起來像
+    # 「這個策略不會進場」的報告。看起來完成、實際上什麼都沒測，是這裡最糟的
+    # 輸出。
+    _refuse_unsupported(data_source, chosen)
+    return chosen
 
 
 def _resolve_exit_thresholds(
@@ -196,7 +208,9 @@ def create_backtest(
 
     symbol = payload.symbol or (strategy.symbol if strategy else loaded.symbol)
     data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
-    timeframe = _resolve_timeframe(payload.timeframe, loaded.entry_point, loaded.timeframe)
+    timeframe = _resolve_timeframe(
+        payload.timeframe, loaded.entry_point, loaded.timeframe, data_source
+    )
     stop_loss_pct, take_profit_pct = _resolve_exit_thresholds(db, user, payload, strategy)
     _guard_range(payload, timeframe)
 
