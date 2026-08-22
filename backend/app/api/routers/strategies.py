@@ -28,6 +28,7 @@ from app.schemas.strategy import (
     TemplateRead,
 )
 from app.services import (
+    ai_settings,
     risk_resolver,
     strategy_performance,
     strategy_templates,
@@ -207,7 +208,9 @@ def validate_strategy(
 
 @router.post("/generate", response_model=StrategyGenerateResult)
 def generate_strategy(
-    payload: StrategyGenerateRequest, user: User = Depends(get_current_active_user)
+    payload: StrategyGenerateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
 ) -> StrategyGenerateResult:
     """Turns a plain-language description into strategy source.
 
@@ -216,7 +219,7 @@ def generate_strategy(
     rejects a good deal of what a model writes by default (`import pandas`
     above all), and a rejection the owner cannot act on is worse than nothing.
     """
-    provider = get_ai_provider()
+    provider = get_ai_provider(ai_settings.resolve(db, user.id))
     system_prompt = build_system_prompt()
     request_prompt = build_request_prompt(
         payload.description, payload.symbol, payload.question, payload.answer

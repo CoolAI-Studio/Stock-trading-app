@@ -12,6 +12,7 @@ from app.schemas.broker import (
     BrokerCredentialRead,
     BrokerCredentialUpdate,
 )
+from app.services import ai_settings
 from app.services.ai_provider import get_ai_provider
 
 router = APIRouter(prefix="/broker-credentials", tags=["broker-credentials"])
@@ -106,9 +107,11 @@ def delete_credential(
 
 @router.post("/ai-assist", response_model=AiAssistResult)
 def ai_assist(
-    payload: AiAssistRequest, user: User = Depends(get_current_active_user)
+    payload: AiAssistRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
 ) -> AiAssistResult:
     """Setup guidance only -- see app/services/ai_provider/base.py's system
     prompt. Never touches BrokerCredential rows or order placement."""
-    result = get_ai_provider().ask(payload.message)
+    result = get_ai_provider(ai_settings.resolve(db, user.id)).ask(payload.message)
     return AiAssistResult(ok=result.ok, reply=result.reply, error=result.error)

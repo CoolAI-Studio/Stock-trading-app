@@ -1,4 +1,3 @@
-from app.config import settings
 from app.services.ai_provider.anthropic_provider import AnthropicProvider
 from app.services.ai_provider.base import AIProvider, AIResult, AISettings
 from app.services.ai_provider.openai_compatible import OpenAICompatibleProvider
@@ -11,21 +10,28 @@ _CLASSES = {
 }
 
 
-def get_ai_provider(resolved=None) -> AIProvider:
-    """The client for whichever provider this deployment (or this user) uses.
+def get_ai_provider(resolved) -> AIProvider:
+    """The client for whichever provider THIS USER is entitled to use.
 
-    `resolved` is a services.ai_settings.ResolvedAI. Without it the provider
-    reads the environment, which is what every caller did before the settings
-    moved into the database and what keeps the existing tests meaningful.
+    `resolved` is a services.ai_settings.ResolvedAI and it is REQUIRED. It used
+    to default to None, and None meant 「read the environment」 -- that is, the
+    deployment owner's own key.
 
-    A NEW INSTANCE each time rather than a shared singleton: the config is now
-    per user, and a cached client would answer the second user with the first
-    one's key. The clients hold no connection state -- both build their request
-    per call -- so this costs nothing.
+    That default was the whole of a real bug. Two routes called this with no
+    arguments and no `db` at all (strategies.py's generator and
+    broker_credentials.py's assistant), so `user.id` never took part in
+    choosing a key, and any account could spend the owner's AI credit. The
+    owner gate in services/ai_settings.py::_is_deployment_owner was correct
+    and simply never consulted.
+
+    Nothing about that failure was visible: it did not error, it worked --
+    with the wrong person's money. So the fallback is gone rather than fixed
+    in place. Forgetting to resolve is now a TypeError at the call site.
+
+    A NEW INSTANCE each time rather than a shared singleton: the config is per
+    user, and a cached client would answer the second user with the first
+    one's key. The clients hold no connection state, so this costs nothing.
     """
-    if resolved is None:
-        return _CLASSES.get(settings.AI_PROVIDER, OpenAICompatibleProvider)()
-
     cls = _CLASSES.get(resolved.provider, OpenAICompatibleProvider)
     return cls(
         AISettings(

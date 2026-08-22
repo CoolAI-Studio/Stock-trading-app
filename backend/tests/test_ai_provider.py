@@ -173,11 +173,33 @@ def test_unexpected_response_shape_is_reported_not_raised(ai_configured):
     assert result.ok is False
 
 
-def test_get_ai_provider_defaults_to_openai_compatible(monkeypatch):
-    monkeypatch.setattr("app.config.settings.AI_PROVIDER", "openai_compatible")
-    assert isinstance(get_ai_provider(), OpenAICompatibleProvider)
+# 這兩條原本呼叫 get_ai_provider() 不帶參數。那個無參數的呼叫方式已經拿掉了：
+# 它的意思是「讀環境變數」，也就是部署者自己的金鑰，而兩支路由就是靠它安靜地花
+# 了別人的錢（tests/test_ai_credit_belongs_to_the_owner.py）。
+#
+# 它們原本要守的東西還在，只是改成用 resolved 表達：不認得的 provider 名稱要有
+# 一個 fallback，而不是丟例外。
 
 
-def test_get_ai_provider_unknown_falls_back_to_default(monkeypatch):
-    monkeypatch.setattr("app.config.settings.AI_PROVIDER", "something-unrecognized")
-    assert isinstance(get_ai_provider(), OpenAICompatibleProvider)
+def _resolved(provider: str):
+    from app.services.ai_settings import ResolvedAI
+
+    return ResolvedAI(
+        provider=provider,
+        base_url="https://example.invalid/v1",
+        api_key="k",
+        model="m",
+        source="env",
+    )
+
+
+def test_get_ai_provider_defaults_to_openai_compatible():
+    assert isinstance(get_ai_provider(_resolved("openai_compatible")), OpenAICompatibleProvider)
+
+
+def test_get_ai_provider_unknown_falls_back_to_default():
+    """一個沒見過的名字不該讓整支端點 500——回一個講得出話的 client 才有機會把
+    「這個 provider 不認得」變成一句訊息。"""
+    assert isinstance(
+        get_ai_provider(_resolved("something-unrecognized")), OpenAICompatibleProvider
+    )
