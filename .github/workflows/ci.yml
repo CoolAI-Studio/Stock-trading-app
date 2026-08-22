@@ -197,7 +197,7 @@ jobs:
         # the process before any port was bound: a dead URL, and the setup page
         # that exists to explain exactly this went down with it.
         run: |
-          docker run -d --name bad-database -p 8001:8000             -e PORT=8000             -e DATABASE_URL=postgresql://someone:hunter2secret@127.0.0.1:1/nope             -e JWT_SECRET=ci-not-a-placeholder-0123456789             -e TV_WEBHOOK_SECRET=ci-not-a-placeholder-9876543210             -e SECRET_ENCRYPTION_KEY=             trading-app-backend:ci
+          docker run -d --name bad-database -p 8001:8000             -e PORT=8000             -e DATABASE_URL=postgresql://user:password-CI-CANARY@127.0.0.1:1/nope             -e JWT_SECRET=ci-not-a-placeholder-0123456789             -e TV_WEBHOOK_SECRET=ci-not-a-placeholder-9876543210             -e SECRET_ENCRYPTION_KEY=             trading-app-backend:ci
           for i in $(seq 1 40); do
             if curl -fsS http://localhost:8001/api/setup/status >/dev/null 2>&1; then
               echo "setup page answered after ${i}s"
@@ -218,7 +218,11 @@ jobs:
           echo "healthz -> $code $(cat /tmp/health.json)"
           [ "$code" = "200" ] || { echo "::error::/healthz 回 $code，第一次部署會被判定失敗。"; exit 1; }
           # 而且那一頁不准把密碼印出來：驅動的錯誤訊息會帶著整串連線字串。
-          if printf '%s' "$body" | grep -q hunter2secret; then
+          # 這個假密碼刻意寫成 user:password 開頭——`scripts/audit.py` 的倉庫掃描
+          # 會認出它是文件／測試用的佔位值而不報，同時 -CI-CANARY 那一段仍然夠
+          # 獨特，grep 得到。（第一版用了一個像真的密碼，稽查員當場就把 CI 擋下來
+          # 了，那是它應該做的事。）
+          if printf '%s' "$body" | grep -q password-CI-CANARY; then
             echo "::error::設定頁把連線字串裡的密碼印出來了。"
             exit 1
           fi
