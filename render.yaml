@@ -1,6 +1,16 @@
 services:
   - type: web
     name: trading-app-backend
+    # OFF, and CI deploys instead. Render's own auto-deploy fires on PUSH, so
+    # it would ship a commit whose tests have not finished -- and this
+    # project's rule is that CI green is the only green. The deploy job at the
+    # end of .github/workflows/ci.yml calls a Deploy Hook once every job
+    # passes, which is the same automation with the gate in the right place.
+    #
+    # This also ends the manual step: 「按一次 Manual Deploy」 was in the
+    # release path for weeks, and a manual step in a release path is a step
+    # that gets skipped.
+    autoDeploy: false
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend

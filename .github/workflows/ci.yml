@@ -180,3 +180,45 @@ jobs:
         if: failure()
         run: docker logs first-deploy
 
+  # Nobody presses Deploy. That was the whole problem: CLAUDE.md carried
+  # 「Render 自動部署 webhook 沒觸發，目前手動」 as a status line for weeks, and
+  # a manual step in the release path is a step that gets skipped -- the
+  # deployed backend spent this entire session older than the code, twice.
+  #
+  # NOT by fixing Render's own auto-deploy, deliberately. That fires on PUSH,
+  # so it would ship a commit whose tests have not run yet, and this project's
+  # rule is that CI green is the only green. This job needs all three jobs
+  # above, so a deploy can only ever happen to a commit that passed everything
+  # -- including the blank-config container check.
+  #
+  # ONE-TIME SETUP, and it is the only part a person has to do:
+  #   Render dashboard -> your service -> Settings -> Deploy Hook -> copy URL
+  #   GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret
+  #     name:  RENDER_DEPLOY_HOOK_URL
+  #     value: the URL you copied
+  # Without the secret this job skips with a notice instead of failing, so a
+  # fork or a clone is never broken by a secret it does not have.
+  deploy:
+    name: deploy (only after everything is green)
+    needs: [backend, frontend, first-deploy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ask Render to deploy this commit
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK_URL 這個 secret 沒有設定，略過自動部署。"
+            echo "設定一次就好：Render → 你的服務 → Settings → Deploy Hook → 複製網址，"
+            echo "然後 GitHub → Settings → Secrets and variables → Actions → New repository secret，"
+            echo "名稱 RENDER_DEPLOY_HOOK_URL，值貼上那個網址。之後每次 CI 綠燈都會自動部署。"
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/deploy.json -w '%{http_code}' -X POST "$HOOK")
+          echo "Render 回應 HTTP $code"
+          cat /tmp/deploy.json || true
+          case "$code" in
+            2*) echo "::notice::已要求 Render 部署 ${GITHUB_SHA:0:7}。" ;;
+            *)  echo "::error::Render 拒絕了部署請求（HTTP $code）。線上跑的還是舊版。"; exit 1 ;;
+          esac
