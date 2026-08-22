@@ -1,0 +1,261 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { TemplateAlertForm } from '../components/TemplateAlertForm'
+import { ApiError, api } from '../lib/api'
+import { markOnboardingSeen } from '../lib/onboarding'
+import { isPushSupported, subscribeToPush } from '../lib/push'
+import type { NotificationChannel, Strategy } from '../lib/types'
+
+type Step = 'choose' | 'templates' | 'ai' | 'channel' | 'done'
+
+/**
+ * 引導流程：從「帳號建好了」到「第一則提醒送到手機」。規格在 ONBOARDING.md。
+ *
+ * WHAT IT IS FOR. 建完帳號之後看到的本來是一個空的儀表板，畫面上沒有任何一句話
+ * 說下一步該做什麼——而「下一步」在這之前需要打開一個程式碼編輯器。
+ *
+ * TWO RULES FROM THE SPEC ARE LOAD-BEARING HERE, and both are easy to undo by
+ * accident later:
+ *
+ *   「我自己選」排在最上面。引導的預設路徑不可以是需要 AI 金鑰的那一條，
+ *   否則設定就依賴一個本身也要設定的東西。任何一版只要拿掉 AI 之後引導走不完，
+ *   就是做錯了——WelcomePage.test.tsx 有一條專門守這件事。
+ *
+ *   通知管道那一步可以跳過，但跳過的話畫面上要明說「現在不會有任何提醒送出」。
+ *   沒有出口的提醒系統跟沒有在跑的提醒系統，後果一模一樣。
+ */
+export function WelcomePage() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [step, setStep] = useState<Step>('choose')
+  const [skippedChannel, setSkippedChannel] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
+
+  const channelsQuery = useQuery({
+    queryKey: ['notification-channels'],
+    queryFn: () => api.get<NotificationChannel[]>('/api/notifications/channels'),
+    retry: false,
+  })
+  const strategiesQuery = useQuery({
+    queryKey: ['strategies'],
+    queryFn: () => api.get<Strategy[]>('/api/strategies'),
+    retry: false,
+  })
+
+  const enabled = (channelsQuery.data ?? []).filter((channel) => channel.is_enabled)
+  const alerts = strategiesQuery.data ?? []
+
+  const enablePush = useMutation({
+    mutationFn: async () => {
+      const { public_key } = await api.get<{ public_key: string }>(
+        '/api/notifications/push/vapid-public-key',
+      )
+      const config = await subscribeToPush(public_key)
+      return api.post('/api/notifications/channels', {
+        channel_type: 'web_push',
+        label: '這台裝置',
+        config,
+      })
+    },
+    onSuccess: () => {
+      setPushError(null)
+      queryClient.invalidateQueries({ queryKey: ['notification-channels'] })
+    },
+    onError: (err) => {
+      // 說出發生什麼、以及他可以做什麼。「失敗」兩個字不是訊息。
+      setPushError(
+        err instanceof ApiError
+          ? err.message
+          : '這個瀏覽器沒有讓推播開起來。常見原因：拒絕過通知權限（要去瀏覽器的網站設定改回來）、'
+            + '無痕視窗、或 iPhone 上還沒有把這個網頁「加入主畫面」。也可以改用 Telegram 或 Email。',
+      )
+    },
+  })
+
+  return (
+    <div className="mx-auto max-w-xl space-y-6 p-4">
+      {step === 'choose' && (
+        <div className="space-y-4">
+          <div>
+            <h1 className="text-lg font-semibold text-slate-100">先設一則提醒吧</h1>
+            <p className="mt-1 text-sm text-slate-400">
+              這個系統的工作是盯著行情，事情發生的時候通知你。要不要買賣還是你自己決定——
+              它不會幫你下單。
+            </p>
+          </div>
+
+          {/* 順序就是規格：不需要金鑰的那一條排最上面，而且是實心按鈕。 */}
+          <button
+            onClick={() => setStep('templates')}
+            className="w-full rounded bg-emerald-600 p-4 text-left text-white hover:bg-emerald-500"
+          >
+            <span className="block font-medium">我自己選一個現成的</span>
+            <span className="mt-1 block text-sm text-emerald-100">
+              填表格就好，不用寫程式，也不用任何金鑰。多數人選這個。
+            </span>
+          </button>
+
+          <button
+            onClick={() => setStep('ai')}
+            className="w-full rounded border border-slate-700 bg-slate-900 p-4 text-left hover:border-slate-500"
+          >
+            <span className="block font-medium text-slate-100">讓 AI 幫我</span>
+            <span className="mt-1 block text-sm text-slate-400">
+              用一句話說你要什麼。需要一把你自己的 AI 金鑰，每次發問的費用算在你自己帳上。
+            </span>
+          </button>
+
+          <button
+            onClick={() => setStep('channel')}
+            className="w-full rounded border border-slate-800 p-3 text-left text-sm text-slate-400 hover:border-slate-600"
+          >
+            先跳過，直接去設定通知
+          </button>
+          <button
+            onClick={() => {
+              // 記下來，否則 OnboardingGate 會把他抓回來——帳號還是空的。
+              markOnboardingSeen()
+              navigate('/', { replace: true })
+            }}
+            className="w-full p-2 text-center text-xs text-slate-500 underline hover:text-slate-300"
+          >
+            我知道自己在做什麼，直接進儀表板
+          </button>
+        </div>
+      )}
+
+      {step === 'templates' && (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-slate-100">要盯什麼？</h1>
+          <TemplateAlertForm onCreated={() => setStep('channel')} />
+          <button
+            onClick={() => setStep('choose')}
+            className="text-xs text-slate-500 underline hover:text-slate-300"
+          >
+            回上一步
+          </button>
+        </div>
+      )}
+
+      {step === 'ai' && (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-slate-100">讓 AI 幫你設定</h1>
+          <p className="text-sm text-slate-400">
+            AI 需要一把你自己的金鑰，設定在「AI 設定」那一頁。金鑰是你的、存在你自己的
+            資料庫裡而且是加密的，隨時可以刪掉——刪掉之後其他功能一切照常。
+          </p>
+          <Link
+            to="/ai-settings"
+            className="block rounded bg-emerald-600 px-3 py-2 text-center font-medium text-white hover:bg-emerald-500"
+          >
+            去設定 AI 金鑰
+          </Link>
+          <button
+            onClick={() => setStep('templates')}
+            className="w-full rounded border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:border-slate-500"
+          >
+            算了，我自己選一個現成的
+          </button>
+        </div>
+      )}
+
+      {step === 'channel' && (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-slate-100">這些提醒要送到哪裡？</h1>
+
+          {enabled.length > 0 ? (
+            <div className="rounded border border-emerald-800 bg-emerald-950/40 p-4 text-sm text-emerald-200">
+              <p className="font-medium">已經有地方可以送了。</p>
+              <ul className="mt-2 list-inside list-disc">
+                {enabled.map((channel) => (
+                  <li key={channel.id}>{channel.label}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-400">
+                沒有這一步，前面設的提醒不會有人知道。選一個就夠了。
+              </p>
+
+              {/* 推播排第一，因為它是唯一不用去別的地方拿一個值的：Telegram 要去
+                  BotFather 要 token，Email 要一整組 SMTP 設定。這一個是按一下就好。 */}
+              <button
+                onClick={() => enablePush.mutate()}
+                disabled={enablePush.isPending || !isPushSupported()}
+                className="w-full rounded bg-emerald-600 px-3 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {enablePush.isPending ? '開啟中…' : '開啟這台裝置的推播（最快，按一下就好）'}
+              </button>
+              {!isPushSupported() && (
+                <p className="text-xs text-slate-500">
+                  這個瀏覽器不支援推播。用下面的 Telegram 或 Email。
+                </p>
+              )}
+              {pushError && <p className="text-sm text-red-400">{pushError}</p>}
+
+              <Link
+                to="/notifications"
+                className="block rounded border border-slate-700 px-3 py-2 text-center text-sm text-slate-200 hover:border-slate-500"
+              >
+                我想用 Telegram 或 Email
+              </Link>
+
+              <button
+                onClick={() => {
+                  setSkippedChannel(true)
+                  setStep('done')
+                }}
+                className="w-full p-2 text-center text-xs text-slate-500 underline hover:text-slate-300"
+              >
+                這一步先跳過
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={() => setStep('done')}
+            className="w-full rounded border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-slate-500"
+          >
+            完成
+          </button>
+        </div>
+      )}
+
+      {step === 'done' && (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-slate-100">設好了</h1>
+          <p className="text-sm text-slate-300">
+            你現在有 <strong>{alerts.length}</strong> 則提醒
+            {enabled.length > 0 ? (
+              <>
+                ，通知會送到 <strong>{enabled.map((c) => c.label).join('、')}</strong>。
+              </>
+            ) : (
+              '。'
+            )}
+          </p>
+
+          {(skippedChannel || enabled.length === 0) && (
+            <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+              你還沒有設定任何通知管道，所以<strong>現在不會有任何提醒送出</strong>
+              ——策略照樣在跑，只是沒有人會知道結果。每一頁上方都會留著這句話，直到你設好為止。
+            </p>
+          )}
+
+          <p className="text-xs text-slate-500">這些之後都可以改，刪掉重設也隨時可以。</p>
+          <button
+            onClick={() => {
+              markOnboardingSeen()
+              navigate('/', { replace: true })
+            }}
+            className="w-full rounded bg-emerald-600 px-3 py-2 font-medium text-white hover:bg-emerald-500"
+          >
+            開始使用
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}

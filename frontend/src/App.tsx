@@ -4,6 +4,8 @@ import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { OnboardingGate } from './components/OnboardingGate'
+import { WelcomePage } from './pages/WelcomePage'
 import { StrategiesPage } from './pages/StrategiesPage'
 import { OrdersPage } from './pages/OrdersPage'
 import { PositionsPage } from './pages/PositionsPage'
@@ -50,7 +52,17 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
-            <Route path="/" element={<DashboardPage />} />
+            {/* 剛建好帳號、什麼都還沒有的人先看到引導，而不是一個空的儀表板。
+                閘門是獨立元件，DashboardPage 本身沒有被動到。 */}
+            <Route
+              path="/"
+              element={
+                <OnboardingGate>
+                  <DashboardPage />
+                </OnboardingGate>
+              }
+            />
+            <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/strategies" element={<StrategiesPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/positions" element={<PositionsPage />} />
