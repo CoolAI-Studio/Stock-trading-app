@@ -203,7 +203,30 @@ jobs:
     needs: [backend, frontend, first-deploy]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Longer than a build takes, shorter than a stuck one runs. A free-tier
+    # image build plus a cold start is a few minutes; twenty-five means the
+    # wait below can time out and SAY SO, rather than be killed mid-poll with
+    # no message.
+    timeout-minutes: 25
     steps:
+      - name: What is running right now, before anything is asked for
+        id: before
+        # The baseline for 「did it change?」. Read BEFORE the hook is called:
+        # afterwards there is no way to tell a new build from the old one
+        # still answering.
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "commit=" >> "$GITHUB_OUTPUT"
+            echo "started_at=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          body=$(curl -sS --max-time 60 "$HEALTH_URL" || true)
+          echo "$body"
+          echo "commit=$(printf '%s' "$body" | jq -r '.version.commit // ""')" >> "$GITHUB_OUTPUT"
+          echo "started_at=$(printf '%s' "$body" | jq -r '.version.started_at // ""')" >> "$GITHUB_OUTPUT"
+
       - name: Ask Render to deploy this commit
         env:
           HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
@@ -222,3 +245,84 @@ jobs:
             2*) echo "::notice::已要求 Render 部署 ${GITHUB_SHA:0:7}。" ;;
             *)  echo "::error::Render 拒絕了部署請求（HTTP $code）。線上跑的還是舊版。"; exit 1 ;;
           esac
+
+      # A 201 from the hook means the request was ACCEPTED, nothing more. The
+      # build can still fail, the image can still refuse to start -- and the
+      # old build goes on answering every probe perfectly while that happens,
+      # because an old build is not a sick one. That is precisely how 「the
+      # backend is older than main」 went unnoticed twice in one session, and
+      # a release step that cannot tell the difference has not finished the
+      # job it was added to do.
+      #
+      # NO EXTRA SETUP: this reuses the HEALTH_URL variable the watchdog
+      # already needs. Without it the step says what it could not verify and
+      # passes -- a fork is never broken by a variable it does not have.
+      - name: Wait until the deployment says it is this commit
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+          BEFORE_COMMIT: ${{ steps.before.outputs.commit }}
+          BEFORE_STARTED: ${{ steps.before.outputs.started_at }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "::notice::HEALTH_URL 沒有設定，只能確認 Render 收下了請求，無法確認部署真的送達。"
+            echo "要啟用：Settings → Secrets and variables → Actions → Variables，"
+            echo "新增 HEALTH_URL，值是你後端的 .../healthz"
+            exit 0
+          fi
+          want="${GITHUB_SHA:0:7}"
+          echo "等的是 $want；現在線上是 '${BEFORE_COMMIT:-未知}'（啟動於 '${BEFORE_STARTED:-未知}'）"
+          landed=""
+          body=""
+          for i in $(seq 1 45); do
+            sleep 20
+            body=$(curl -sS --max-time 60 "$HEALTH_URL" || true)
+            commit=$(printf '%s' "$body" | jq -r '.version.commit // ""' 2>/dev/null || true)
+            started=$(printf '%s' "$body" | jq -r '.version.started_at // ""' 2>/dev/null || true)
+            if [ "$commit" = "$want" ]; then
+              echo "::notice::線上已經是 $want（等了 $((i * 20)) 秒）。"
+              landed="commit"
+              break
+            fi
+            # The host may not tell the container which commit it built. That
+            # is a courtesy, not a guarantee, and this project does not bind
+            # itself to one host -- so a process start later than the one
+            # measured before the hook counts as proof that A deploy landed.
+            # It just cannot prove WHICH, and says so.
+            if [ -z "$commit" ] && [ -n "$started" ] && [ "$started" != "$BEFORE_STARTED" ]; then
+              echo "::notice::線上重新啟動了（'${BEFORE_STARTED:-未知}' → $started）。這個平台沒有提供 commit，所以只能確認「有部署」，不能確認「是這一個 commit」。設定 APP_GIT_COMMIT 就能確認。"
+              landed="restart"
+              break
+            fi
+            echo "  等了 $((i * 20)) 秒：線上仍是 '${commit:-未知}'（啟動於 '${started:-未知}'）"
+          done
+          if [ -z "$landed" ]; then
+            echo "::error::等了 15 分鐘，線上跑的還不是 $want。部署沒有送達，線上是舊版。"
+            echo "去部署平台看這次 build 的紀錄。常見原因：build 失敗，或容器一啟動就死（例如 DATABASE_URL 打錯）。"
+            echo "最後一次拿到的回應："
+            echo "$body"
+            exit 1
+          fi
+
+      - name: And that what landed is actually alive
+        # 「新版上線了」不等於「新版活著」。The alerting IS the product, so a
+        # release is not finished until the thing that sends the alerts
+        # answers. A cold start plus the worker's first tick takes a moment,
+        # hence a grace window rather than a single shot.
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then exit 0; fi
+          body=""
+          for i in $(seq 1 10); do
+            body=$(curl -sS --max-time 60 "$HEALTH_URL" || true)
+            state=$(printf '%s' "$body" | jq -r '.status // ""' 2>/dev/null || true)
+            case "$state" in
+              ok)    echo "::notice::新版上線，而且健康。"; exit 0 ;;
+              setup) echo "::notice::新版上線，目前在設定模式（設定還沒填完）。"; exit 0 ;;
+            esac
+            echo "  第 $i 次：status='${state:-沒有回應}'，再等 30 秒"
+            sleep 30
+          done
+          echo "::error::新版上線了，但五分鐘內 /healthz 沒有恢復正常。警告可能是停擺的。"
+          echo "$body"
+          exit 1

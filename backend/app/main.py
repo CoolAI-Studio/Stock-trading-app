@@ -11,6 +11,7 @@ from app.api.router import api_router
 from app.api.routers.health import router as health_router
 from app.config import enforce_required_secrets, settings
 from app.logging_setup import configure_logging
+from app.services import build_info
 from app.services.events import bus
 from app.services.market_loop import run_forever
 from app.services.notification.dispatcher import handle_event as dispatch_notification
@@ -125,6 +126,10 @@ async def _lock_until_configured(request, call_next):
             status_code=status.HTTP_200_OK,
             content={
                 "status": "setup",
+                # Carried here too: a first deploy has nothing else to look
+                # at, and 「is this even the build I just pushed?」 is the
+                # question somebody staring at a setup screen is asking.
+                "version": build_info.version(),
                 "checks": {
                     "setup": {
                         "status": "setup",

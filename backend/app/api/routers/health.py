@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
-from app.services import worker_health
+from app.services import build_info, worker_health
 
 logger = logging.getLogger("app.health")
 
@@ -130,4 +130,9 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
     failing = any(check["status"] == _FAIL for check in checks.values())
     if failing:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"status": _FAIL if failing else _OK, "checks": checks}
+    # Which build answered. Deploys are automatic now, and the failure that
+    # makes automatic dangerous is silent: a backend running code older than
+    # main passes every check above, because an old build is not a sick one.
+    # It rides on the unauthenticated probe because the moment you most need
+    # it is the moment a deploy shipped something you cannot log in to.
+    return {"status": _FAIL if failing else _OK, "version": build_info.version(), "checks": checks}

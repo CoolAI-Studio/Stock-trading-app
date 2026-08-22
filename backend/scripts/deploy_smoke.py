@@ -16,10 +16,12 @@ boxes blank:
      and no port is ever bound. The setup page that exists to explain what is
      missing is then unreachable for exactly the reason it exists.
 
-  2. Does the path Render probes answer 200?
+  2. Does the path the host probes answer 200, and does it say which build
+     answered?
      render.yaml sets healthCheckPath, and a first deploy has no previous
-     version to fall back to. A probe that never passes is a deploy Render
-     marks as failed.
+     version to fall back to. A probe that never passes is a deploy the host
+     marks as failed. The build identity rides along because the release gate
+     in CI polls it: an out-of-date backend passes every other check here.
 
   3. Does /api/setup/status list what is missing, including the push keys?
      The audience for this app wants alerts on their phone. If the push key row
@@ -96,8 +98,8 @@ def run(base: str) -> list[str]:
         return problems
     print(f"   OK（/api/setup/status -> {status}）")
 
-    print("2. Render 探測的那條路徑答 200 嗎？")
-    status, _ = _get(f"{base}/healthz")
+    print("2. 部署平台探測的那條路徑答 200 嗎？")
+    status, health = _get(f"{base}/healthz")
     if status != 200:
         problems.append(
             f"/healthz 回 {status}，而 render.yaml 的 healthCheckPath 指著它。"
@@ -106,6 +108,27 @@ def run(base: str) -> list[str]:
         )
     else:
         print("   OK")
+
+    print("2b. 它說得出自己是哪一個 build 嗎？")
+    # An old build passes every health check, because an old build is not a
+    # sick one -- so 「did the deploy land?」 has no answer unless the probe
+    # carries one. The CI deploy step polls exactly this field, which makes it
+    # load-bearing: if the wiring breaks, the release gate silently starts
+    # measuring nothing.
+    #
+    # The commit itself is allowed to be absent here: this container is
+    # started the way a blank deploy starts it, with no build arg and no host
+    # variable, and 「no commit」 is the honest answer to that. What must
+    # always be there is the block and the start time.
+    version = (health or {}).get("version")
+    if not isinstance(version, dict) or not version.get("started_at"):
+        problems.append(
+            "/healthz 沒有說自己是哪一個 build。舊版的後端每一項健康檢查都會是綠的"
+            "（舊版沒有生病，它只是舊的），所以沒有這一段，「部署到底有沒有成功」"
+            "就沒有辦法從外面看出來——CI 的部署確認步驟讀的就是這個欄位。"
+        )
+    else:
+        print(f"   OK（commit={version.get('commit')!r}，啟動於 {version['started_at']}）")
 
     print("3. /api/setup/status 說得出缺什麼嗎？")
     status, body = _get(f"{base}/api/setup/status")

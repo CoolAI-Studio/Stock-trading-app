@@ -97,6 +97,30 @@ Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控
 
 回應只有檢查項目名稱和秒數，不會帶出連線字串、金鑰或持股標的，所以公開被 ping 是安全的。
 
+### 怎麼知道線上跑的是哪一版
+
+`/healthz` 的回應裡有一段 `version`：
+
+```json
+{ "status": "ok", "version": { "commit": "41298da", "started_at": "2026-08-22T09:41:00Z" }, ... }
+```
+
+- `commit`：線上這個版本是哪一個 commit。跟 GitHub 上最新的那一個比對，一樣就代表部署到了。
+- `started_at`：這個行程是什麼時候啟動的。部署成功會重新啟動，所以這個時間會往前跳。
+
+**為什麼需要這個**：後端跑的是舊版時，上面每一項檢查都會是綠的——舊版並沒有生病，
+它只是舊的。沒有這一段，「我推上去的東西到底上線了沒」就只能靠記得有沒有按過按鈕。
+
+CI 的部署步驟自己會看這個欄位：呼叫部署 hook 之後，它會一直問線上「你是哪一個 commit」，
+等到答案變成剛推上去的那一個才算成功；等不到就把那次 CI 變成紅燈並寄信給你。
+（要有這個確認，`HEALTH_URL` 這個 repository variable 要設好，就是 UptimeRobot 那一節用的同一個網址。）
+
+`commit` 是從環境變數讀的，`APP_GIT_COMMIT` 是這個 app 自己的名字；
+Render（`RENDER_GIT_COMMIT`）、Heroku／Dokku（`SOURCE_VERSION`）、Railway、Koyeb 這些
+平台自己會塞的名字也都認得，所以多數情況下你什麼都不用設定。
+自己 build 映像檔的話：`docker build --build-arg APP_GIT_COMMIT=$(git rev-parse HEAD) ...`。
+兩邊都沒有時，這一格是 `null`——**寧可說不知道，也不會編一個版本號給你看**。
+
 另外注意：`render.yaml` 的 `healthCheckPath` 也指向 `/healthz`，所以持續 503 時 Render 也會判定服務不健康。worker 卡死的情況下重啟本來就是正確處置，但如果之後不想要這個連動，把 `healthCheckPath` 改成別的路徑即可。
 
 ---

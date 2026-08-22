@@ -21,6 +21,18 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
+# Which build is this? /healthz reports it, so 「did my deploy actually land?」
+# has an answer instead of a guess -- an out-of-date backend passes every
+# health check, because an old build is not a sick one.
+#
+# Optional, and nothing breaks without it: hosts that already inject their own
+# (RENDER_GIT_COMMIT, SOURCE_VERSION, RAILWAY_GIT_COMMIT_SHA, ...) are read at
+# runtime instead, and a build with neither reports no commit rather than a
+# wrong one. For a hand-built image:
+#     docker build --build-arg APP_GIT_COMMIT=$(git rev-parse HEAD) ...
+ARG APP_GIT_COMMIT=""
+ENV APP_GIT_COMMIT=${APP_GIT_COMMIT}
+
 EXPOSE 8000
 
 # Runs the migration on every boot (idempotent -- a no-op once already at
