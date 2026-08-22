@@ -101,6 +101,24 @@ def _record_strategy_error(
     db.commit()
 
 
+def _record_feed_problem(db: Session, strategy: Strategy, detail: str) -> None:
+    """行情抓不到。**這不是策略的錯，所以不會累積、不會關掉它。**
+
+    _record_strategy_error 連續五次就把策略停用，而輪詢是五秒一次——照那條路走，
+    上游擋你二十五秒，使用者的每一支策略就永久停用了，而且擋單結束之後沒有任何
+    東西會把它們打開。畫面上只會寫著「停用」，沒有人看得出來為什麼。
+
+    壞掉的程式碼不會自己好，所以那條路留給它；抓不到資料會自己好，所以這裡只留
+    一句話在那一列上，等下一輪抓到就被 _run_bar_strategy 清掉。
+
+    Same shape as the warm-up notice above it: something to read, nothing that
+    retires the strategy.
+    """
+    strategy.last_run_at = utcnow()
+    strategy.last_error = f"抓不到 K 棒：{detail}"
+    db.commit()
+
+
 def _run_tick_strategy(
     db: Session, strategy: Strategy, loaded: LoadedStrategy, quote: Quote, events: list[Event]
 ) -> None:
@@ -402,14 +420,32 @@ def tick_once(
         # One fetch per distinct symbol+timeframe, shared by every strategy
         # asking for it -- the history cache bounds this further still.
         bars_by_key: dict[tuple[DataSource, str, Timeframe], list[Bar]] = {}
+        # PER KEY, because an unguarded fetch here used to end the whole round.
+        # tick_once's own try has a finally and no except, so anything raised
+        # walked out to run_forever -- skipping every remaining strategy, the
+        # stop-loss scan, the order expiry AND the pending-notification sweep.
+        # One symbol nobody could price cost every alert in that round.
+        #
+        # BarFetchError is already handled below this layer (the service serves
+        # the stale cache rather than storing a failure as fact). What reaches
+        # here is everything that was never wrapped: an upstream library whose
+        # response shape changed, a parser KeyError, an unwrapped timeout.
+        bar_failures: dict[tuple[DataSource, str, Timeframe], str] = {}
         for strategy in strategies:
             loaded = loaded_by_id.get(strategy.id)
             if loaded is None or loaded.entry_point != "on_bar":
                 continue
             key = (strategy.data_source, strategy.symbol, loaded.timeframe)
-            if key not in bars_by_key:
+            if key in bars_by_key or key in bar_failures:
+                continue
+            try:
                 bars_by_key[key] = service.get_bars(
                     strategy.symbol, loaded.timeframe, strategy.data_source
+                )
+            except Exception as exc:  # noqa: BLE001 -- 一個代號不能拖垮整輪
+                bar_failures[key] = f"{type(exc).__name__}: {exc}"
+                logger.exception(
+                    "bar fetch failed for %s %s", strategy.symbol, loaded.timeframe.value
                 )
 
         for strategy in strategies:
@@ -418,6 +454,12 @@ def tick_once(
                 continue  # failed to compile; already recorded above
             if loaded.entry_point == "on_bar":
                 key = (strategy.data_source, strategy.symbol, loaded.timeframe)
+                problem = bar_failures.get(key)
+                if problem is not None:
+                    # 不能拿空清單當答案：那會被下面讀成「還在暖身」，而暖身是
+                    # 一句會自己過去的話。抓不到就說抓不到。
+                    _record_feed_problem(session, strategy, problem)
+                    continue
                 _run_bar_strategy(session, strategy, loaded, bars_by_key.get(key, []), events)
                 continue
             quote = quotes.get(strategy.symbol)
