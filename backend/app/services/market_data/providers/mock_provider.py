@@ -4,7 +4,15 @@ from decimal import Decimal
 
 from app.models.enums import DataSource
 from app.services import symbol_search
-from app.services.market_data.base import Bar, Quote, Timeframe, bars_from_closes, currency_for
+from app.services.market_data.base import (
+    Bar,
+    BarFetchError,
+    Quote,
+    Timeframe,
+    bars_from_closes,
+    currency_for,
+    supports_timeframe,
+)
 
 
 class MockProvider:
@@ -87,7 +95,16 @@ class MockProvider:
         Refuses on the same terms as get_quotes. A symbol with 300 candles and
         no quote is a strategy that warms up, evaluates, and can never fire --
         which reads as a working strategy right up until it matters.
+
+        AND ON THE SAME TERMS AS THE REAL PROVIDER, for the timeframe. This
+        used to serve candles at any interval, so 12h had data here and none on
+        Yahoo -- and every test written against this double was blind to a
+        whole class of failure, including the tests whose subject WAS 「does
+        this source have this candle」. The docstring at the top of this file
+        already said why that is the worst kind of double.
         """
+        if not supports_timeframe(self.data_source, timeframe):
+            raise BarFetchError(f"{self.data_source.value} 沒有提供 {timeframe.value} 這個週期。")
         if not self._can_price(symbol):
             return []
         base = self._prices.setdefault(symbol, 100.0)
