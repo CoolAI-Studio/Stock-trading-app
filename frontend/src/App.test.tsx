@@ -92,6 +92,19 @@ describe('還沒設定完的部署', () => {
     expect(await screen.findByText(/完成你的部署設定/)).toBeInTheDocument()
   })
 
+  it('沒有 token 打開根網址，停在設定頁 —— 那是剛部署好的人真正會做的事', async () => {
+    // README 承諾「畫面會自動帶你到設定頁，而不是給你一個壞掉的登入畫面」。
+    // 剛部署好的人沒有 token，所以 / 會被 ProtectedRoute 導去 /login——而在
+    // 登入頁開始發請求之前，那裡沒有任何一個請求會帶回 setup_required，
+    // 承諾就停在半路。這一條走的是他真正會走的路徑：根網址進來，不預設 token。
+    unconfiguredBackend()
+    setToken(null)
+
+    show('/')
+
+    expect(await screen.findByText(/完成你的部署設定/)).toBeInTheDocument()
+  })
+
   it('連登入頁也會被帶去設定頁 —— 那是還沒有帳號的人唯一會停在的地方', async () => {
     // It used to be that this could only assert 「the route is reachable」:
     // the login page made no request until somebody pressed a button, so an
