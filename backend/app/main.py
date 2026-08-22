@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.api.routers.health import router as health_router
-from app.config import enforce_required_secrets, settings
+from app.config import Settings, enforce_required_secrets, settings
 from app.logging_setup import configure_logging
 from app.services import build_info
 from app.services.events import bus
@@ -82,7 +82,20 @@ except RuntimeError as exc:
         "starting in SETUP MODE -- the API is locked until this is fixed: %s", exc
     )
 
-app = FastAPI(title="Trading App API", lifespan=lifespan)
+
+def docs_urls(config: Settings) -> dict[str, str | None]:
+    """Where FastAPI serves its schema and docs -- or None, meaning nowhere.
+
+    None makes the routes not exist, so a stranger gets 404 rather than 401.
+    「這裡沒有這個東西」 tells them less than 「有，但你不能看」, and there is
+    nothing to gain from the distinction here.
+    """
+    if config.ENABLE_API_DOCS:
+        return {"openapi_url": "/openapi.json", "docs_url": "/docs", "redoc_url": "/redoc"}
+    return {"openapi_url": None, "docs_url": None, "redoc_url": None}
+
+
+app = FastAPI(title="Trading App API", lifespan=lifespan, **docs_urls(settings))
 
 
 def setup_mode_active() -> bool:

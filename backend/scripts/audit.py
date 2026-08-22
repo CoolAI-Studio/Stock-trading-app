@@ -83,10 +83,6 @@ PUBLIC_ON_PURPOSE: dict[str, str] = {
         "端到端加密的，只有那個訂閱本身解得開，所以「手上有這個 token」本身就是證明。"
         "而且它一律回 204，不會變成猜 token 的神諭。"
     ),
-    "GET /openapi.json": "FastAPI 內建的 schema",
-    "GET /docs": "FastAPI 內建的文件頁",
-    "GET /redoc": "FastAPI 內建的文件頁",
-    "GET /docs/oauth2-redirect": "FastAPI 內建的 OAuth 轉址頁",
 }
 
 # The sandbox is the other way out: strategy code runs on the server, so an
@@ -246,7 +242,7 @@ class Audit:
         # reader counts it as coverage.
         live = {f"{m} {p}" for m, p, _ in operations}
         for entry in PUBLIC_ON_PURPOSE:
-            if entry not in live and not entry.startswith(("GET /docs", "GET /redoc", "GET /open")):
+            if entry not in live:
                 self.note(f"名單上的 {entry} 已經不存在，可以刪掉（不是漏洞，是過期的許可）")
         return operations
 
@@ -660,39 +656,69 @@ class Audit:
             else:
                 self.note(f"寫入探測：註冊回 {code}（不是 200/201，門是關的）")
 
-        status, body = fetch("/openapi.json")
-        if status != 200:
-            self.note(f"線上的 /openapi.json 回 {status}，沒有辦法比對線上的公開清單")
-            return
-        try:
-            paths = json.loads(body)["paths"]
-        except (ValueError, KeyError):
-            self.note("線上的 /openapi.json 讀不出 paths")
-            return
-
-        checked = 0
-        for path, methods in paths.items():
-            for method, operation in methods.items():
-                verb = method.upper()
-                if verb not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
-                    continue
-                if operation.get("security"):
-                    continue
-                checked += 1
-                if f"{verb} {path}" in PUBLIC_ON_PURPOSE:
-                    continue
+        # THE MAP ITSELF MUST NOT BE PUBLIC. FastAPI serves /docs and
+        # /openapi.json unless told otherwise, and 「told otherwise」 is a
+        # thing this repository can be right about while the deployment is
+        # still wrong -- an older build, or a platform-level override. That is
+        # exactly the class of drift this whole method exists for.
+        for path in ("/openapi.json", "/docs", "/redoc"):
+            code, _ = fetch(path)
+            if code == 200:
                 self.fail(
                     "七、線上",
-                    f"線上有一個不需要登入的 {verb} {path}，而它不在名單上",
-                    "這是「部署出去的那一份」，不是這個工作目錄——兩者可以不一樣，"
-                    "而只有這一項看得出差別。",
+                    f"線上的 {path} 不需要登入就打得開",
+                    "裡面沒有使用者資料，所以這不是外洩——但它是一份完整的端點地圖，"
+                    "交給任何知道後端網址的人，而那個網址在前端每一個請求裡。"
+                    "ENABLE_API_DOCS 預設是關的，線上卻是開的，代表部署的版本比這份"
+                    "程式碼舊，或是平台上有人設了那個變數。",
                 )
-        self.counts["live_public_operations"] = checked
-        self.counts["live_operations"] = sum(len(m) for m in paths.values())
-        # Reading the schema at all means the schema is public. Not a leak --
-        # no data is in it -- but it hands a stranger the whole map, and a
-        # deployment for one person has no audience for it.
-        self.note("線上的 /openapi.json 不需要登入就讀得到（這份稽查就是這樣讀的）")
+
+        # 部署出去的那一份有沒有跟這份程式碼分歧。
+        #
+        # 以前這一段是去讀線上的 /openapi.json——而那正好是上面剛剛要求它關掉的
+        # 東西。現在改成拿「這份程式碼宣告的清單」去打線上：宣告要登入的，線上就
+        # 不可以在沒有登入時回 200。這比讀宣告強，因為它測的是那扇門本身。
+        #
+        # 全部都是 GET，不帶任何憑證。線上是別人（或自己）真的在用的系統，稽查
+        # 不可以在上面寫東西。
+        try:
+            from app.main import app as local_app
+
+            operations = [
+                (method.upper(), path, operation)
+                for path, methods in local_app.openapi()["paths"].items()
+                for method, operation in methods.items()
+            ]
+        except Exception as exc:  # noqa: BLE001
+            self.note(f"讀不出本機的端點清單（{type(exc).__name__}），略過線上清冊比對")
+            return
+
+        gated_open = 0
+        checked = 0
+        for verb, path, operation in operations:
+            if verb != "GET":
+                continue
+            url = re.sub(r"\{[^}]+\}", "1", path)
+            code, body = fetch(url)
+            if code == 0:
+                continue
+            checked += 1
+            if operation.get("security"):
+                if code == 200:
+                    gated_open += 1
+                    self.fail(
+                        "七、線上",
+                        f"線上的 GET {path} 沒有登入就回 200，而這份程式碼說它要登入",
+                        f"回應開頭：{body[:200]}",
+                    )
+            elif f"GET {path}" not in PUBLIC_ON_PURPOSE and code == 200:
+                self.fail(
+                    "七、線上",
+                    f"線上有一個不需要登入的 GET {path}，而它不在名單上",
+                    "工作目錄裡是什麼，跟公開網路上跑著什麼，是兩件可以不一樣的事。",
+                )
+        self.counts["live_gets_probed"] = checked
+        self.counts["live_gated_but_open"] = gated_open
 
     def run(self) -> int:
         with tempfile.TemporaryDirectory(prefix="audit-", ignore_cleanup_errors=True) as tmpdir:
@@ -797,7 +823,15 @@ def main(argv: list[str]) -> int:
     if args.url:
         # A live deployment cannot be seeded, and must not be: this asks only
         # what a stranger can see from outside.
-        audit.live(args.url)
+        #
+        # The temporary environment is still needed, because the comparison is
+        # against THIS code's declared endpoint list -- and importing the app
+        # to read it requires the secrets it refuses to start without. It
+        # points at a throwaway sqlite file; nothing here touches the live
+        # database, and nothing here writes anything anywhere.
+        with tempfile.TemporaryDirectory(prefix="audit-live-", ignore_cleanup_errors=True) as tmp:
+            audit.mint_canaries(Path(tmp))
+            audit.live(args.url)
         code = audit.report()
     else:
         code = audit.run()

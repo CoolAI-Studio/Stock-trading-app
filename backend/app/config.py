@@ -68,6 +68,21 @@ class Settings(BaseSettings):
     # moment that first account exists.
     ALLOW_FIRST_ACCOUNT: bool = True
 
+    # FastAPI's /docs, /redoc and /openapi.json. OFF by default, and the
+    # default is the one that matters: nobody deploying a copy of this will
+    # ever set this, and they should not have to think about it.
+    #
+    # MEASURED on the live deployment: both /docs and /openapi.json answered
+    # 200 to anybody. No user data is in the schema, so this was never a leak
+    # -- but it is a complete map of 82 operations handed to anyone who knows
+    # the backend's address, and that address travels in every request the
+    # frontend makes. The owner of a deployment is not an engineer and will
+    # never open /docs, so its only readers were people looking for a way in.
+    #
+    # Deliberately NOT declared in render.yaml: it is for local development,
+    # and every value on that form is a place a first-time deployer stops.
+    ENABLE_API_DOCS: bool = False
+
     # Brute-force throttle on POST /api/auth/login: one password guards every
     # stored broker credential, so a public URL must not allow unlimited guesses.
     # Counters live in-process (app/core/login_throttle.py).

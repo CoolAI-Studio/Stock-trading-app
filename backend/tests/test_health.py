@@ -200,7 +200,18 @@ async def test_run_forever_keeps_looping_but_records_no_poll_when_a_tick_raises(
     assert snapshot.last_poll_age_sec is None
 
 
-def test_docs_available(client):
+def test_the_docs_page_is_not_served_to_the_public(client):
+    """This used to assert 200, from when 「the app is up」 was the question.
+
+    The answer changed deliberately: /docs and /openapi.json hand a complete
+    map of every endpoint to anyone who knows the backend's address, and that
+    address travels in every request the frontend makes. No user data is in
+    the schema, so this was never a leak -- but the owner of a deployment is
+    not an engineer and will never open that page, which left its only readers
+    being people looking for a way in.
+
+    A developer who wants it sets ENABLE_API_DOCS in their own .env.
+    tests/test_the_api_map_is_not_public.py owns the rest of this behaviour."""
     response = client.get("/docs")
 
-    assert response.status_code == 200
+    assert response.status_code == 404
