@@ -180,7 +180,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'my-strategy')
     await user.type(screen.getByLabelText('股票代號'), 'TSLA')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -211,7 +211,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.click(await screen.findByRole('button', { name: '5 日均線交叉' }))
 
     expect(screen.getByLabelText('原始碼')).toHaveValue('class Strategy:\n    pass\n')
@@ -239,7 +239,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '台積電五日均線向上就買進')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -267,7 +267,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('股票代號'), '2330.TW')
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線向上就買進')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
@@ -292,7 +292,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '隨便給我一個策略')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -305,7 +305,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '隨便給我一個策略')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -326,7 +326,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '用 pandas 算均線')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -339,7 +339,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -356,7 +356,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), '我的策略')
     await user.type(screen.getByLabelText('股票代號'), '2330.TW')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -373,7 +373,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('原始碼'), 'my own work')
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
@@ -396,7 +396,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('原始碼'), 'my own work')
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線策略')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
@@ -408,7 +408,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
 
     expect(screen.getByText(/自己讀過、看懂/)).toBeInTheDocument()
     expect(screen.getByText(/不是投資建議/)).toBeInTheDocument()
@@ -483,7 +483,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'watcher')
     await user.type(screen.getByLabelText('股票代號'), 'TSLA')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -507,7 +507,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
 
     expect(screen.getByText(/只會發通知給你，不會產生需要確認的訂單/)).toBeInTheDocument()
   })
@@ -626,7 +626,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), OWNER_DESCRIPTION)
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -650,7 +650,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), '五日均線向上就買進')
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -674,7 +674,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), OWNER_DESCRIPTION)
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -713,7 +713,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText(AI_DESCRIPTION_LABEL), OWNER_DESCRIPTION)
     await user.click(screen.getByRole('button', { name: 'AI 產生策略' }))
 
@@ -746,7 +746,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.click(screen.getByRole('button', { name: '看看有哪些指標可以用' }))
 
     expect(await screen.findByText('rsi(values, period=14)')).toBeInTheDocument()
@@ -759,7 +759,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
 
     expect(api.get).not.toHaveBeenCalledWith('/api/indicators')
   })
@@ -768,7 +768,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
 
     expect(screen.getByLabelText(RISK_OVERRIDE_LABEL)).not.toBeChecked()
     expect(screen.queryByLabelText('本金')).not.toBeInTheDocument()
@@ -787,7 +787,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'inheritor')
     await user.type(screen.getByLabelText('股票代號'), 'TSLA')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -812,7 +812,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
 
     await waitFor(() =>
@@ -832,7 +832,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
 
     expect(screen.getByText(/留空＝沿用全域/)).toBeInTheDocument()
@@ -845,7 +845,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'capped')
     await user.type(screen.getByLabelText('股票代號'), 'TSLA')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -957,7 +957,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'no-stop')
     await user.type(screen.getByLabelText('股票代號'), 'TSLA')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -993,7 +993,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
     await user.type(screen.getByLabelText('本金'), '50000')
     await user.click(screen.getByLabelText('停損百分比：不設停損'))
@@ -1037,7 +1037,7 @@ describe('StrategiesPage', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.click(screen.getByLabelText(RISK_OVERRIDE_LABEL))
 
     expect(screen.getByLabelText('停損百分比：不設停損')).toBeInTheDocument()
@@ -1067,7 +1067,7 @@ describe('order size and data feed', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByRole('button', { name: '新增策略' }))
+    await user.click(await screen.findByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'tsmc')
     await user.type(screen.getByLabelText('股票代號'), '2330.TW')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -1091,7 +1091,7 @@ describe('order size and data feed', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByRole('button', { name: '新增策略' }))
+    await user.click(await screen.findByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('名稱'), 'btc')
     await user.type(screen.getByLabelText('股票代號'), 'BTCUSDT')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
@@ -1190,7 +1190,7 @@ describe('AI 挑的代號有問題時', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('股票代號'), '2330.TW')
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
     await user.click(screen.getByRole('button', { name: '驗證' }))
@@ -1206,7 +1206,7 @@ describe('AI 挑的代號有問題時', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
     await user.click(screen.getByRole('button', { name: '驗證' }))
 
@@ -1219,7 +1219,7 @@ describe('AI 挑的代號有問題時', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
     await user.click(screen.getByRole('button', { name: '驗證' }))
 
@@ -1233,7 +1233,7 @@ describe('AI 挑的代號有問題時', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('button', { name: '新增策略' }))
+    await user.click(screen.getByRole('button', { name: '自己寫策略' }))
     await user.type(screen.getByLabelText('原始碼'), 'class Strategy: pass')
     await user.click(screen.getByRole('button', { name: '驗證' }))
 
@@ -1241,3 +1241,36 @@ describe('AI 挑的代號有問題時', () => {
     expect(screen.queryByText(/self\.symbol/)).not.toBeInTheDocument()
   })
 })
+
+/**
+ * 這一頁本來只有一條路：一個程式碼編輯器。
+ *
+ * CLAUDE.md 把「不用寫 Python 就能設定的簡單價格提醒」列為核心功能，而在
+ * TemplateAlertForm 之前，想要「跌到 900 叫我」的人只能打開那個編輯器改數字。
+ * 所以這裡要守的不只是「有那個入口」，還有「它排在前面」——兩顆按鈕並排的時候，
+ * 沒有說明的那一顆會把不寫程式的人帶到程式碼裡。
+ */
+describe('不寫程式的人也有一條路', () => {
+  it('先給的是「設定提醒（不用寫程式）」，不是程式碼編輯器', async () => {
+    renderPage()
+
+    const withoutCode = await screen.findByRole('button', { name: /設定提醒（不用寫程式）/ })
+    const withCode = screen.getByRole('button', { name: '自己寫策略' })
+
+    expect(withoutCode).toBeInTheDocument()
+    // 兩顆都在，而且不用寫程式的那一顆排在前面。
+    expect(withoutCode.compareDocumentPosition(withCode)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+
+  it('按下去出現的是範本清單，不是文字框', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /設定提醒（不用寫程式）/ }))
+
+    expect(await screen.findByText(/選一種提醒/)).toBeInTheDocument()
+  })
+})
+

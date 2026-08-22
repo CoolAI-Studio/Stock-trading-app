@@ -590,6 +590,31 @@ export interface SetupStatus {
   where: string
 }
 
+/** 一格表單，連同它的中文說明。
+ *
+ * `help` 跟著欄位走，不是寫在前端某個地方：解釋「跌破多少通知我」那一句話，
+ * 屬於讀那個數字的程式旁邊，否則兩邊會各說各話而只有一邊是對的。 */
+export interface TemplateField {
+  key: string
+  label: string
+  help: string
+  kind: string
+  default: number | string
+  minimum: number | null
+}
+
+/** GET /api/strategies/templates -- 現成的提醒範本。
+ *
+ * 這份清單存在的理由是：在它之前，設定一則「跌到 900 叫我」的提醒需要打開一個
+ * 程式碼編輯器。範本讓同一件事變成填表格。 */
+export interface StrategyTemplate {
+  key: string
+  title: string
+  summary: string
+  good_for: string
+  fields: TemplateField[]
+}
+
 /** GET /api/system/status -- 「is it still running」, for the page that answers it.
  *
  * Distinct from /healthz, which is unauthenticated and therefore deliberately

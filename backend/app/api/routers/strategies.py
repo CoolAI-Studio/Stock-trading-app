@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.schemas.strategy import (
     SampleStrategyInfo,
     StrategyCreate,
     StrategyDetail,
+    StrategyFromTemplate,
     StrategyGenerateRequest,
     StrategyGenerateResult,
     StrategyPerformanceRead,
@@ -22,8 +24,15 @@ from app.schemas.strategy import (
     StrategyUpdate,
     StrategyValidateRequest,
     StrategyValidateResult,
+    TemplateFieldRead,
+    TemplateRead,
 )
-from app.services import risk_resolver, strategy_performance, symbol_search
+from app.services import (
+    risk_resolver,
+    strategy_performance,
+    strategy_templates,
+    symbol_search,
+)
 from app.services.ai_provider import get_ai_provider
 from app.services.market_data.base import (
     SUPPORTED_TIMEFRAMES,
@@ -262,6 +271,88 @@ def list_samples(user: User = Depends(get_current_active_user)) -> list[SampleSt
             SampleStrategyInfo(filename=path.name, source_code=path.read_text(encoding="utf-8"))
         )
     return samples
+
+
+@router.get("/templates", response_model=list[TemplateRead])
+def list_templates(user: User = Depends(get_current_active_user)) -> list[TemplateRead]:
+    """現成的提醒範本，給不寫 Python 的人。
+
+    DECLARED BEFORE /{strategy_id}, and that is not a style choice: the path
+    parameter matches any string, so a literal route declared after it is
+    unreachable -- 「templates」 would be looked up as a strategy id and 404.
+    """
+    return [
+        TemplateRead(
+            key=template.key,
+            title=template.title,
+            summary=template.summary,
+            good_for=template.good_for,
+            fields=[TemplateFieldRead(**vars(field)) for field in template.fields],
+        )
+        for template in strategy_templates.TEMPLATES
+    ]
+
+
+@router.post("/from-template", response_model=StrategyRead, status_code=status.HTTP_201_CREATED)
+def create_from_template(
+    payload: StrategyFromTemplate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Strategy:
+    """一則提醒，從表單來，沒有任何一行程式碼經過使用者的手。
+
+    It goes through create_strategy rather than around it. Everything that
+    protects a hand-written strategy -- the sandbox, the parameter type check,
+    the symbol/feed mismatch check that catches binance + 2330.TW -- protects
+    this one too, because it is the same code path with the source filled in
+    from a template instead of a text box.
+
+    alert_only is forced on: this is a 提醒系統, and every route into it that
+    could quietly produce an order is a route that eventually will.
+    """
+    template = strategy_templates.get_template(payload.template)
+    if template is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"沒有叫做 {payload.template!r} 的範本。",
+        )
+
+    try:
+        create = StrategyCreate(
+            name=payload.name,
+            symbol=payload.symbol,
+            data_source=payload.data_source,
+            source_code=template.source,
+            alert_only=True,
+            params=payload.params,
+        )
+    except ValidationError as exc:
+        # Built here rather than parsed from the request body, so FastAPI never
+        # sees it -- and an uncaught ValidationError inside a handler is a 500.
+        # The person filling in the form gets the reason instead.
+        #
+        # The MESSAGES, not exc.errors(): that structure carries the original
+        # exception object in `ctx`, which is not JSON serialisable, and the
+        # sentence the validator wrote (「binance 上沒有 2330.TW」) is the only
+        # part anybody can act on anyway.
+        reasons = "；".join(
+            str(error.get("msg", "")).removeprefix("Value error, ") for error in exc.errors()
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=reasons
+        ) from exc
+
+    strategy = create_strategy(create, db=db, user=user)
+
+    # ON, unlike a hand-written strategy. That one starts inactive because its
+    # author wants to read it once more before it runs; this one was made by
+    # somebody typing a price and pressing a button, and an alert that has to
+    # be switched on afterwards is an alarm that does not ring -- with nothing
+    # anywhere saying why.
+    strategy.is_active = True
+    db.commit()
+    db.refresh(strategy)
+    return strategy
 
 
 @router.post("", response_model=StrategyRead, status_code=status.HTTP_201_CREATED)

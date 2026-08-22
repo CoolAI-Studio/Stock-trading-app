@@ -76,6 +76,45 @@ class StrategyCreate(StrategyRiskOverrides):
         return self
 
 
+class TemplateFieldRead(BaseModel):
+    """一格表單，連同它的中文說明。
+
+    `help` travels with the field rather than living in the frontend: the
+    sentence that explains what 「跌破多少通知我」 means belongs next to the
+    code that reads the number, or the two drift and only one of them is right.
+    """
+
+    key: str
+    label: str
+    help: str
+    kind: str
+    default: float | str
+    minimum: float | None = None
+
+
+class TemplateRead(BaseModel):
+    key: str
+    title: str
+    summary: str
+    good_for: str
+    fields: list[TemplateFieldRead]
+
+
+class StrategyFromTemplate(BaseModel):
+    """一則提醒，用表單描述——沒有 source_code 這個欄位，刻意的。
+
+    The whole point is that nothing the owner submits is code. The source comes
+    from the template on the server; if this schema carried a source_code field
+    it would be a text box again, one release later.
+    """
+
+    template: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    symbol: str = Field(min_length=1, max_length=32)
+    data_source: DataSource = DataSource.YFINANCE
+    params: dict = Field(default_factory=dict)
+
+
 class StrategyUpdate(StrategyRiskOverrides):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     symbol: str | None = Field(default=None, min_length=1, max_length=32)

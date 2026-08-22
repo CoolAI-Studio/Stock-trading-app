@@ -6,6 +6,7 @@ import { SymbolInput } from '../components/SymbolInput'
 import { StrategyParams, type ParamValue } from '../components/StrategyParams'
 import { Pager } from '../components/Pager'
 import { StrategyScorecard } from '../components/StrategyScorecard'
+import { TemplateAlertForm } from '../components/TemplateAlertForm'
 import { ExportButton } from '../components/ExportButton'
 import { RISK_FIELDS, isSwitchedOff, offSwitchLabel } from '../lib/riskFields'
 import type {
@@ -1140,6 +1141,7 @@ function AlertHistory({ strategies }: { strategies: Strategy[] }) {
 
 export function StrategiesPage() {
   const [showForm, setShowForm] = useState(false)
+  const [showTemplates, setShowTemplates] = useState(false)
   const strategiesQuery = useQuery({
     queryKey: ['strategies'],
     queryFn: () => api.get<Strategy[]>('/api/strategies'),
@@ -1153,15 +1155,35 @@ export function StrategiesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold">策略</h1>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          新增策略
-        </button>
+        <div className="flex gap-2">
+          {/* 不用寫程式的那條路排在前面，而且是實心的按鈕。這不是排版偏好：
+              CLAUDE.md 把「不用寫 Python 就能設定的簡單價格提醒」列為核心功能，
+              而在這之前這一頁只有一個程式碼編輯器。預設的路徑要是多數人走得完
+              的那一條。 */}
+          <button
+            onClick={() => {
+              setShowTemplates((v) => !v)
+              setShowForm(false)
+            }}
+            className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500"
+          >
+            設定提醒（不用寫程式）
+          </button>
+          <button
+            onClick={() => {
+              setShowForm((v) => !v)
+              setShowTemplates(false)
+            }}
+            className="rounded border border-slate-600 px-3 py-1 text-sm font-medium text-slate-200 hover:border-slate-400"
+          >
+            自己寫策略
+          </button>
+        </div>
       </div>
+
+      {showTemplates && <TemplateAlertForm onCreated={() => setShowTemplates(false)} />}
 
       {showForm && (
         <NewStrategyForm onDone={() => setShowForm(false)} samples={samplesQuery.data ?? []} />
