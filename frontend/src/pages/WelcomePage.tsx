@@ -51,9 +51,6 @@ export function WelcomePage() {
     queryKey: ['ai-settings'],
     queryFn: () => api.get<{ configured: boolean }>('/api/ai-settings'),
     retry: false,
-    // Only when that branch is actually taken: asking on load would spend a
-    // request on a feature most people never open.
-    enabled: step === 'ai',
   })
 
   const enabled = (channelsQuery.data ?? []).filter((channel) => channel.is_enabled)
@@ -138,7 +135,22 @@ export function WelcomePage() {
             </p>
           </div>
 
-          {/* 順序就是規格：不需要金鑰的那一條排最上面，而且是實心按鈕。 */}
+          {/* 第一個選項是設定，不是功能。新使用者真正卡住的地方是「資料庫怎麼
+              接上線」「AI 的 API 怎麼接上線」，而那些在設定引導那一頁講完整。 */}
+          <Link
+            to="/guide"
+            onClick={() => markOnboardingSeen()}
+            className="block w-full rounded bg-emerald-600 p-4 text-left text-white hover:bg-emerald-500"
+          >
+            <span className="block font-medium">先把設定弄完</span>
+            <span className="mt-1 block text-sm text-emerald-100">
+              資料庫接上線、AI 的 API 接上線、通知收得到。三件事，一頁講完，而且每一件都
+              可以在那裡按一下確認它真的通。
+            </span>
+          </Link>
+
+          {/* 不需要金鑰的那一條排在 AI 前面，而且 AI 沒接上線時根本不出現：
+              給一個按了會走進死路的選項，比不給還糟。 */}
           <button
             onClick={() => setStep('templates')}
             className="w-full rounded bg-emerald-600 p-4 text-left text-white hover:bg-emerald-500"
@@ -149,21 +161,23 @@ export function WelcomePage() {
             </span>
           </button>
 
-          <button
-            onClick={() => setStep('ai')}
-            className="w-full rounded border border-slate-700 bg-slate-900 p-4 text-left hover:border-slate-500"
-          >
-            <span className="block font-medium text-slate-100">讓 AI 幫我</span>
-            <span className="mt-1 block text-sm text-slate-400">
-              用一句話說你要什麼。需要一把你自己的 AI 金鑰，每次發問的費用算在你自己帳上。
-            </span>
-          </button>
+          {aiSettingsQuery.data?.configured && (
+            <button
+              onClick={() => setStep('ai')}
+              className="w-full rounded border border-slate-700 bg-slate-900 p-4 text-left hover:border-slate-500"
+            >
+              <span className="block font-medium text-slate-100">讓 AI 幫我</span>
+              <span className="mt-1 block text-sm text-slate-400">
+                用一句話說你要什麼。每次發問的費用算在你自己的金鑰上。
+              </span>
+            </button>
+          )}
 
           <button
             onClick={() => setStep('channel')}
             className="w-full rounded border border-slate-800 p-3 text-left text-sm text-slate-400 hover:border-slate-600"
           >
-            先跳過，直接去設定通知
+            先跳過，直接去設定通知管道
           </button>
           <button
             onClick={() => {

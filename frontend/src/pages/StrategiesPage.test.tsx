@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { StrategiesPage } from './StrategiesPage'
 import { ApiError, api } from '../lib/api'
 import type { RiskSettings, Strategy, StrategyAlert, StrategyValidateResult } from '../lib/types'
@@ -135,7 +136,11 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <StrategiesPage />
+      {/* 這一頁現在有一個連到設定引導的 <Link>（AI 沒設定時那一塊會變成一句話
+          加一條路），而 <Link> 沒有 Router context 會直接丟例外。 */}
+      <MemoryRouter>
+        <StrategiesPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -146,6 +151,9 @@ describe('StrategiesPage', () => {
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path === '/api/strategies') return [STRATEGY] as never
       if (path === '/api/strategies/samples') return [] as never
+      // AI 有設定，因為這一組測試裡有好幾條在測 AI 產生策略那條路——沒有金鑰的
+      // 時候那一整塊是刻意不出現的（見檔案最後的那一組測試）。
+      if (path.includes('ai-settings')) return { configured: true } as never
       if (path.endsWith('/performance')) return PERFORMANCE as never
       if (path === '/api/strategies/1') return { ...STRATEGY, source_code: SAVED_SOURCE } as never
       if (path === '/api/risk-settings') return GLOBAL_RISK as never
@@ -1271,6 +1279,45 @@ describe('不寫程式的人也有一條路', () => {
     await user.click(await screen.findByRole('button', { name: /設定提醒（不用寫程式）/ }))
 
     expect(await screen.findByText(/選一種提醒/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * 沒有 AI 金鑰的時候，AI 的功能要關起來，不是給一個按了會失敗的按鈕。
+ *
+ * 使用者的話：「其他有要 AI 的部分在沒有 AI 導入前功能可以關起來。」
+ *
+ * 這也是 CLAUDE.md 那條規則的另一面：AI 不能是必需品，所以它沒設定的時候，
+ * 畫面上不該有一塊看起來壞掉的東西——那會讓人以為這個 app 少了它就不完整。
+ */
+describe('AI 還沒接上線的時候', () => {
+  it('不給那個會失敗的輸入框，改成一句話和一條路', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('ai-settings')) return { configured: false } as never
+      if (path.includes('samples')) return [] as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '自己寫策略' }))
+
+    expect(await screen.findByText(/需要先設定 AI/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/想要的策略/)).not.toBeInTheDocument()
+  })
+
+  it('接上線之後就照常出現', async () => {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.includes('ai-settings')) return { configured: true } as never
+      if (path.includes('samples')) return [] as never
+      return [] as never
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '自己寫策略' }))
+
+    expect(await screen.findByLabelText(/想要的策略/)).toBeInTheDocument()
   })
 })
 

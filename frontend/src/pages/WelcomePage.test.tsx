@@ -33,6 +33,7 @@ function serve({ channels = [], strategies = [] }: { channels?: unknown[]; strat
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path.includes('templates')) return Promise.resolve([TEMPLATE]) as never
     if (path.includes('channels')) return Promise.resolve(channels) as never
+    if (path.includes('ai-settings')) return Promise.resolve({ configured: true }) as never
     if (path.includes('strategies')) return Promise.resolve(strategies) as never
     return Promise.resolve([]) as never
   })
@@ -71,9 +72,36 @@ describe('引導流程', () => {
     renderWizard()
 
     const own = await screen.findByRole('button', { name: /我自己選/ })
-    const ai = screen.getByRole('button', { name: /讓 AI 幫我/ })
+    // AI 那一顆要等「AI 有沒有設定好」的答案回來才會出現（沒設定就不出現），
+    // 所以這裡不能用 getByRole。
+    const ai = await screen.findByRole('button', { name: /讓 AI 幫我/ })
 
     expect(own.compareDocumentPosition(ai)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it('第一個問題就是「要不要先把設定弄完」，那才是新使用者真正卡住的地方', async () => {
+    // 使用者的話：「引導只是引導如何讓 AI 的 API 上線，還有幾個建議資料庫如何讓
+    // 它連上線或是引導用本機的設定。」設一則提醒是之後的事。
+    serve({})
+    renderWizard()
+
+    expect(await screen.findByRole('link', { name: /把設定弄完/ })).toHaveAttribute(
+      'href',
+      '/guide',
+    )
+  })
+
+  it('AI 還沒接上線的時候，就不要給那個選項', async () => {
+    // 給一個按了會走進死路的選項，比不給還糟。
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.includes('ai-settings')) return Promise.resolve({ configured: false }) as never
+      if (path.includes('templates')) return Promise.resolve([TEMPLATE]) as never
+      return Promise.resolve([]) as never
+    })
+    renderWizard()
+
+    expect(await screen.findByRole('button', { name: /我自己選/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /讓 AI 幫我/ })).not.toBeInTheDocument()
   })
 
   it('選「我自己選」就看到現成的範本，全程沒有 AI 也沒有金鑰', async () => {
@@ -84,9 +112,10 @@ describe('引導流程', () => {
     await user.click(await screen.findByRole('button', { name: /我自己選/ }))
 
     expect(await screen.findByText('到價提醒')).toBeInTheDocument()
-    // 沒有任何一個請求打到 AI 那邊。
-    const asked = vi.mocked(api.get).mock.calls.map(([path]) => String(path))
-    expect(asked.some((path) => path.includes('ai'))).toBe(false)
+    // 沒有任何一次真的去問 AI。（「AI 有沒有設定好」還是要問，因為那決定要不要
+    // 給那個選項——但那是問這個部署的狀態，不是花他的錢去問模型。）
+    const posted = vi.mocked(api.post).mock.calls.map(([path]) => String(path))
+    expect(posted.some((path) => path.includes('generate'))).toBe(false)
   })
 
   it('建立完提醒之後，下一步問的是「這些提醒要送到哪裡」', async () => {
@@ -197,17 +226,6 @@ describe('引導流程：讓 AI 幫我', () => {
       return Promise.resolve({ id: 9, name: 'AI 的提醒', is_active: true }) as never
     })
   }
-
-  it('還沒設定 AI 金鑰的時候，不要給一個按了會失敗的輸入框', async () => {
-    serveAi({ configured: false })
-    const user = userEvent.setup()
-    renderWizard()
-
-    await user.click(await screen.findByRole('button', { name: /讓 AI 幫我/ }))
-
-    expect(await screen.findByRole('link', { name: /設定 AI 金鑰/ })).toBeInTheDocument()
-    expect(screen.queryByLabelText(/用一句話說/)).not.toBeInTheDocument()
-  })
 
   it('設定好了就直接在這裡問他要什麼', async () => {
     serveAi({ generate: { ok: true, source_code: 'class Strategy: pass', detected_name: '台積電到價', detected_symbol: '2330.TW' } })

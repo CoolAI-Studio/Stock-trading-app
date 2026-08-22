@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
 import { SymbolInput } from '../components/SymbolInput'
@@ -714,6 +715,14 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
   const [params, setParams] = useState<Record<string, ParamValue>>({})
   const [createError, setCreateError] = useState<string | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
+  // 沒有金鑰的時候，這一整塊要消失，而不是留一個按了會失敗的按鈕。AI 是幫忙的
+  // 那一層，不是這個 app 的必需品——留著一塊壞掉的東西，會讓人以為少了它就不完整。
+  const aiSettingsQuery = useQuery({
+    queryKey: ['ai-settings'],
+    queryFn: () => api.get<{ configured: boolean }>('/api/ai-settings'),
+    retry: false,
+  })
+  const aiReady = aiSettingsQuery.data?.configured === true
   // What the AI asked instead of writing code, and what the owner replies.
   const [question, setQuestion] = useState<string | null>(null)
   const [answer, setAnswer] = useState('')
@@ -837,6 +846,17 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           </div>
         </div>
       )}
+      {!aiReady ? (
+        <div className="space-y-1 rounded border border-slate-800 p-3 text-sm text-slate-400">
+          <p className="font-semibold text-slate-300">用 AI 產生策略</p>
+          <p>
+            需要先設定 AI 的金鑰，現在這個功能是關著的——其他功能完全不受影響。
+          </p>
+          <Link to="/guide" className="underline hover:text-slate-200">
+            去設定引導把 AI 接上線
+          </Link>
+        </div>
+      ) : (
       <div className="space-y-2 rounded border border-slate-800 p-3">
         <p className="text-sm font-semibold text-slate-300">用 AI 產生策略</p>
         {/* Always on screen, with no way to dismiss it: an active strategy's
@@ -905,8 +925,13 @@ function NewStrategyForm({ onDone, samples }: { onDone: () => void; samples: Sam
           </div>
         )}
 
-        <IndicatorCatalogueBrowser />
       </div>
+      )}
+
+      {/* AI 那一塊之外，因為它跟 AI 無關：自己寫程式的人更需要知道有哪些指標
+          可以用（而且要用系統內建的那一份，自己算的數字會跟回測和看盤軟體對不
+          起來）。它本來被放在 AI 區塊裡面，沒有金鑰的時候會一起消失。 */}
+      <IndicatorCatalogueBrowser />
 
       <div>
         <label htmlFor="strategy-name" className="text-sm text-slate-400">
