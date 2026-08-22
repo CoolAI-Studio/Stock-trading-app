@@ -96,7 +96,13 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
     """Everything that stops this deployment from working, most urgent first."""
     missing: list[MissingSetting] = []
 
-    if not (s.DATABASE_URL or "").strip() or s.DATABASE_URL.startswith("sqlite"):
+    database_url = (s.DATABASE_URL or "").strip()
+    # 同一個事實（一個檔案型資料庫）在兩個環境裡的後果不一樣，所以不能用同一句話
+    # 講。認得出自己在哪一家平台上，這件事才分得開（services/hosting.py）。
+    on_a_platform = hosting.detect() is not hosting.GENERIC
+    a_file = database_url.startswith("sqlite")
+
+    if not database_url or (a_file and on_a_platform):
         missing.append(
             MissingSetting(
                 name="DATABASE_URL",
@@ -113,6 +119,30 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "或是自己架的 Postgres 也一樣可以。"
                 ),
                 generator=None,
+                step=1,
+            )
+        )
+    elif a_file:
+        # 本機或自架：那個檔案就在他的硬碟上，不會因為誰重新部署而消失。把這個
+        # 說成「還沒設定完」是錯的——app 會一直說他沒做完一件他已經決定好的事。
+        #
+        # 但也不能什麼都不說：它是一個檔案，可以被刪掉，而這裡沒有任何東西在
+        # 替他備份。不擋，但講。
+        missing.append(
+            MissingSetting(
+                name="DATABASE_URL",
+                why=(
+                    "你現在用的是本機的檔案資料庫（SQLite）。在自己的電腦或自己的機器上"
+                    "這是一個正當的選擇 —— 那個檔案就在那裡，不會因為重新部署而消失。"
+                ),
+                how=(
+                    "要繼續用本機檔案，不用做任何事。只要記得那是一個檔案："
+                    "把它跟其他重要檔案一起備份，因為這個系統不會替你備份它。"
+                    "之後想換成 Postgres 也隨時可以（免費的例如 Neon、Supabase，"
+                    "自己架的也行），把連線字串放進 DATABASE_URL 就好。"
+                ),
+                generator=None,
+                blocking=False,
                 step=1,
             )
         )
