@@ -36,6 +36,8 @@ from app.db.session import get_db
 from app.models.enums import NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationLog
+from app.models.position import Position
+from app.models.strategy import Strategy
 from app.models.user import User
 from app.services import ai_settings, hosting, setup_state, worker_health
 from app.services.ai_provider import get_ai_provider
@@ -164,22 +166,43 @@ def system_status(
         if stalled or never_ran:
             overall = _worse(overall, _FAIL)
 
+    # YOUR symbols, not the process's. The heartbeat is a module-level
+    # singleton and its map is the union across every account -- so this used
+    # to hand each caller everybody else's watch list, named, on a page that
+    # otherwise filters correctly (the notification counts three lines below
+    # have always been scoped by user_id).
+    #
+    # What somebody is watching is one of the most personal things in this
+    # app, and it was being shown to anyone else with an account.
+    owned_symbols = {
+        symbol
+        for (symbol,) in db.query(Strategy.symbol).filter(Strategy.user_id == user.id).distinct()
+    } | {
+        symbol
+        for (symbol,) in db.query(Position.symbol).filter(Position.user_id == user.id).distinct()
+    }
+    own_gaps = {
+        symbol: gap for symbol, gap in beat.symbol_gap_sec.items() if symbol in owned_symbols
+    }
+
     market_data: dict[str, Any] = {
         "consecutive_empty_polls": beat.consecutive_empty_polls,
         # Named and aged, which is the detail /healthz cannot carry. A symbol
         # that never resolves is a symbol whose alerts have silently stopped,
         # and it is fixed by correcting or deleting that one row.
         "stale_symbols": [
-            {"symbol": symbol, "gap_sec": round(gap, 1)}
-            for symbol, gap in sorted(beat.symbol_gap_sec.items())
+            {"symbol": symbol, "gap_sec": round(gap, 1)} for symbol, gap in sorted(own_gaps.items())
         ],
     }
     if settings.WORKER_ENABLED:
         if beat.consecutive_empty_polls >= settings.HEALTH_MAX_EMPTY_POLLS:
             overall = _worse(overall, _FAIL)
-        if any(gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC for gap in beat.symbol_gap_sec.values()):
+        # Also the caller's own: another account's stale symbol turning this
+        # page amber would be an alarm about something they cannot see and
+        # cannot fix.
+        if any(gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC for gap in own_gaps.values()):
             overall = _worse(overall, _FAIL)
-        elif beat.symbol_gap_sec:
+        elif own_gaps:
             # Below the threshold it is a hiccup, not an outage -- but it is
             # the shape an outage starts as, and hiding it until it crosses a
             # line is how somebody finds out too late.

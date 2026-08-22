@@ -175,10 +175,12 @@ def test_the_response_counts_the_symbols_but_does_not_name_them(client, monkeypa
     assert "2330.TW" not in resp.text
 
 
-def test_but_the_owner_can_still_find_out_which_symbol_it_was(auth_client, monkeypatch):
+def test_but_the_owner_can_still_find_out_which_symbol_it_was(auth_client, db_session, monkeypatch):
     """The half of the old contract that must not be lost: 「something is
     wrong」 is not a thing anybody can act on."""
     from app.services import worker_health
+
+    _own_the_symbol(db_session, "2330.TW")
 
     class _Beat:
         @staticmethod
@@ -233,3 +235,32 @@ def test_the_watchdog_still_copes_when_the_names_are_missing():
     problems = read_verdict(503, '{"checks": {"symbols": {"status": "fail"}}}')
 
     assert len(problems) == 1
+
+
+def _own_the_symbol(db_session, symbol: str) -> None:
+    """把那個代號掛在呼叫者名下。
+
+    狀態頁的 stale_symbols 現在只列呼叫者自己的代號——heartbeat 是行程層級的
+    單例，它的表是跨全部帳號的聯集，原本等於把別人在看什麼股票攤開給任何一個
+    有帳號的人（tests/test_the_status_page_shows_only_your_symbols.py）。
+    這個 helper 讓測試植入的代號真的屬於這個帳號，斷言的意思才跟以前一樣。
+    """
+    from decimal import Decimal
+
+    from app.models.enums import DataSource
+    from app.models.strategy import Strategy
+    from app.models.user import User
+
+    owner = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+    db_session.add(
+        Strategy(
+            user_id=owner.id,
+            name=f"watches-{symbol}",
+            symbol=symbol,
+            data_source=DataSource.YFINANCE,
+            source_code="class Strategy:" + chr(10) + "    pass" + chr(10),
+            code_hash=f"hash-{symbol}",
+            default_quantity=Decimal(1),
+        )
+    )
+    db_session.commit()

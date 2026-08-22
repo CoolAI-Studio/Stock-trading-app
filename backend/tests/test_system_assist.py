@@ -76,8 +76,29 @@ def test_the_question_is_sent_with_the_current_state_attached(auth_client):
     assert "worker" in seen["message"].lower()
 
 
-def test_the_state_includes_the_symbols_that_are_not_pricing(auth_client, monkeypatch):
+def test_the_state_includes_the_symbols_that_are_not_pricing(auth_client, db_session, monkeypatch):
+    from decimal import Decimal
+
+    from app.models.enums import DataSource
+    from app.models.strategy import Strategy
+    from app.models.user import User
     from app.services import worker_health
+
+    # 掛在呼叫者名下。送進 AI 的那份摘要跟畫面讀的是同一個欄位，而那個欄位現在
+    # 只列自己的代號——否則等於換一條路把別人的持股清單送到一個外部服務。
+    owner = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+    db_session.add(
+        Strategy(
+            user_id=owner.id,
+            name="watches-2330",
+            symbol="2330.TW",
+            data_source=DataSource.YFINANCE,
+            source_code="class Strategy:" + chr(10) + "    pass" + chr(10),
+            code_hash="hash-assist-test",
+            default_quantity=Decimal(1),
+        )
+    )
+    db_session.commit()
 
     class _Beat:
         @staticmethod

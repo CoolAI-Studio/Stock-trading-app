@@ -89,10 +89,36 @@ def test_it_reports_how_long_the_feed_has_been_empty(auth_client):
     assert "consecutive_empty_polls" in body["market_data"]
 
 
-def test_it_names_the_symbols_that_have_no_price(auth_client, monkeypatch):
+def test_it_names_the_symbols_that_have_no_price(auth_client, db_session, monkeypatch):
     """The failure /healthz was taught to catch, with the detail /healthz
-    cannot carry: which symbol, and for how long."""
+    cannot carry: which symbol, and for how long.
+
+    The strategy row is new here and is not decoration: the list is now scoped
+    to the caller's own symbols, because the heartbeat is a process-wide
+    singleton and its map is the union across every account
+    (tests/test_the_status_page_shows_only_your_symbols.py). A symbol nobody
+    in this account watches is somebody else's business.
+    """
+    from decimal import Decimal
+
+    from app.models.enums import DataSource
+    from app.models.strategy import Strategy
+    from app.models.user import User
     from app.services import worker_health
+
+    owner = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+    db_session.add(
+        Strategy(
+            user_id=owner.id,
+            name="watches-2330",
+            symbol="2330.TW",
+            data_source=DataSource.YFINANCE,
+            source_code="class Strategy:" + chr(10) + "    pass" + chr(10),
+            code_hash="hash-status-test",
+            default_quantity=Decimal(1),
+        )
+    )
+    db_session.commit()
 
     class _Beat:
         @staticmethod
