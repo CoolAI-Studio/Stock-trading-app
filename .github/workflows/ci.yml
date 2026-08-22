@@ -189,9 +189,45 @@ jobs:
       - name: Can a new user get past the first screen?
         run: python backend/scripts/deploy_smoke.py http://localhost:8000
 
+      - name: And when the one value they had to copy is wrong
+        # DATABASE_URL is the only field on that form the app cannot generate --
+        # it is copied out of somebody else's console -- so it is the single
+        # most likely one to be wrong. The old CMD was
+        # `alembic upgrade head && uvicorn`, which meant a wrong value killed
+        # the process before any port was bound: a dead URL, and the setup page
+        # that exists to explain exactly this went down with it.
+        run: |
+          docker run -d --name bad-database -p 8001:8000             -e PORT=8000             -e DATABASE_URL=postgresql://someone:hunter2secret@127.0.0.1:1/nope             -e JWT_SECRET=ci-not-a-placeholder-0123456789             -e TV_WEBHOOK_SECRET=ci-not-a-placeholder-9876543210             -e SECRET_ENCRYPTION_KEY=             trading-app-backend:ci
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8001/api/setup/status >/dev/null 2>&1; then
+              echo "setup page answered after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          body=$(curl -sS http://localhost:8001/api/setup/status)
+          echo "$body"
+          if [ -z "$body" ]; then
+            echo "::error::DATABASE_URL 打錯之後，容器沒有起來——使用者拿到的是一個死掉的網址。"
+            docker logs bad-database
+            exit 1
+          fi
+          # 健康檢查也要過，否則第一次部署會被平台判定失敗，而那個要解釋問題的
+          # 頁面會跟著一起消失。
+          code=$(curl -sS -o /tmp/health.json -w '%{http_code}' http://localhost:8001/healthz)
+          echo "healthz -> $code $(cat /tmp/health.json)"
+          [ "$code" = "200" ] || { echo "::error::/healthz 回 $code，第一次部署會被判定失敗。"; exit 1; }
+          # 而且那一頁不准把密碼印出來：驅動的錯誤訊息會帶著整串連線字串。
+          if printf '%s' "$body" | grep -q hunter2secret; then
+            echo "::error::設定頁把連線字串裡的密碼印出來了。"
+            exit 1
+          fi
+
       - name: Container log (on failure)
         if: failure()
-        run: docker logs first-deploy
+        run: |
+          docker logs first-deploy || true
+          docker logs bad-database || true
 
   # Nobody presses Deploy. That was the whole problem: CLAUDE.md carried
   # 「Render 自動部署 webhook 沒觸發，目前手動」 as a status line for weeks, and

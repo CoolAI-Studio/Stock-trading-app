@@ -35,9 +35,20 @@ ENV APP_GIT_COMMIT=${APP_GIT_COMMIT}
 
 EXPOSE 8000
 
-# Runs the migration on every boot (idempotent -- a no-op once already at
-# head) so a fresh deploy never needs a separate manual migration step.
-# --workers 1 is required: the background market-data worker and the
-# in-memory WS ticket store are both process-local singletons: a second
+# Migrations still run on every boot (idempotent -- a no-op once already at
+# head), but through a script rather than `alembic ... && uvicorn ...`.
+#
+# THE `&&` WAS THE BUG. A DATABASE_URL with one character wrong makes alembic
+# exit non-zero, so uvicorn never ran and no port was ever bound: the deployer
+# got a dead URL. And DATABASE_URL is the one value on that form the app cannot
+# generate -- it has to be copied from somebody else's console -- so it is the
+# single most likely field to be wrong.
+#
+# scripts/start.py reports a failed migration instead of dying on it, then
+# starts the server anyway: the setup page exists precisely to explain this
+# situation, and it can only do that from a process that is alive.
+#
+# --workers 1 is set inside that script: the background market-data worker and
+# the in-memory WS ticket store are process-local singletons, and a second
 # worker process would run its own polling loop and duplicate every signal.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+CMD ["python", "scripts/start.py"]

@@ -27,6 +27,7 @@ report 「done」 about a boot that still crashes, which is worse than no page.
 """
 
 import base64
+import os
 import secrets
 from dataclasses import dataclass
 
@@ -92,6 +93,23 @@ def _vapid_ok(s: Settings) -> tuple[bool, str | None]:
     return True, None
 
 
+def _database_unreachable() -> str | None:
+    """開機時連不上資料庫的理由，或 None。
+
+    READ FROM THE BOOT, NOT PROBED NOW. 第一版是在這裡真的去連一次，那有兩個問題
+    而且第二個比較嚴重：每一次讀設定頁都要等一次連線逾時；而資料庫抖一下就會讓
+    一份**已經設定好**的部署重新變成「未設定」——那會讓不需要登入的設定端點重新
+    打開，也就是把一個暫時的故障變成一次資訊揭露。
+
+    scripts/start.py 在開機跑遷移的時候已經知道答案了，而且它是唯一真正重要的
+    那一刻：那時連不上，代表這份部署從來沒有起來過。它把（洗掉密碼的）理由放在
+    這個環境變數裡。
+
+    開機成功之後才壞掉的資料庫，是 /healthz 和系統狀態頁在管的事，不是設定頁。
+    """
+    return (os.environ.get("DATABASE_MIGRATION_ERROR") or "").strip() or None
+
+
 def missing_settings(s: Settings) -> list[MissingSetting]:
     """Everything that stops this deployment from working, most urgent first."""
     missing: list[MissingSetting] = []
@@ -102,7 +120,28 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
     on_a_platform = hosting.detect() is not hosting.GENERIC
     a_file = database_url.startswith("sqlite")
 
-    if not database_url or (a_file and on_a_platform):
+    unreachable = _database_unreachable() if database_url else None
+
+    if unreachable:
+        # 「還沒填」和「填了但連不上」要做的事不一樣，所以不能共用一句話。
+        # 這一格是整張表單上唯一一個 app 生不出來、只能去別人家的服務複製貼上的
+        # 值，也就是最可能貼錯的那一格。
+        missing.append(
+            MissingSetting(
+                name="DATABASE_URL",
+                why=(
+                    f"資料庫連不上。連線字串已經填了，但這個系統連不到它——對方回的是：{unreachable}"
+                ),
+                how=(
+                    "多半是那一串本身有問題：貼的時候少了一段、密碼後來換過、"
+                    "或那個資料庫已經被刪掉了。回你的資料庫服務主控台重新複製一次"
+                    f"完整的連線字串，再貼進{hosting.paste_target()}的這一格。"
+                ),
+                generator=None,
+                step=1,
+            )
+        )
+    elif not database_url or (a_file and on_a_platform):
         missing.append(
             MissingSetting(
                 name="DATABASE_URL",

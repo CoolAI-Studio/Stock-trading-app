@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -98,9 +99,32 @@ def docs_urls(config: Settings) -> dict[str, str | None]:
 app = FastAPI(title="Trading App API", lifespan=lifespan, **docs_urls(settings))
 
 
+def boot_problem() -> str | None:
+    """A boot-time database failure, or None.
+
+    scripts/start.py runs the migration and, when it cannot, records the reason
+    here instead of exiting -- because exiting is what used to leave the
+    deployer with a dead URL (see that file's docstring).
+
+    Read from the environment at CALL TIME rather than captured at import, so a
+    test can set it and so the value belongs to the process that actually
+    booted this way.
+
+    WHY IT COUNTS AS SETUP MODE. The hosting platform's health check points at
+    /healthz, and a first deploy has no previous version to fall back to: a
+    probe that never passes is a deploy marked FAILED, which takes down the
+    setup page at exactly the moment it is the only useful thing in the app.
+    A migration that could not run at boot means this deployment has never
+    worked -- the schema may not even exist -- and that is 「still being set
+    up」, not 「a working system broke」. The second one still answers 503,
+    because the watchdog depends on it.
+    """
+    return (os.environ.get("DATABASE_MIGRATION_ERROR") or "").strip() or None
+
+
 def setup_mode_active() -> bool:
     """Whether this process is locked to the setup endpoints."""
-    return SETUP_MODE_REASON is not None
+    return SETUP_MODE_REASON is not None or boot_problem() is not None
 
 
 # Paths that still answer in setup mode. /healthz because the external watchdog
