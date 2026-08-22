@@ -99,11 +99,24 @@ class Settings(BaseSettings):
     # real polling loop or touches the network.
     WORKER_ENABLED: bool = True
 
+    # 一輪 tick 的合理上限。裡面最慢的是通知重送掃描，它自己有 20 秒的預算
+    # （notification/retry.py::_MAX_SWEEP_SEC），抓報價和 K 棒還要再加上去。
+    HEALTH_TICK_BUDGET_SEC: float = 60.0
+
     # /healthz fails (503) when the worker's last loop iteration, or its last
-    # poll cycle that completed, is older than this. Deliberately far above
-    # MARKET_DATA_POLL_INTERVAL_SEC: one slow yfinance response must never page
-    # anyone, only a worker that is genuinely wedged or dead.
-    HEALTH_MAX_AGE_SEC: float = 300.0
+    # poll cycle that completed, is older than this.
+    #
+    # IT MUST CLEAR THE LONGEST SLEEP, PLUS ONE TICK. 這個值原本是 300，而市場
+    # 關著的時候 next_poll_delay() 回的 market_loop.CLOSED_POLL_INTERVAL_SEC
+    # 也正好是 300。run_forever 的順序是「mark_loop → 跑一輪 tick（耗時 T）→
+    # 睡 300 秒」，所以每一個循環都有長度 T 的一段時間，探測打進來就是 fail。
+    # 台股使用者從 13:30 到隔天 09:00 都在這個狀態：每天半夜一封「worker 沒有
+    # 在跑」，而 worker 好得很。
+    #
+    # 一個每天亂叫的警報器會被學會忽略，然後真的停擺那一次的信長得一模一樣。
+    # tests/test_the_watchdog_does_not_cry_wolf.py 把這個關係釘成不變式：
+    # 任何一邊的間隔被調整，那些測試就會紅。
+    HEALTH_MAX_AGE_SEC: float = 420.0
 
     # Render's free tier spins the whole process down when idle, so the first
     # probe after a cold start meets a worker that truthfully has never polled.
