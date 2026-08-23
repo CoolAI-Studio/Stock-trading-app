@@ -86,6 +86,21 @@ const DEFAULT_DEPTH = 300
 // requests to reach five years while doubling reaches it in four.
 const DEEPEN_BY = 2
 
+// HOW MUCH IS ON SCREEN WHEN THE CHART OPENS, in candles.
+//
+// NOT fitContent(). Fitting everything is what broke the first attempt at this:
+// the visible range became the whole of the loaded history, and combined with
+// fixLeftEdge -- which exists to stop the canvas scrolling into blank space --
+// the library then refuses to move when somebody drags leftwards, because
+// there is nothing to the left of what is already shown. Ten passing tests, a
+// green CI and a successful deploy all missed it, because the hand-written
+// stub's fitContent is an empty function.
+//
+// Showing the most recent slice instead leaves the history off-screen to the
+// left, so dragging works from the first second and reaching the oldest candle
+// is what asks for more.
+const INITIAL_VISIBLE_BARS = 120
+
 // How close the left edge of the view has to come to the oldest candle before
 // the next depth is fetched. Waiting until they are flush means the reader
 // watches themselves hit the wall first.
@@ -362,11 +377,14 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
 
     const onRange = (range: LogicalRange | null) => {
       if (!range) return
-      // ALREADY SHOWING EVERYTHING. fitContent leaves `from` at zero too, so a
-      // handler that looked only at `from` would make every chart dig itself
-      // down to the ceiling the moment it loaded -- one request turned into a
-      // chain of them, on the provider this app cannot afford to lose.
-      if (range.to - range.from + 1 >= loadedRef.current) return
+      // JUST THE LEFT EDGE. An earlier version also refused when the view
+      // already held every loaded candle, to stop fitContent triggering a dig
+      // on load -- but that condition is exactly true of the gesture this is
+      // for, so it blocked the real thing to guard against a self-inflicted
+      // one. The self-inflicted one is gone now: the opening view deliberately
+      // leaves history off-screen (INITIAL_VISIBLE_BARS), so `from` starts well
+      // clear of zero, and 「the source has no more」 is answered by what came
+      // back rather than by how much is on screen.
       if (range.from > LOAD_MORE_WITHIN_BARS) return
       deepenRef.current()
     }
@@ -449,7 +467,17 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
         // breaking the chart over; the reader keeps whatever the library chose.
       }
     } else {
-      scale?.fitContent()
+      // The most recent slice, with the rest of the history off-screen to the
+      // left where it can be dragged into view. See INITIAL_VISIBLE_BARS.
+      try {
+        scale?.setVisibleLogicalRange({
+          from: Math.max(0, bars.length - INITIAL_VISIBLE_BARS),
+          to: bars.length - 1,
+        })
+      } catch {
+        // A range the library will not take (one candle, an empty series).
+        // Whatever it chose by itself is still a chart.
+      }
     }
   }, [query.data, symbol, timeframe, dataSource])
 

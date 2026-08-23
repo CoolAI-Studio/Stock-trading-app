@@ -53,6 +53,9 @@ type LogicalRange = { from: number; to: number }
 const rangeHandlers: ((range: LogicalRange | null) => void)[] = []
 const setVisibleRange = vi.fn()
 const getVisibleRange = vi.fn(() => ({ from: 1, to: 2 }))
+/** 初始視角是用「最後 N 根」設的，所以它是索引不是時間。 */
+const setVisibleLogicalRange = vi.fn()
+const getVisibleLogicalRange = vi.fn(() => ({ from: 0, to: 1 }))
 
 /** Every line series handed to the renderer, with the pane it went on.
  *
@@ -116,6 +119,8 @@ vi.mock('lightweight-charts', () => ({
       },
       getVisibleRange,
       setVisibleRange,
+      getVisibleLogicalRange,
+      setVisibleLogicalRange,
       applyOptions: vi.fn(),
     }),
     applyOptions: vi.fn(),
@@ -1013,9 +1018,33 @@ describe('往前拉要看得到更早的資料，不是一片空白', () => {
     })
   })
 
-  it('全部 K 棒都在畫面上時不會亂問 —— 沒有更早的可以拉', async () => {
-    // fitContent 之後可見範圍就是全部，from 也是 0。只看 from 會讓每一張圖一
-    // 載入就自己往下挖到上限，把單一請求變成一連串的請求。
+  it('一載入就要拉得動 —— 初始視角把歷史留在畫面左外側', async () => {
+    // 這是上一版真正壞掉的地方，而十條測試全綠、CI 全綠、部署成功都沒抓到。
+    //
+    // fitContent() 讓可見範圍等於「全部載入的 K 棒」。再配上 fixLeftEdge（那是
+    // 用來擋住捲進空白的），使用者往左拉的時候函式庫會說「左邊沒有東西了」，
+    // 於是**畫布紋風不動**——除非他先用滾輪放大。沒有人會猜到要先放大。
+    //
+    // 所以初始視角改成只顯示最近的那幾根，歷史留在畫面左外側：一開始就拉得動，
+    // 拉到最舊那一根就去要更早的。
+    sourceWith(10_000)
+    show()
+    await drawn()
+
+    await vi.waitFor(() => {
+      expect(setVisibleLogicalRange).toHaveBeenCalled()
+    })
+    const range = setVisibleLogicalRange.mock.calls.at(-1)![0] as { from: number; to: number }
+    expect(range.to).toBe(DEPTH - 1)
+    expect(range.from).toBeGreaterThan(0)
+    expect(range.to - range.from).toBeLessThan(DEPTH - 1)
+    // 而且不是 fitContent —— 那正是把畫布釘死的那一個。
+    expect(fitContent).not.toHaveBeenCalled()
+  })
+
+  it('往左拉不需要先放大 —— from 靠近 0 就去要，不管畫面裝了幾根', async () => {
+    // 上一版多了一道「畫面已裝下全部就不要問」的閘門，本來是防止 fitContent 自
+    // 己觸發無限加深。初始視角改掉之後那道閘門不再需要，而它會擋掉真正的手勢。
     sourceWith(10_000)
     show()
     await drawn()
@@ -1024,8 +1053,9 @@ describe('往前拉要看得到更早的資料，不是一片空白', () => {
       for (const handler of [...rangeHandlers]) handler({ from: 0, to: DEPTH - 1 })
     })
 
-    await new Promise((r) => setTimeout(r, 50))
-    expect(depthsAsked()).toEqual([DEPTH])
+    await vi.waitFor(() => {
+      expect(depthsAsked().at(-1)).toBeGreaterThan(DEPTH)
+    })
   })
 
   it('上游回的比問的少，就是沒有更早的了，不要一直問', async () => {
