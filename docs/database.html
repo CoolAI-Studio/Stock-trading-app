@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>資料放哪裡 — 股票提醒儀表板</title>
+<meta name="description" content="放在自己的電腦，還是放在雲端。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="steps-nav">
+  <div class="wrap">
+    <ol>
+      <li><a href="index.html">1. AI</a></li>
+      <li class="now">2. 資料</li>
+      <li><a href="install.html">3. 安裝</a></li>
+    </ol>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <h1>資料放哪裡。</h1>
+    <p class="lede">差別只有一件事：電腦關機的時候會怎樣。</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="cards">
+      <div class="card">
+        <p class="who">自己的電腦</p>
+        <h3>硬碟上一個檔案</h3>
+        <ul>
+          <li>不用註冊，不用信用卡</li>
+          <li><strong>關機就停止盯盤</strong></li>
+          <li>要自己備份</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="who">雲端</p>
+        <h3>你關電腦它照樣在跑</h3>
+        <ul>
+          <li>手機在哪裡都收得到</li>
+          <li>有免費方案，多數不用卡</li>
+          <li>免費方案會休眠，醒來等幾秒</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>不確定就選雲端。</strong>它的價值在你沒看盤的時候。之後改得掉。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>雲端用哪一家</h2>
+    <p class="lede">它要的是三樣東西，不是三個品牌。</p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>要的東西</th><th>免費的例子</th><th>也可以</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>跑 Docker</td>
+            <td>Render</td>
+            <td>Railway、Fly.io、Koyeb、自己的機器</td>
+          </tr>
+          <tr>
+            <td>一個 Postgres</td>
+            <td>Neon、Supabase</td>
+            <td>任何 Postgres，含自架</td>
+          </tr>
+          <tr>
+            <td>放前端</td>
+            <td>Vercel</td>
+            <td>Cloudflare Pages、Netlify</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      只有資料庫要去別人家拿：一串 <code>postgresql://</code> 開頭的連線字串。其餘系統自己產生。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="next">
+      <a class="btn" href="install.html">下一步：安裝 →</a>
+      <a class="btn ghost" href="index.html">← 上一步</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>資料在你自己開的資料庫裡。</p>
+    <p><a href="https://github.com/CoolAI-Studio/Stock-trading-app">原始碼</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安裝 — 股票提醒儀表板</title>
+<meta name="description" content="六步。最花時間的是第一步。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="steps-nav">
+  <div class="wrap">
+    <ol>
+      <li><a href="index.html">1. AI</a></li>
+      <li><a href="database.html">2. 資料</a></li>
+      <li class="now">3. 安裝</li>
+    </ol>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <h1>十五分鐘。</h1>
+    <p class="lede">最花時間的是第一步。其餘系統會帶你走。</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <ol class="steps">
+      <li>
+        <h3>開一個 Postgres</h3>
+        <p>複製它給你的連線字串。</p>
+      </li>
+      <li>
+        <h3>部署後端</h3>
+        <p>用 <code>backend/Dockerfile</code>。只填 <code>DATABASE_URL</code>，其餘留白。</p>
+      </li>
+      <li>
+        <h3>部署前端</h3>
+        <p>只填後端網址。</p>
+      </li>
+      <li>
+        <h3>打開你的網址</h3>
+        <p>設定頁會列出還缺什麼，能產生的都有按鈕。</p>
+      </li>
+      <li>
+        <h3>建立帳號</h3>
+        <p>第一個也是唯一一個。建好後註冊自動關閉。</p>
+      </li>
+      <li>
+        <h3>接上三件事</h3>
+        <p>資料庫、AI、通知。每一格都要按到通為止。</p>
+      </li>
+    </ol>
+
+    <div class="note">
+      在自己電腦上跑：<code>docker compose up</code>，然後從第 4 步開始。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="next">
+      <a class="btn" href="https://github.com/CoolAI-Studio/Stock-trading-app/blob/main/DEPLOYMENT.md">
+        完整的部署說明
+      </a>
+      <a class="btn ghost" href="database.html">← 上一步</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>裝完之後那一份完全屬於你。</p>
+    <p><a href="https://github.com/CoolAI-Studio/Stock-trading-app">原始碼</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
