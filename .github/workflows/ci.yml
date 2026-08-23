@@ -139,6 +139,57 @@ jobs:
       - name: Build
         run: npm run build
 
+  # THE ONE GATE THAT OPENS A REAL BROWSER.
+  #
+  # It exists because of a specific escape. `e8124ce` fixed 「圖表往前拉是一片空
+  # 白」; ten unit tests were green, all four jobs here were green, the deploy
+  # verified itself against the live commit -- and the chart still would not
+  # move under the user's mouse. `fixLeftEdge: true` plus `fitContent()` makes
+  # the library refuse to scroll, and NOTHING above can see that:
+  #
+  #   - the unit tests replace the drawing library with a hand-written stub
+  #     whose `fitContent` is an empty function, so the stub cannot reproduce it
+  #   - the real-library test runs in jsdom, where layout waits for an animation
+  #     frame that never comes, so interaction is untestable there
+  #   - tsc, oxlint and vite build have no opinion about what an option DOES
+  #
+  # DELIBERATELY NOT IN deploy's `needs`. A browser test is the flakiest thing
+  # in this file -- a browser download, a slow runner, a rendering change -- and
+  # deploy blocks on its dependencies. 「警告不能停擺」 outranks the chart: a
+  # flaky drag must never be able to hold back a fix to the notification path.
+  # It still turns this run red, which is the part that matters.
+  chart:
+    name: chart (real browser, real drag)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Keyed on the lockfile: Playwright pins a browser build, so a new
+      # Playwright means a new download and an old cache must not be reused.
+      - name: Cache the browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Drag the chart
+        run: npm run test:chart
+
   # Everything above tests the CODE. This tests the thing a new person actually
   # does: press Deploy, leave the optional boxes blank, open the URL.
   #

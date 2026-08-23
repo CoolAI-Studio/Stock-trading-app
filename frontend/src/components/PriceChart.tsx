@@ -12,6 +12,7 @@ import {
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api } from '../lib/api'
+import { INITIAL_VISIBLE_BARS, LOAD_MORE_WITHIN_BARS } from '../lib/chartViewport'
 import { looksUnpriceable } from '../lib/symbol'
 import { useTimeframes } from '../lib/timeframes'
 import { tradingViewSymbol } from '../lib/tradingView'
@@ -86,25 +87,9 @@ const DEFAULT_DEPTH = 300
 // requests to reach five years while doubling reaches it in four.
 const DEEPEN_BY = 2
 
-// HOW MUCH IS ON SCREEN WHEN THE CHART OPENS, in candles.
-//
-// NOT fitContent(). Fitting everything is what broke the first attempt at this:
-// the visible range became the whole of the loaded history, and combined with
-// fixLeftEdge -- which exists to stop the canvas scrolling into blank space --
-// the library then refuses to move when somebody drags leftwards, because
-// there is nothing to the left of what is already shown. Ten passing tests, a
-// green CI and a successful deploy all missed it, because the hand-written
-// stub's fitContent is an empty function.
-//
-// Showing the most recent slice instead leaves the history off-screen to the
-// left, so dragging works from the first second and reaching the oldest candle
-// is what asks for more.
-const INITIAL_VISIBLE_BARS = 120
+// 這兩個數字住在 lib/chartViewport.ts：開真的瀏覽器的那一關在 node 專案下跑，
+// 讀不到這個檔案（JSX ＋ DOM 型別），而抄一份過去就會漂。
 
-// How close the left edge of the view has to come to the oldest candle before
-// the next depth is fetched. Waiting until they are flush means the reader
-// watches themselves hit the wall first.
-const LOAD_MORE_WITHIN_BARS = 20
 
 // Each extra pane costs height. Enough to read a shape in, not so much that
 // four of them push the candles off a laptop screen.

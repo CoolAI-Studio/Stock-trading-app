@@ -2,7 +2,13 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
+    // DOM is here for ONE reason: the bodies of Playwright's `page.evaluate`
+    // callbacks are browser code that happens to be written inside a node
+    // file, so `window` and `document` in them are real. The cost is that a
+    // node-side test could now reference `document` and only fail when it
+    // runs -- accepted, because the alternative is casting every browser
+    // global in that file and calling the result a type.
+    "lib": ["ES2023", "DOM"],
     "types": ["node"],
     "skipLibCheck": true,
 
