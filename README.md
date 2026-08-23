@@ -3,6 +3,11 @@
 個人股票交易儀表板：網頁化的策略監控、手動確認下單、TradingView Webhook 訊號、即時報價推播、
 LINE/Telegram/Email 通知。後端 FastAPI + SQLAlchemy，前端 Vite + React + TypeScript。
 
+> **只想用、不想讀程式碼？**
+> [**➜ 開始使用（圖解引導）**](https://coolai-studio.github.io/Stock-trading-app/)
+> —— 一頁講完「放自己電腦還是放雲端」「雲端要用哪一家」，然後才回到這裡。
+> 步驟跟下面完全一樣，只是有圖。
+
 ## 想要自己的一份嗎？一鍵部署
 
 點下面兩個按鈕，用你自己的帳號部署一份完全獨立的系統——你自己的網址、自己的資料庫、
