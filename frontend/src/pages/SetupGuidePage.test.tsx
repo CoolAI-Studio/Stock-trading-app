@@ -125,6 +125,51 @@ describe('設定引導（分頁）', () => {
     expect(screen.queryByText(/還沒設定/)).not.toBeInTheDocument()
   })
 
+  it('本機跑的時候，本機和雲端是兩個可以選的，不是系統替他決定', async () => {
+    serve({ system: LOCAL_FILE })
+    renderGuide()
+
+    expect(await screen.findByRole('button', { name: /就用本機/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /改用雲端/ })).toBeInTheDocument()
+  })
+
+  it('選「改用雲端」就拿得到完整步驟 —— 那串步驟本來只有容器裡的人看得到', async () => {
+    // 原本寫死在 `{database?.ephemeral && ...}` 裡面，所以在本機跑的人想搬上雲
+    // 端，只會拿到一句「把連線字串放進 DATABASE_URL」。對不寫程式的人，那句話
+    // 就是流程到此結束。
+    serve({ system: LOCAL_FILE })
+    const user = userEvent.setup()
+    renderGuide()
+
+    await user.click(await screen.findByRole('button', { name: /改用雲端/ }))
+
+    expect(await screen.findByText(/去開一個 Postgres/)).toBeInTheDocument()
+    expect(screen.getByText(/你的部署平台上「環境變數」那一頁/)).toBeInTheDocument()
+  })
+
+  it('選「就用本機」就不要再囉唆，只提醒備份', async () => {
+    serve({ system: LOCAL_FILE })
+    const user = userEvent.setup()
+    renderGuide()
+
+    await user.click(await screen.findByRole('button', { name: /就用本機/ }))
+
+    expect(await screen.findByText(/不用再設定/)).toBeInTheDocument()
+    expect(screen.getByText(/備份/)).toBeInTheDocument()
+    expect(screen.queryByText(/去開一個 Postgres/)).not.toBeInTheDocument()
+  })
+
+  it('會被清空的那一種不給「用本機」這個選項，而且說得出為什麼', async () => {
+    // 這裡不是偏好問題。容器裡的檔案下一次重新部署就沒了，把它列成一個選項，
+    // 等於把「資料會不見」包裝成一個可以勾的方案。
+    serve({ system: EPHEMERAL_FILE })
+    renderGuide()
+
+    expect(await screen.findByText(/去開一個 Postgres/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /就用本機/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/每次重新部署都會換一個新的容器/)).toBeInTheDocument()
+  })
+
   it('改完之後可以在這裡重新檢查，不用自己猜生效了沒', async () => {
     serve({ system: EPHEMERAL_FILE })
     const user = userEvent.setup()

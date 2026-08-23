@@ -48,9 +48,20 @@ export function SetupGuidePage() {
     retry: false,
   })
 
+  // 使用者選的方案。null＝還沒選，畫面就把兩個選項都攤開。
+  // 這只是「現在要看哪一段說明」，不是事實來源——那一格完成了沒，仍然由後端
+  // 回報的現況決定（見 done.database）。
+  const [dbPlan, setDbPlan] = useState<'local' | 'cloud' | null>(null)
+
   const database = systemQuery.data?.database
   const platform = systemQuery.data?.platform
   const channels = (channelsQuery.data ?? []).filter((channel) => channel.is_enabled)
+
+  // 本機的檔案只有在「不會被清空」的時候才是一個正當選項。已經是 Postgres 的
+  // 人不用選，那一格已經完成了。
+  const canChooseLocal = database?.kind === 'sqlite' && !database.ephemeral
+  // 會被清空的那一種沒得選，直接給步驟。
+  const showCloudSteps = database?.ephemeral === true || dbPlan === 'cloud'
 
   const done: Record<TabKey, boolean> = {
     // 本機的檔案資料庫是一個選擇，不是一件沒做完的事。只有「在會被清空的地方
@@ -159,7 +170,49 @@ export function SetupGuidePage() {
             <p className="mt-1">{database?.detail}</p>
           </div>
 
-          {database?.ephemeral && (
+          {/* 本機和雲端是兩個可以選的方案，不是系統替他判斷的結果。
+              只有「在會被清空的地方放著一個檔案」不給選——那不是偏好問題，
+              把它列成一個選項等於把「資料會不見」包裝成一個可以勾的方案。 */}
+          {canChooseLocal && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setDbPlan('local')}
+                aria-pressed={dbPlan === 'local'}
+                className={`rounded px-3 py-1 text-sm ${
+                  dbPlan === 'local'
+                    ? 'bg-sky-700 font-medium text-white'
+                    : 'border border-slate-600 text-slate-200 hover:border-slate-400'
+                }`}
+              >
+                就用本機這個檔案
+              </button>
+              <button
+                onClick={() => setDbPlan('cloud')}
+                aria-pressed={dbPlan === 'cloud'}
+                className={`rounded px-3 py-1 text-sm ${
+                  dbPlan === 'cloud'
+                    ? 'bg-sky-700 font-medium text-white'
+                    : 'border border-slate-600 text-slate-200 hover:border-slate-400'
+                }`}
+              >
+                改用雲端資料庫
+              </button>
+            </div>
+          )}
+
+          {dbPlan === 'local' && (
+            <p className="text-sm text-slate-400">
+              好，這一格<strong className="text-slate-200">不用再設定</strong>了。
+              資料就存在這台機器上的那個檔案裡，沒有別人碰得到。
+              唯一要記得的是<strong className="text-slate-200">備份</strong>：那個檔案不見了，
+              提醒、策略、紀錄就一起不見了。
+            </p>
+          )}
+
+          {/* 步驟本來寫死在「會被清空」那個條件裡，所以在本機跑的人想搬上雲端，
+              只拿得到一句「把連線字串放進 DATABASE_URL」。對不寫程式的人，那句
+              話就是流程到此結束。 */}
+          {showCloudSteps && (
             <ol className="list-inside list-decimal space-y-2 text-sm text-slate-300">
               <li>
                 去開一個 Postgres。免費的例如{' '}
@@ -183,13 +236,6 @@ export function SetupGuidePage() {
               </li>
               <li>存檔之後服務會自己重新啟動，然後回到這一頁按「重新檢查」。</li>
             </ol>
-          )}
-
-          {database?.kind === 'sqlite' && !database.ephemeral && (
-            <p className="text-sm text-slate-400">
-              要繼續用本機檔案，不用做任何事。想換成 Postgres 也隨時可以：把連線字串放進
-              DATABASE_URL（{platform?.env_where}）。
-            </p>
           )}
 
           <button
