@@ -42,10 +42,24 @@ const STATUS: SetupStatus = {
     {
       name: 'DATABASE_URL',
       why: '沒有資料庫，這個系統存不了任何東西。',
-      how: '去 neon.tech 註冊一個免費帳號、建立一個資料庫。',
+      how: '你需要一個 Postgres 連線字串。',
       generator: null,
       blocking: true,
       step: 1,
+      options: [
+        {
+          kind: 'local',
+          label: '就跑在自己的電腦或自己的機器上',
+          detail: '這個平台每次重新部署都會清空那個檔案。',
+          url: null,
+        },
+        {
+          kind: 'cloud',
+          label: 'Neon（免費方案夠用，不用信用卡）',
+          detail: '註冊之後開一個 project，它會給你一串連線字串。',
+          url: 'https://neon.tech',
+        },
+      ],
     },
   ],
   where: 'Render 後台 → 你的服務 → 左邊選單 Environment → 找到同名的欄位貼上去。',
@@ -96,6 +110,54 @@ describe('還沒設定完的部署', () => {
 // --- the button that removes the Python step --------------------------------
 
 describe('app 自己產生得出來的值', () => {
+  it('同一個步驟只標一次 —— 連續三個「步驟 2」讀起來像壞掉', async () => {
+    // 實際開瀏覽器看到的是：步驟 1 / 步驟 2 / 步驟 2 / 步驟 2 / 步驟 3。
+    // 數字沒有錯——三把金鑰本來就是同一個階段——但讀的人問的是「我現在到底在第
+    // 幾步」，而畫面回答他三次一樣的數字。
+    vi.mocked(api.get).mockResolvedValue({
+      ...STATUS,
+      missing: [
+        { ...STATUS.missing[1] },
+        { ...STATUS.missing[0] },
+        { ...STATUS.missing[0], name: 'JWT_SECRET' },
+        { ...STATUS.missing[0], name: 'TV_WEBHOOK_SECRET' },
+      ],
+    } as never)
+    show()
+
+    await screen.findByText('TV_WEBHOOK_SECRET')
+    expect(screen.getAllByText(/步驟 2/)).toHaveLength(1)
+    expect(screen.getAllByText(/步驟 1/)).toHaveLength(1)
+  })
+
+  it('資料庫那一格把方案攤開，不是塞成一段話', async () => {
+    // 使用者的話：「render 只是其一的解法不是嗎？你要提供方案給他們選。」
+    //
+    // 而這一頁特別重要的理由，是實際走過一遍才看得出來的：資料庫還沒接上的時
+    // 候整個 app 是鎖住的，他連帳號都還沒有，走不到登入之後的設定引導。**雲端
+    // 使用者能做這個選擇的地方只有這裡。**
+    show()
+
+    expect(await screen.findByText('就跑在自己的電腦或自己的機器上')).toBeInTheDocument()
+    expect(screen.getByText(/Neon（免費方案夠用/)).toBeInTheDocument()
+    expect(screen.getByText(/每次重新部署都會清空那個檔案/)).toBeInTheDocument()
+  })
+
+  it('有網址的方案要點得過去 —— 不要叫他自己去搜尋', async () => {
+    show()
+
+    const link = await screen.findByRole('link', { name: /Neon/ })
+    expect(link).toHaveAttribute('href', 'https://neon.tech')
+  })
+
+  it('沒有方案可選的欄位就不要生出一個空的清單', async () => {
+    // 一把金鑰就是一把金鑰，沒有「選哪一種」的問題。
+    show()
+
+    const key = (await screen.findByText('SECRET_ENCRYPTION_KEY')).closest('li')!
+    expect(within(key).queryByRole('link')).not.toBeInTheDocument()
+  })
+
   it('可以產生的欄位有按鈕', async () => {
     show()
 

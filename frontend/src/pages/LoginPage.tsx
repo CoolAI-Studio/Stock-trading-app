@@ -115,8 +115,10 @@ export function LoginPage() {
 
         {waitingForOwner && (
           <p className="rounded border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200">
-            這個部署還沒有擁有者。你現在建立的是**第一個也是唯一一個**帳號——建立完成之後
-            註冊就會自己關起來，別人打不進來。密碼請記牢，這裡沒有「忘記密碼」。
+            這個部署還沒有擁有者。你現在建立的是
+            <strong className="font-semibold">第一個也是唯一一個</strong>
+            帳號——建立完成之後註冊就會自己關起來，別人打不進來。
+            密碼請記牢，這裡沒有「忘記密碼」。
           </p>
         )}
 

@@ -580,6 +580,16 @@ export interface SetupStatus {
      * is what render.yaml already gave them; the order is what was missing,
      * and two of these cannot be KNOWN until the step before has happened. */
     step: number
+    /** 可以選的做法。空的代表這一格沒有「選哪一種」的問題（一把金鑰就是一把
+     * 金鑰）。資料庫是唯一有選擇的那一格，而**雲端使用者能做那個選擇的地方
+     * 只有這一頁**：資料庫還沒接上的時候整個 app 是鎖住的，他連帳號都還沒
+     * 有，走不到登入之後的設定引導。 */
+    options?: {
+      kind: string
+      label: string
+      detail: string
+      url: string | null
+    }[]
   }[]
   /** Where to paste the answers, in the words of the platform this deployment
    * is actually on -- the backend works that out from the environment

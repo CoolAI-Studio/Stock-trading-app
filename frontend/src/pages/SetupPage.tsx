@@ -47,7 +47,16 @@ function GeneratedValues({ values }: { values: Record<string, string> }) {
   )
 }
 
-function MissingRow({ item }: { item: SetupStatus['missing'][number] }) {
+function MissingRow({
+  item,
+  showStep,
+}: {
+  item: SetupStatus['missing'][number]
+  /** 同一個步驟裡的第一項才標。三把金鑰本來就是同一個階段，數字沒有錯——但連續
+   *  三個「步驟 2」，讀的人問的是「我現在到底在第幾步」，而畫面回答他三次一樣的
+   *  數字。 */
+  showStep: boolean
+}) {
   const [values, setValues] = useState<Record<string, string> | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -69,13 +78,45 @@ function MissingRow({ item }: { item: SetupStatus['missing'][number] }) {
         {/* The step number is the part render.yaml could not show: seven blanks
             presented side by side look independent, and two of them cannot even
             be KNOWN until the one before has happened. */}
-        <span className="rounded bg-slate-700 px-1.5 text-xs text-slate-300">
-          步驟 {item.step}
-        </span>
+        {showStep && (
+          <span className="rounded bg-slate-700 px-1.5 text-xs text-slate-300">
+            步驟 {item.step}
+          </span>
+        )}
         <span className="font-mono text-sm font-medium text-amber-300">{item.name}</span>
       </p>
       <p className="mt-1 text-sm text-slate-300">{item.why}</p>
       <p className="mt-1 text-sm text-slate-400">{item.how}</p>
+
+      {/* 方案，攤開並排。原本這一格是一段散文，一句話裡塞四條路——而讀它的人
+          按這個專案的定義不是工程師，一段話沒有辦法讓人「選」。
+          有網址的就給連結：叫他自己去搜尋，等於把流程交還給運氣。 */}
+      {(item.options?.length ?? 0) > 0 && (
+        <ul className="mt-2 space-y-2">
+          {item.options!.map((option) => (
+            <li
+              key={option.label}
+              className="rounded border border-slate-700 bg-slate-950/60 px-3 py-2"
+            >
+              <p className="text-sm font-medium text-slate-200">
+                {option.url ? (
+                  <a
+                    href={option.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sky-400 underline"
+                  >
+                    {option.label}
+                  </a>
+                ) : (
+                  option.label
+                )}
+              </p>
+              <p className="mt-0.5 text-sm text-slate-400">{option.detail}</p>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* CORS_ORIGINS is the last step of the flow and the one most likely to
           be got wrong, because it cannot be known until the frontend exists.
@@ -175,8 +216,12 @@ export function SetupPage() {
                 這些沒填，系統現在完全不能用（{blocking.length} 項）
               </h2>
               <ul className="space-y-3">
-                {blocking.map((item) => (
-                  <MissingRow key={item.name} item={item} />
+                {blocking.map((item, index, arr) => (
+                  <MissingRow
+                    key={item.name}
+                    item={item}
+                    showStep={index === 0 || arr[index - 1].step !== item.step}
+                  />
                 ))}
               </ul>
             </section>
@@ -192,8 +237,12 @@ export function SetupPage() {
                 這些不會擋住啟動，但沒填就會有東西不能用（{advisory.length} 項）
               </h2>
               <ul className="space-y-3">
-                {advisory.map((item) => (
-                  <MissingRow key={item.name} item={item} />
+                {advisory.map((item, index, arr) => (
+                  <MissingRow
+                    key={item.name}
+                    item={item}
+                    showStep={index === 0 || arr[index - 1].step !== item.step}
+                  />
                 ))}
               </ul>
             </section>

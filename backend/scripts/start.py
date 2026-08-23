@@ -62,9 +62,46 @@ def run_migrations() -> str | None:
         return None
 
     output = (completed.stderr or completed.stdout or "").strip()
-    # 最後幾行才是原因，前面是 alembic 的例行輸出。
-    tail = "\n".join(output.splitlines()[-8:])
-    return scrub(tail or f"alembic exited with {completed.returncode}")
+    return scrub(readable_reason(output) or f"alembic exited with {completed.returncode}")
+
+
+def readable_reason(output: str) -> str:
+    """A failure said in one line, or as close to it as the output allows.
+
+    THE SETUP PAGE PRINTS THIS VERBATIM, under 「對方回的是：」, to somebody who
+    is not a programmer. It used to be the last eight lines of alembic's
+    stderr, which for the commonest failure is the tail of a Python traceback:
+    file paths on this machine, sqlalchemy's own filenames, and a caret line.
+    None of that says what is wrong. The LAST line does, and it is the only
+    line that ever did.
+
+    Everything the traceback machinery adds is dropped -- the header, the
+    frame lines, the source echoed under each frame, the carets. What is left
+    is the exception itself; output that was never a traceback in the first
+    place (alembic says plenty of things in plain sentences) comes through
+    untouched.
+    """
+    kept: list[str] = []
+    skip_source_echo = False
+    for raw in output.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if line.strip() == "Traceback (most recent call last):":
+            continue
+        if line.lstrip().startswith('File "'):
+            # The line after a frame is the source it points at, indented.
+            skip_source_echo = True
+            continue
+        if skip_source_echo and raw[:1].isspace():
+            continue
+        skip_source_echo = False
+        kept.append(line)
+
+    # The last two, not just the last: a chained failure ends with a cause
+    # line or a 「(Background on this error at: ...)」, and the useful half is
+    # not always the final one.
+    return "\n".join(kept[-2:]).strip()
 
 
 def main() -> int:

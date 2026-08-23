@@ -40,6 +40,25 @@ _TOKEN_BYTES = 48
 
 
 @dataclass(frozen=True)
+class SetupOption:
+    """一個可以選的做法，附上選了它之後會怎樣。
+
+    存在的理由是實測走過一遍才看得出來的：**雲端使用者做這個決定的地方只有登入
+    之前那一頁。** 資料庫還是容器裡的檔案時，DATABASE_URL 擋住整個 app，他連帳
+    號都還沒有，走不到登入之後的設定引導；等他走得到，資料庫已經是 Postgres 了。
+
+    原本這裡是一段散文，一句話裡塞四個方案（「免費的例如 Neon、Supabase；要更穩
+    的可以用付費方案，或是自己架的也行」）。讀它的人按這個專案的定義不是工程師，
+    而一段話沒有辦法讓人「選」。
+    """
+
+    kind: str
+    label: str
+    detail: str
+    url: str | None = None
+
+
+@dataclass(frozen=True)
 class MissingSetting:
     """One blank, and everything the person filling it in needs to know.
 
@@ -58,6 +77,9 @@ class MissingSetting:
     # start」 and 「TradingView will send to the wrong address」 are not the same
     # urgency, and a page that mixes them teaches people to skim.
     blocking: bool = True
+    # 可以選的做法。空的代表這一格沒有「選哪一種」的問題（一把金鑰就是一把金
+    # 鑰），有東西的時候畫面要把它們並排攤開，而不是寫成一段話。
+    options: tuple[SetupOption, ...] = ()
     # Which step of the deploy flow this belongs to. render.yaml presents seven
     # values as a flat parallel list; three of them are a chain, and a stranger
     # cannot see the chain. The number is what puts them back in order.
@@ -110,6 +132,50 @@ def _database_unreachable() -> str | None:
     return (os.environ.get("DATABASE_MIGRATION_ERROR") or "").strip() or None
 
 
+def _database_options(on_a_platform: bool) -> tuple[SetupOption, ...]:
+    """資料放哪裡，有哪幾條路。
+
+    同一份清單在兩種環境下都給得出來，差別只在「跑在自己的機器上」那一條的後果：
+    在自己的電腦上它是**做完了**，在雲端平台上它會被清空。兩種都要看得見——看不
+    到的選項等於不存在，而這個決定是使用者的，不是這個 app 的。
+    """
+    return (
+        SetupOption(
+            kind="local",
+            label="就跑在自己的電腦或自己的機器上",
+            detail=(
+                "這個平台每次重新部署都會換一個新的容器，裡面那個檔案會一起消失——"
+                "帳號、策略、通知設定全部被清空，而且不會有任何提示。"
+                "所以在這裡這不是一個能用的選擇。"
+                if on_a_platform
+                else "不用做任何事，資料就存在那個檔案裡。只要記得它是一個檔案："
+                "跟其他重要檔案一起備份，這個系統不會替你備份它。"
+            ),
+        ),
+        SetupOption(
+            kind="cloud",
+            label="Neon（免費方案夠用，不用信用卡）",
+            detail="註冊之後開一個 project，它會給你一串 postgresql:// 開頭的連線字串。",
+            url="https://neon.tech",
+        ),
+        SetupOption(
+            kind="cloud",
+            label="Supabase（免費方案，同樣是 Postgres）",
+            detail="開一個 project，在 Project Settings → Database 裡複製連線字串。",
+            url="https://supabase.com",
+        ),
+        SetupOption(
+            kind="cloud",
+            label="付費方案，或自己架的 Postgres",
+            detail=(
+                "免費方案通常會在閒置一段時間後休眠，醒來要等幾秒。"
+                "在意這件事就用付費方案，或用你自己已經有的 Postgres——"
+                "這個 app 不在乎是誰家的，它要的只是一串連線字串。"
+            ),
+        ),
+    )
+
+
 def missing_settings(s: Settings) -> list[MissingSetting]:
     """Everything that stops this deployment from working, most urgent first."""
     missing: list[MissingSetting] = []
@@ -151,13 +217,13 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "部署都會被清空 —— 東西會不見，而且不會有任何提示。"
                 ),
                 how=(
-                    "你需要一個 Postgres 連線字串（postgresql://... 開頭），"
-                    f"把它貼進{hosting.paste_target()}的這一格。"
-                    "任何一家的 Postgres 都可以，這個 app 不在乎是誰家的："
-                    "免費的例如 Neon、Supabase；要更穩的可以用付費方案，"
-                    "或是自己架的 Postgres 也一樣可以。"
+                    # 「有哪幾條路」現在由下面的方案清單回答，一條一行、各自說出
+                    # 後果。這裡只留機械動作——同一件事講兩次，讀的人會兩次都略過。
+                    "下面選一個做法，拿到一串 postgresql:// 開頭的連線字串，"
+                    f"貼進{hosting.paste_target()}的這一格。"
                 ),
                 generator=None,
+                options=_database_options(on_a_platform=True),
                 step=1,
             )
         )
@@ -182,6 +248,7 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                 ),
                 generator=None,
                 blocking=False,
+                options=_database_options(on_a_platform=False),
                 step=1,
             )
         )

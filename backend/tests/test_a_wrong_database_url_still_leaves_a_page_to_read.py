@@ -96,6 +96,72 @@ def test_and_that_sentence_never_carries_the_password(monkeypatch):
     assert LEAKY_DSN not in text
 
 
+def test_the_reason_is_not_a_python_traceback():
+    """實測看到的東西：設定頁上寫著「對方回的是：」，後面接的是一段被截斷的
+    traceback——這台機器上的路徑，加上 sqlalchemy 的內部檔名。
+
+    對一個不寫程式的人那不是「對方回的是」，那是噪音；而這一格是整張設定表單上
+    唯一一個他只能複製貼上、也最可能貼錯的值。他需要的是最後那一行，真正說出哪
+    裡不對的那一句。
+    """
+    from scripts.start import readable_reason
+
+    traceback = chr(10).join(
+        [
+            "Traceback (most recent call last):",
+            '  File "C:'
+            + chr(92)
+            + "backend"
+            + chr(92)
+            + "venv"
+            + chr(92)
+            + "Lib"
+            + chr(92)
+            + "site-packages"
+            + chr(92)
+            + "alembic"
+            + chr(92)
+            + 'env.py", line 90, in <module>',
+            "    run_migrations_online()",
+            '  File "C:'
+            + chr(92)
+            + "backend"
+            + chr(92)
+            + "venv"
+            + chr(92)
+            + "Lib"
+            + chr(92)
+            + "site-packages"
+            + chr(92)
+            + "sqlalchemy"
+            + chr(92)
+            + "engine"
+            + chr(92)
+            + 'create.py", line 667, in create_engine',
+            "    raise exc",
+            "    ^^^^^^^^^",
+            "sqlalchemy.exc.OperationalError: (psycopg2.OperationalError)"
+            " could not translate host name",
+        ]
+    )
+
+    reason = readable_reason(traceback)
+
+    assert "could not translate host name" in reason
+    assert "File " not in reason
+    assert "site-packages" not in reason
+    assert "Traceback" not in reason
+
+
+def test_a_reason_with_nothing_technical_in_it_survives_intact():
+    """不是每一次失敗都是 traceback。alembic 也會直接印一句話，而那句就是答案。"""
+    from scripts.start import readable_reason
+
+    assert readable_reason("Can't locate revision identified by 'abc123'") == (
+        "Can't locate revision identified by 'abc123'"
+    )
+
+
 def test_a_database_that_works_is_not_reported_as_unreachable(tmp_path, monkeypatch):
     monkeypatch.delenv("DATABASE_MIGRATION_ERROR", raising=False)
     row = _database_row(_settings(f"sqlite:///{(tmp_path / 'ok.db').as_posix()}"))

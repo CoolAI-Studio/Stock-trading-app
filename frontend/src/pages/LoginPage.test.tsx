@@ -109,6 +109,19 @@ describe('LoginPage：這個部署還沒有擁有者的時候', () => {
     expect(screen.queryByRole('button', { name: '登入' })).not.toBeInTheDocument()
   })
 
+  it('那段話裡不可以有沒被渲染的 markdown', async () => {
+    // 實際開瀏覽器看到的第一句話是：
+    //   「你現在建立的是**第一個也是唯一一個**帳號」
+    // 兩坨星號原樣印在畫面上。這是全新使用者看到的**第一個畫面的第一句話**，
+    // 而它看起來像壞掉的樣板。JSX 不是 markdown，要粗體就用 <strong>。
+    route([['registration-open', () => jsonResponse({ open: true })]])
+
+    renderLoginPage()
+
+    await screen.findByRole('button', { name: '建立帳號' })
+    expect(document.body.textContent).not.toMatch(/\*\*/)
+  })
+
   it('建立完直接進去，不用再登入一次', async () => {
     route([
       ['registration-open', () => jsonResponse({ open: true })],

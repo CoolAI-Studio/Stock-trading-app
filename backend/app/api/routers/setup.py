@@ -17,7 +17,7 @@ somebody to keep knocking.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import optional_current_user
 from app.config import settings
@@ -25,6 +25,23 @@ from app.models.user import User
 from app.services import hosting, setup_state
 
 router = APIRouter(prefix="/setup", tags=["setup"])
+
+
+class SetupOptionRead(BaseModel):
+    """一個可以選的做法。
+
+    這一格上的選擇，雲端使用者只有在這裡做得到：資料庫還是容器裡的檔案時整個
+    app 是鎖住的，他連帳號都還沒有，走不到登入之後的設定引導。
+    """
+
+    # 從 services 那邊的 dataclass 直接讀，不用先轉成 dict：那一層才是這份清單
+    # 的事實來源，中間多一次手抄就是多一個會漂的地方。
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    label: str
+    detail: str
+    url: str | None
 
 
 class MissingSettingRead(BaseModel):
@@ -44,7 +61,11 @@ class MissingSettingRead(BaseModel):
     # work will not. Shown apart from the blocking ones, because 「it will not
     # start」 and 「TradingView will send to the wrong address」 are not the same
     # urgency and a page that mixes them teaches people to skim.
+    model_config = ConfigDict(from_attributes=True)
+
     blocking: bool
+    # 可以選的做法，空的代表這一格沒有「選哪一種」的問題。
+    options: list[SetupOptionRead] = []
     # Which step of the deploy flow this belongs to. Seven parallel blanks is
     # what render.yaml already gave them; the order is the part that was
     # missing, and three of these cannot even be known until the step before
@@ -95,7 +116,7 @@ def _guard(user: User | None = None) -> list:
 @router.get("/status", response_model=SetupStatus)
 def setup_status(user: User | None = Depends(optional_current_user)) -> SetupStatus:
     return SetupStatus(
-        missing=[MissingSettingRead(**vars(item)) for item in _guard(user)],
+        missing=[MissingSettingRead.model_validate(item) for item in _guard(user)],
         # Asked, not assumed. This used to be Render's menu path for
         # everybody, which is a wrong instruction for anybody who deployed
         # somewhere else -- and being wrong here is worse than being vague,
