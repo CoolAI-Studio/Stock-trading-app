@@ -321,10 +321,15 @@ describe('設定填好之後，他要建立第一個帳號', () => {
     // 的東西：已經有擁有者的登入頁。
     const { page, errors } = await open()
     await page.goto(WEB_ORIGIN + '/login')
-    await page.waitForSelector('a:has-text("部署你自己的一份")', { timeout: 30_000 })
+    await page.waitForSelector('a:has-text("看怎麼自己部署一份")', { timeout: 30_000 })
 
-    const href = await page.locator('a:has-text("部署你自己的一份")').getAttribute('href')
-    expect(href).toContain('render.com/deploy')
+    // **不可以直接跳到某一家的部署按鈕。** 第一版指的是 render.com/deploy，等於
+    // 替他決定了要用哪一家——而「不要綁死廠商」是這個專案最早提出的三個需求之
+    // 一。它要的是三樣東西，不是三個品牌，而且三樣都可以跑在他自己的電腦上。
+    const href = await page.locator('a:has-text("看怎麼自己部署一份")').getAttribute('href')
+    expect(href).not.toContain('render.com/deploy')
+    expect(href).toContain('github.com')
+    expect(await page.locator('body').innerText()).toMatch(/自己的電腦|自己的機器/)
     // 而且不要留一顆按了必定失敗的註冊鈕。
     expect(await page.locator('button:has-text("建立帳號")').count()).toBe(0)
     expect(errors).toEqual([])

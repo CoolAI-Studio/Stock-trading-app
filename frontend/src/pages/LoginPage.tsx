@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError, SESSION_EXPIRED_KEY } from '../lib/api'
 import { useAuth } from '../context/useAuth'
-import { DEPLOY_YOUR_OWN_URL } from '../lib/project'
+import { PROJECT_URL } from '../lib/project'
 
 /**
  * 登入，或者——如果這個部署還沒有擁有者——建立那個帳號。
@@ -213,13 +213,20 @@ export function LoginPage() {
             <span className="text-slate-200">自己的網址、自己的資料庫、自己的通知</span>
             ，跟這一份完全無關，也不會用到別人的額度。
           </p>
+          {/* 不指向某一家的部署按鈕。它要的是三樣東西，不是三個品牌——而選哪一
+              家（或哪一家都不選）是他的決定。清單只有 README 那一份，這裡不抄。 */}
+          <p className="mt-2">
+            它要的是三樣東西，不是三個品牌：一個能跑 Docker 的地方、一個 Postgres、
+            一個放前端的地方。
+            <span className="text-slate-200">哪一家都可以，也可以整份跑在自己的電腦上。</span>
+          </p>
           <a
-            href={DEPLOY_YOUR_OWN_URL}
+            href={PROJECT_URL}
             target="_blank"
             rel="noreferrer"
             className="mt-3 block rounded bg-sky-700 px-3 py-2 text-center font-medium text-white hover:bg-sky-600"
           >
-            部署你自己的一份
+            看怎麼自己部署一份
           </a>
         </div>
       )}

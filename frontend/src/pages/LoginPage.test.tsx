@@ -186,11 +186,30 @@ describe('LoginPage：這個部署還沒有擁有者的時候', () => {
 
     renderLoginPage()
 
-    const link = await screen.findByRole('link', { name: /部署你自己/ })
-    expect(link).toHaveAttribute('href', expect.stringContaining('render.com/deploy'))
+    const link = await screen.findByRole('link', { name: /自己部署|怎麼部署|部署你自己/ })
+    // **不可以直接跳到某一家的部署按鈕。** 第一版指的是 render.com/deploy，那等於
+    // 把「不要綁死廠商」那條規則推翻——使用者最早提的三個需求之一就是它。這個
+    // app 要的是三樣東西（能跑 Docker 的地方、一個 Postgres、放前端的地方），
+    // 不是三個品牌，而選哪一家是他的決定，不是這顆按鈕的。
+    const href = link.getAttribute('href') ?? ''
+    expect(href).not.toContain('render.com/deploy')
+    expect(href).not.toContain('vercel.com/new')
+    expect(href).toContain('github.com/CoolAI-Studio/Stock-trading-app')
     // getAllBy：那句話裡有一個 <span> 把「私人部署」框起來，所以外層段落和它
     // 自己都會命中。要驗的是「有沒有說」，不是「說在哪一個標籤裡」。
     expect(screen.getAllByText(/私人部署|只有擁有者/).length).toBeGreaterThan(0)
+  })
+
+  it('而且要說得出「跑在自己的電腦上」也是一條路', async () => {
+    // 使用者：「不是說有本機端跟自選雲端可以選，你這樣是強迫別人只能選擇 render
+    // 這單一方案不是嗎？」——對的。一顆直接跳到某一家的按鈕，就是把選擇拿走。
+    route([['registration-open', () => jsonResponse({ open: false })]])
+
+    renderLoginPage()
+
+    await screen.findByRole('link', { name: /自己部署|怎麼部署|部署你自己/ })
+    expect(document.body.textContent).toMatch(/自己的電腦|自己的機器/)
+    expect(document.body.textContent).toMatch(/哪一家|任何一家|不是.*品牌/)
   })
 
   it('那條路不會假裝能在這一份上註冊', async () => {
@@ -200,7 +219,7 @@ describe('LoginPage：這個部署還沒有擁有者的時候', () => {
 
     renderLoginPage()
 
-    await screen.findByRole('link', { name: /部署你自己/ })
+    await screen.findByRole('link', { name: /自己部署|怎麼部署|部署你自己/ })
     expect(screen.queryByRole('button', { name: '建立帳號' })).not.toBeInTheDocument()
   })
 
