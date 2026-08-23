@@ -1,8 +1,9 @@
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
+import httpx
 import yfinance as yf
 
 from app.models.enums import DataSource
@@ -72,13 +73,233 @@ def _period_days(timeframe: Timeframe, limit: int) -> int:
     return max(wanted, _MIN_DAYS)
 
 
+# THE CHART ENDPOINT, ASKED DIRECTLY.
+#
+# MEASURED from a datacentre IP during a diagnosis, at the same moment:
+#
+#     getcrumb                            -> 429
+#     /v8/finance/chart/AAPL + Chrome UA  -> 200, with real data
+#
+# WHAT IS BLOCKED IS THE HEADER, NOT THE IP. yfinance has to do a crumb
+# handshake first, and that handshake is the part that gets refused -- so a
+# free-tier deployment on a shared address loses every quote at once, and
+# losing quotes means alerts that do not arrive.
+#
+# Also measured: the old fast_info path spent THREE requests per symbol per
+# poll while bars spent one, so 「quotes are the cheap half」 was backwards.
+# Both halves now read the same response.
+_CHART_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}"
+
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# yfinance's own default is 30 seconds with retries=0. The market loop runs
+# every five seconds, and one request hanging holds up that round's stop-loss
+# scan and its pending-notification sweep with it.
+_HTTP_TIMEOUT_SEC = 10.0
+
+# What a quote needs: the newest daily candle's meta block. A short range keeps
+# the response small -- the numbers come from `meta`, not from the candles.
+_QUOTE_RANGE = "5d"
+
+# Which timeframes keep the instant they opened. Anything a whole day or longer
+# is normalised to local midnight (see _stamp).
+_INTRADAY_INTERVALS = frozenset(
+    {
+        Timeframe.MINUTE_1,
+        Timeframe.MINUTE_5,
+        Timeframe.MINUTE_15,
+        Timeframe.MINUTE_30,
+        Timeframe.HOUR_1,
+        Timeframe.HOUR_4,
+        Timeframe.HOUR_12,
+    }
+)
+
+
 logger = logging.getLogger("app.market_data.yfinance")
+
+
+def _fetch_chart(symbol: str, interval: str, range_: str) -> dict | None:
+    """The raw chart response, or None if it could not be had or understood.
+
+    None rather than an exception on purpose: every caller has a fallback, and
+    Yahoo has changed this payload's shape more than once. 「I could not read
+    it」 must not become 「this symbol has no history」, which is the mistake
+    services/market_data/service.py already caches against.
+    """
+    try:
+        response = httpx.get(
+            _CHART_URL.format(symbol=symbol),
+            params={"interval": interval, "range": range_, "includePrePost": "false"},
+            headers=_BROWSER_HEADERS,
+            timeout=_HTTP_TIMEOUT_SEC,
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception:  # noqa: BLE001 -- 任何失敗都只是「這條路走不通」
+        logger.warning("chart endpoint failed for %s", symbol, exc_info=True)
+        return None
+
+
+def _result_of(payload: dict | None) -> dict | None:
+    try:
+        result = payload["chart"]["result"][0]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def _stamp(epoch: int, timeframe: Timeframe, gmtoffset: int) -> datetime:
+    """A candle's timestamp, matching what yfinance used to produce.
+
+    INTRADAY keeps the instant it opened -- that is what the 4h session
+    alignment in market_data/base.py measures from.
+
+    DAILY AND SLOWER are normalised to local midnight, because yfinance's
+    index was a DATE and `bar_end()` adds a flat day to it. Yahoo stamps the
+    daily candle at the session open instead (13:30 UTC for AAPL), and copying
+    that through would push every daily close 13.5 hours later than before --
+    a 「收盤提醒」 arriving half a day late, with nothing on screen to show
+    for it.
+    """
+    moment = datetime.fromtimestamp(epoch, UTC)
+    if timeframe in _INTRADAY_INTERVALS:
+        return moment
+    local = moment + timedelta(seconds=gmtoffset)
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight - timedelta(seconds=gmtoffset)
+
+
+def _bars_from_chart(
+    payload: dict | None, symbol: str, timeframe: Timeframe, limit: int
+) -> list[Bar] | None:
+    result = _result_of(payload)
+    if result is None:
+        return None
+    try:
+        stamps = result["timestamp"]
+        quote = result["indicators"]["quote"][0]
+        opens, highs, lows, closes = (
+            quote["open"],
+            quote["high"],
+            quote["low"],
+            quote["close"],
+        )
+        volumes = quote.get("volume") or [None] * len(stamps)
+        gmtoffset = int(result["meta"].get("gmtoffset") or 0)
+    except (KeyError, IndexError, TypeError):
+        return None
+
+    # Split adjustments. MEASURED: `open * (adjclose/close)` matches yfinance's
+    # auto_adjust=True to four decimal places (224.6408 vs 224.6409). Without
+    # it, the day of a split disagrees with the chart and with every backtest.
+    adjusted = None
+    try:
+        adjusted = result["indicators"]["adjclose"][0]["adjclose"]
+    except (KeyError, IndexError, TypeError):
+        adjusted = None
+
+    bars: list[Bar] = []
+    for i, epoch in enumerate(stamps):
+        values = [_as_float(series[i]) for series in (opens, highs, lows, closes)]
+        if any(value is None for value in values) or epoch is None:
+            # Yahoo pads gaps (halts, holidays it got wrong) with nulls. One
+            # null reaching an indicator poisons every later value it feeds.
+            continue
+        open_, high, low, close = values
+        factor = 1.0
+        if adjusted is not None:
+            adj = _as_float(adjusted[i]) if i < len(adjusted) else None
+            if adj is not None and close:
+                factor = adj / close
+        bars.append(
+            Bar(
+                symbol=symbol,
+                timeframe=timeframe,
+                timestamp=_stamp(int(epoch), timeframe, gmtoffset),
+                open=round(open_ * factor, 6),
+                high=round(high * factor, 6),
+                low=round(low * factor, 6),
+                close=round(close * factor, 6),
+                volume=_as_float(volumes[i]) if i < len(volumes) else None,
+            )
+        )
+    return bars[-limit:] if limit else bars
 
 
 class YFinanceProvider:
     data_source = DataSource.YFINANCE
 
     def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
+        """The latest price per symbol, read off the same chart response.
+
+        MEASURED: the old fast_info path spent three requests per symbol per
+        poll, and this loop runs every five seconds -- so quotes, not bars,
+        were what earned the shared-IP 429s.
+        """
+        if not symbols:
+            return {}
+
+        quotes: dict[str, Quote] = {}
+        for symbol in symbols:
+            quote = self._quote_from_chart(symbol)
+            if quote is not None:
+                quotes[symbol] = quote
+                continue
+            fallback = self._quote_via_yfinance(symbol)
+            if fallback is not None:
+                quotes[symbol] = fallback
+        return quotes
+
+    def _quote_from_chart(self, symbol: str) -> Quote | None:
+        result = _result_of(_fetch_chart(symbol, Timeframe.DAY_1.value, _QUOTE_RANGE))
+        if result is None:
+            return None
+        meta = result.get("meta") or {}
+        price = _as_float(meta.get("regularMarketPrice"))
+        if price is None:
+            return None
+        prev_close = _as_float(meta.get("chartPreviousClose"))
+        try:
+            price_dec = Decimal(str(round(price, 4)))
+            prev_close_dec = Decimal(str(round(prev_close, 4))) if prev_close else None
+        except InvalidOperation:
+            return None
+
+        change_pct = None
+        if prev_close_dec:
+            change_pct = round(((price_dec - prev_close_dec) / prev_close_dec) * 100, 4)
+
+        # AT LAST A REAL ONE. `quote_time` was forced to None because fast_info
+        # carries no temporal field at all, and filling it with our own clock
+        # made every price look current -- including the final close of a stock
+        # delisted years ago. This field exists to reveal staleness.
+        stamped = meta.get("regularMarketTime")
+        quote_time = datetime.fromtimestamp(int(stamped), UTC) if stamped else None
+
+        return Quote(
+            symbol=symbol,
+            data_source=self.data_source,
+            price=price_dec,
+            prev_close=prev_close_dec,
+            change_pct=change_pct,
+            quote_time=quote_time,
+            currency=meta.get("currency") or currency_for(symbol, self.data_source),
+        )
+
+    def _quote_via_yfinance(self, symbol: str) -> Quote | None:
+        quotes = self._quotes_via_yfinance([symbol])
+        return quotes.get(symbol)
+
+    def _quotes_via_yfinance(self, symbols: list[str]) -> dict[str, Quote]:
         if not symbols:
             return {}
 
@@ -141,6 +362,25 @@ class YFinanceProvider:
         return quotes
 
     def get_bars(self, symbol: str, timeframe: Timeframe, limit: int) -> list[Bar]:
+        """Candles, from the chart endpoint, falling back to yfinance.
+
+        The direct call is first because it is the one that answers on a shared
+        IP (see _CHART_URL). The fallback stays because Yahoo has changed this
+        payload's shape before, and 「I could not read it」 must not turn into
+        「this symbol has no history」.
+        """
+        parsed = _bars_from_chart(
+            _fetch_chart(symbol, timeframe.value, f"{_period_days(timeframe, limit)}d"),
+            symbol,
+            timeframe,
+            limit,
+        )
+        if parsed:
+            return parsed
+
+        return self._bars_via_yfinance(symbol, timeframe, limit)
+
+    def _bars_via_yfinance(self, symbol: str, timeframe: Timeframe, limit: int) -> list[Bar]:
         try:
             frame = yf.Ticker(symbol).history(
                 period=f"{_period_days(timeframe, limit)}d",

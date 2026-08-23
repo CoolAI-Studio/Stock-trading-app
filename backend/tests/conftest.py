@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
@@ -19,6 +20,24 @@ def _secret_encryption_key(monkeypatch):
     # needs a real Fernet key to encrypt/decrypt at all -- every test gets
     # one so this isn't something each test file has to remember.
     monkeypatch.setattr("app.config.settings.SECRET_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+
+@pytest.fixture(autouse=True)
+def _no_outbound_http(monkeypatch):
+    """沒有一條測試可以打真的網路。
+
+    行情供應商現在直接打 Yahoo 的 chart 端點（httpx.get），而測試只要沒有把它
+    mock 掉就會真的送出去——慢、看網路臉色、而且在 CI 上會變成間歇性紅燈。
+
+    擋的是 module 層級的 `httpx.get`：TestClient 用的是自己的 Client 實例，不受
+    影響。想測那條路的測試自己把它換掉（見
+    tests/test_bars_come_from_the_chart_endpoint.py）。
+    """
+
+    def _refuse(*args, **kwargs):
+        raise AssertionError("測試打了真的網路：httpx.get(...)。要測這條路請自己 mock 它。")
+
+    monkeypatch.setattr(httpx, "get", _refuse)
 
 
 @pytest.fixture
