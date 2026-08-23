@@ -197,6 +197,28 @@ def max_bars_available(data_source: DataSource, timeframe: Timeframe) -> int:
     return _MAX_BARS.get(data_source, {}).get(timeframe, 0)
 
 
+# THE CHART'S CEILING, DERIVED RATHER THAN CHOSEN.
+#
+# It used to be a separate constant (1000) sitting in the router, and the two
+# numbers disagreed: the table above declares 3,500 hourly candles and
+# /api/market/timeframes sends that number to the browser as `max_bars`, so a
+# chart that scrolled back the depth it had just been told about was answered
+# 422. To the reader, a 422 while dragging leftwards looks like exactly one
+# thing -- 「往前拉就是一片空白」.
+#
+# DEEPER IS NOT MORE REQUESTS. _period_days() clamps intraday to the source's
+# hard wall no matter what was asked, so 300 candles and 3,500 candles are the
+# same range in the same single HTTP call; only the slice at the end differs.
+# The cap that protects the scraper is the table above, which is measured. A
+# second, smaller number protected nothing -- it only stopped the scrolling.
+def deepest_bars_available() -> int:
+    """The most candles any source will part with, for any interval."""
+    return max((depth for source in _MAX_BARS.values() for depth in source.values()), default=0)
+
+
+MAX_CHART_BARS = deepest_bars_available()
+
+
 # Daily is the least surprising thing to hand a strategy that never said
 # which candle it wanted -- an intraday default would quietly burn provider
 # quota, and a weekly one would leave it silent for a week.

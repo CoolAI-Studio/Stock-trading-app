@@ -19,6 +19,7 @@ from app.schemas.market import (
 )
 from app.services import chart_indicators, indicator_panes, symbol_search
 from app.services.market_data.base import (
+    MAX_CHART_BARS,
     SUPPORTED_TIMEFRAMES,
     TIMEFRAME_LABELS,
     Timeframe,
@@ -39,12 +40,6 @@ router = APIRouter(prefix="/market", tags=["market"])
 # Taiwanese symbols -- its own words for 「the symbol is real, but this widget
 # is not licensed to show its data」. No amount of symbol correctness reaches a
 # licensing restriction, and this backend already has the candles.
-
-# A chart is a picture, not a backtest. Enough candles for years of daily bars
-# and nowhere near MAX_BACKTEST_BARS: yfinance is an unofficial scraper, and
-# serving a request for a hundred thousand candles costs the deployment its
-# access to it.
-MAX_CHART_BARS = 1000
 
 
 @router.get("/quote", response_model=list[QuoteRead])

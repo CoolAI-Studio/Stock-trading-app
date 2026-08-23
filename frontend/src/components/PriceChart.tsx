@@ -7,6 +7,7 @@ import {
   createChart,
   type IChartApi,
   type ISeriesApi,
+  type LogicalRange,
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
@@ -67,6 +68,29 @@ const DOWN = '#22c55e'
 // going to send anyway would be paying in the wrong currency.
 const PARAM_SETTLE_MS = 400
 
+// HOW DEEP THE FIRST ASK GOES, and how the chart digs when somebody scrolls
+// back past it.
+//
+// 300 is the backend's DEFAULT_BAR_LIMIT, and matching it is not decoration:
+// the market loop asks for exactly that depth, so the chart's first request
+// shares the loop's cache entry and costs the rate-limited provider nothing.
+//
+// It used to be the ONLY depth this chart ever asked for. Scrolling further
+// back than 300 candles reached blank canvas and stayed blank, because nothing
+// went and got more -- 「往前拉以往數據不會在讀取資料，只看到空的畫面」.
+const DEFAULT_DEPTH = 300
+
+// Doubling, not a fixed step. The depth somebody wants is unknown and the cost
+// of asking is one request either way (the provider clamps intraday to the
+// source's wall regardless of depth), so a fixed +300 would mean twenty
+// requests to reach five years while doubling reaches it in four.
+const DEEPEN_BY = 2
+
+// How close the left edge of the view has to come to the oldest candle before
+// the next depth is fetched. Waiting until they are flush means the reader
+// watches themselves hit the wall first.
+const LOAD_MORE_WITHIN_BARS = 20
+
 // Each extra pane costs height. Enough to read a shape in, not so much that
 // four of them push the candles off a laptop screen.
 const INDICATOR_PANE_HEIGHT_PX = 110
@@ -84,6 +108,26 @@ const LINE_COLOURS = [
   '#22d3ee',
   '#fb923c',
 ]
+
+/** Whether a cached answer belongs to the chart currently on screen.
+ *
+ * Depth is part of the query key, so asking for more history is a NEW query
+ * and react-query has no data for it -- the canvas would blank and the
+ * 「載入中…」 overlay would flash on every scroll leftwards, which is the very
+ * thing being fixed. Keeping the previous answer while the deeper one arrives
+ * fixes that, but ONLY for the same chart: kept across a change of symbol it
+ * would leave another company's candles under this company's name, which is a
+ * bug this component has already had once and is why setData([]) is called at
+ * all.
+ */
+function sameChart(
+  key: readonly unknown[] | undefined,
+  symbol: string,
+  timeframe: string,
+  dataSource?: DataSource,
+): boolean {
+  return key?.[1] === symbol && key?.[2] === timeframe && key?.[3] === dataSource
+}
 
 export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?: DataSource }) {
   const [timeframe, setTimeframe] = useState('1d')
@@ -114,6 +158,38 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
     setTimeframe(timeframes.options.some((o) => o.value === '1d') ? '1d' : timeframes.options[0].value)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataSource, timeframes.isPending])
+  // HOW MANY CANDLES ARE CURRENTLY BEING ASKED FOR. Grows when the view
+  // reaches the oldest one; back to the default whenever the chart becomes a
+  // different chart.
+  const [depth, setDepth] = useState(DEFAULT_DEPTH)
+
+  // The ceiling, asked of the server rather than written here. base.py measured
+  // what each source actually parts with per interval -- 1m stops at seven
+  // days, hourly at two years -- and past it Yahoo returns an EMPTY frame
+  // rather than a shorter one. A number in this file would drift from that one
+  // and the drift would show up as a chart that goes blank at a depth the app
+  // said was available.
+  const depthCap = Math.max(
+    timeframes.options.find((option) => option.value === timeframe)?.max_bars ?? 0,
+    DEFAULT_DEPTH,
+  )
+
+  // The depth of the last answer AND how many candles came back in it. Both,
+  // because either alone cannot say whether there is more: asking for 600 and
+  // receiving 320 means the source has 320, and asking again is a wasted round
+  // trip against a rate limiter that this product cannot afford to lose.
+  const answered = useRef({ depth: 0, count: 0 })
+  // How many candles are on the canvas right now, read by the scroll handler.
+  const loadedRef = useRef(0)
+  // Which chart the canvas is currently showing, so 「more history arrived」 can
+  // be told apart from 「this is a different symbol now」.
+  const viewRef = useRef('')
+
+  useEffect(() => {
+    setDepth(DEFAULT_DEPTH)
+    answered.current = { depth: 0, count: 0 }
+  }, [symbol, timeframe, dataSource])
+
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<{ candles: ReturnType<IChartApi['addSeries']> ; volume: ReturnType<IChartApi['addSeries']> } | null>(null)
@@ -149,8 +225,12 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   }, [indicators])
 
   const query = useQuery({
-    queryKey: ['bars', symbol, timeframe, dataSource],
+    queryKey: ['bars', symbol, timeframe, dataSource, depth],
     enabled: !unpriceable,
+    // See sameChart(): keeps the shallower candles on screen while the deeper
+    // answer is on its way, and only for this same chart.
+    placeholderData: (previous, previousQuery) =>
+      sameChart(previousQuery?.queryKey, symbol, timeframe, dataSource) ? previous : undefined,
     // No retries. The failures this actually sees are a 404 from a backend
     // older than this page and a 422 from a symbol it will not price -- both
     // permanent, and retrying them means seven seconds of a blank chart before
@@ -159,6 +239,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
     queryFn: () =>
       api.get<BarsResponse>(
         `/api/market/bars?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}` +
+          `&limit=${depth}` +
           (dataSource ? `&data_source=${dataSource}` : ''),
       ),
   })
@@ -166,7 +247,11 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   const indicatorQuery = useQuery({
     // Keyed on the params too: changing a period from 20 to 60 has to refetch,
     // and keying only on the names would serve the 20 forever.
-    queryKey: ['indicators', symbol, timeframe, dataSource, JSON.stringify(settled)],
+    queryKey: ['indicators', symbol, timeframe, dataSource, depth, JSON.stringify(settled)],
+    // Same as the candles: the lines must not vanish while a deeper window is
+    // being fetched.
+    placeholderData: (previous, previousQuery) =>
+      sameChart(previousQuery?.queryKey, symbol, timeframe, dataSource) ? previous : undefined,
     // A free-tier dyno and a rate-limited quote provider. With nothing picked
     // there is nothing to ask for, and the request should not leave the page.
     enabled: !unpriceable && settled.length > 0,
@@ -177,6 +262,11 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
       api.post<IndicatorsResponse>('/api/market/indicators', {
         symbol,
         timeframe,
+        // THE SAME DEPTH AS THE CANDLES, always. Candles reaching back three
+        // years under a line that starts one year in draws 「這個指標從這裡才
+        // 開始存在」, which is not true of the indicator and which nothing on
+        // the screen contradicts.
+        limit: depth,
         ...(dataSource ? { data_source: dataSource } : {}),
         indicators: settled,
       }),
@@ -205,7 +295,17 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
           horzLines: { color: '#1e293b' },
         },
         rightPriceScale: { borderColor: '#334155' },
-        timeScale: { borderColor: '#334155', timeVisible: false },
+        timeScale: {
+          borderColor: '#334155',
+          timeVisible: false,
+          // THE CANVAS MUST NOT SCROLL PAST THE OLDEST CANDLE. Left to its
+          // default it scrolls into empty space forever, and empty space is
+          // indistinguishable from 「the data failed to load」 -- which is
+          // exactly how this was reported. With the edge fixed, reaching the
+          // oldest candle either loads more (see the handler below) or simply
+          // stops, and stopping reads as 「這就是全部了」.
+          fixLeftEdge: true,
+        },
       })
     } catch {
       setRenderFailed(true)
@@ -238,6 +338,53 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
     }
   }, [])
 
+  // Deciding whether to dig, kept in a ref so the subscription below can be
+  // made once and still see the current depth. Re-subscribing on every render
+  // would churn a listener the library holds onto.
+  const deepenRef = useRef(() => {})
+  useEffect(() => {
+    deepenRef.current = () => {
+      if (query.isFetching) return
+      if (depth >= depthCap) return
+      // Fewer came back than were asked for, so the source is out: a stock
+      // listed six months ago has six months of candles and no amount of
+      // asking produces a seventh. Asking anyway spends a request against the
+      // rate limiter that every alert in this app shares.
+      if (answered.current.depth > 0 && answered.current.count < answered.current.depth) return
+      setDepth((current) => Math.min(depthCap, current * DEEPEN_BY))
+    }
+  })
+
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const scale = chart.timeScale()
+
+    const onRange = (range: LogicalRange | null) => {
+      if (!range) return
+      // ALREADY SHOWING EVERYTHING. fitContent leaves `from` at zero too, so a
+      // handler that looked only at `from` would make every chart dig itself
+      // down to the ceiling the moment it loaded -- one request turned into a
+      // chain of them, on the provider this app cannot afford to lose.
+      if (range.to - range.from + 1 >= loadedRef.current) return
+      if (range.from > LOAD_MORE_WITHIN_BARS) return
+      deepenRef.current()
+    }
+
+    scale.subscribeVisibleLogicalRangeChange(onRange)
+    return () => scale.unsubscribeVisibleLogicalRangeChange(onRange)
+  }, [])
+
+  // What the last real answer cost and what it contained. Recorded off the
+  // placeholder flag: while a deeper window is in flight `query.data` is still
+  // the shallower one, and pairing THAT count with the NEW depth would read as
+  // 「the source ran out」 and stop the digging one step in.
+  useEffect(() => {
+    if (query.isSuccess && !query.isPlaceholderData) {
+      answered.current = { depth, count: query.data?.bars?.length ?? 0 }
+    }
+  }, [query.isSuccess, query.isPlaceholderData, query.data, depth])
+
   useEffect(() => {
     const series = seriesRef.current
     if (!series) return
@@ -255,6 +402,7 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
       // same failure the backend refuses ambiguous symbols to avoid.
       series.candles.setData([])
       series.volume.setData([])
+      loadedRef.current = 0
       return
     }
 
@@ -272,6 +420,18 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
         close: bar.close,
       })),
     )
+    // WHERE THE READER IS LOOKING, saved before the data underneath them
+    // changes. Prepending three years of candles renumbers every bar, so the
+    // position has to be remembered as a span of TIME, not as bar indices.
+    //
+    // Only for the same chart, and only when there was already something to
+    // hold a position in: a different symbol is a different picture and should
+    // open showing all of itself.
+    const view = `${symbol}|${timeframe}|${dataSource ?? ''}`
+    const scale = chartRef.current?.timeScale()
+    const holding = viewRef.current === view && loadedRef.current > 0 ? scale?.getVisibleRange() : null
+    viewRef.current = view
+
     series.volume.setData(
       bars.map((bar) => ({
         time: at(bar.time),
@@ -279,8 +439,19 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
         color: bar.close >= bar.open ? `${UP}55` : `${DOWN}55`,
       })),
     )
-    chartRef.current?.timeScale().fitContent()
-  }, [query.data])
+    loadedRef.current = bars.length
+
+    if (holding) {
+      try {
+        scale?.setVisibleRange(holding)
+      } catch {
+        // The saved span does not land inside the new data -- nothing worth
+        // breaking the chart over; the reader keeps whatever the library chose.
+      }
+    } else {
+      scale?.fitContent()
+    }
+  }, [query.data, symbol, timeframe, dataSource])
 
   // The indicator lines. Torn down and rebuilt whenever the answer changes,
   // rather than updated in place: the SET of series changes with the selection
@@ -465,6 +636,16 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
             : indicatorQuery.error instanceof ApiError && indicatorQuery.error.status === 404
               ? '後端還沒有指標功能 —— 線上的後端比這個畫面舊。部署是自動的（CI 全綠就會部署），等一兩分鐘重新整理通常就好；一直這樣就去 GitHub 的 Actions 看最後一次有沒有失敗。'
               : '指標算不出來 —— 稍後重新整理看看。K 棒和報價不受影響。'}
+        </p>
+      )}
+
+      {/* Said beside the chart, never over it. The candles already on screen
+          are correct and stay readable; covering them with 「載入中…」 while
+          more history arrives would reproduce the blank the reader reported,
+          only this time drawn on purpose. */}
+      {query.isPlaceholderData && (
+        <p role="status" className="text-xs text-slate-400">
+          載入更早的資料…
         </p>
       )}
 

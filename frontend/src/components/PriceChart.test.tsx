@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PriceChart } from './PriceChart'
@@ -37,6 +37,23 @@ const setVolumeData = vi.fn()
 const remove = vi.fn()
 const fitContent = vi.fn()
 
+/** The options the chart was created with, so `fixLeftEdge` can be asserted.
+ *
+ * It is not cosmetic. Without it the canvas scrolls freely past the oldest
+ * candle into blank space -- which is the state the user reported: 「往前拉以
+ * 往數據不會再讀取資料，只看到空的畫面」. */
+const chartOptions: Record<string, unknown>[] = []
+
+/** Whoever the chart asked to be told when the visible window moves.
+ *
+ * The lazy loading hangs off this callback, and there is no DOM to drag: the
+ * chart is a canvas. Calling the handler IS the user panning, as far as this
+ * component can tell. */
+type LogicalRange = { from: number; to: number }
+const rangeHandlers: ((range: LogicalRange | null) => void)[] = []
+const setVisibleRange = vi.fn()
+const getVisibleRange = vi.fn(() => ({ from: 1, to: 2 }))
+
 /** Every line series handed to the renderer, with the pane it went on.
  *
  * Recorded rather than read back from the DOM because the pane is the whole
@@ -60,7 +77,9 @@ const panes = () =>
   }))
 
 vi.mock('lightweight-charts', () => ({
-  createChart: vi.fn(() => ({
+  createChart: vi.fn((_container: unknown, options: Record<string, unknown>) => {
+    chartOptions.push(options)
+    return {
     addSeries: vi.fn((definition: unknown, options: Record<string, unknown>, pane?: number) => {
       if (definition === 'LINE') {
         const entry: DrawnLine = { pane, options, data: [] }
@@ -86,10 +105,23 @@ vi.mock('lightweight-charts', () => ({
     removeSeries,
     panes,
     removePane,
-    timeScale: () => ({ fitContent }),
+    timeScale: () => ({
+      fitContent,
+      subscribeVisibleLogicalRangeChange: (handler: (range: LogicalRange | null) => void) => {
+        rangeHandlers.push(handler)
+      },
+      unsubscribeVisibleLogicalRangeChange: (handler: (range: LogicalRange | null) => void) => {
+        const at = rangeHandlers.indexOf(handler)
+        if (at >= 0) rangeHandlers.splice(at, 1)
+      },
+      getVisibleRange,
+      setVisibleRange,
+      applyOptions: vi.fn(),
+    }),
     applyOptions: vi.fn(),
     remove,
-  })),
+    }
+  }),
   CandlestickSeries: 'CANDLESTICK',
   HistogramSeries: 'HISTOGRAM',
   LineSeries: 'LINE',
@@ -206,6 +238,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   lines.length = 0
   stretch.length = 0
+  chartOptions.length = 0
+  rangeHandlers.length = 0
   window.localStorage.clear()
   // Path-aware, because this page now makes two different GETs: the candles
   // and the indicator catalogue. One blanket mockResolvedValue answers the
@@ -881,5 +915,219 @@ describe('K 棒週期', () => {
     )
     // ...and said so, rather than leaving the reader to notice.
     expect(screen.getByRole('status')).toHaveTextContent(/12 小時線/)
+  })
+})
+
+
+// --- 往前拉 ---------------------------------------------------------------------
+
+/**
+ * 「圖表只讀取當下可顯示的頁面，往前拉以往數據不會在讀取資料，只看到空的畫面。」
+ *
+ * 那是真的，而且是兩件事疊在一起：
+ *
+ * 1. 這張圖只問過一次後端，深度固定 300 根，從此不再問。
+ * 2. lightweight-charts 預設**允許捲出資料範圍之外**，所以拉過最舊那一根之後
+ *    畫布還在動，只是上面什麼都沒有。
+ *
+ * 第二點讓第一點看起來像壞掉而不像「沒有更多了」。兩件都修：往左拉到最舊那一根
+ * 就再問一次更深的，問到來源給不出來為止；而任何時候都不能捲進空白。
+ *
+ * 這裡沒有真的拖曳可以做——圖是 canvas，沒有 DOM。對這個元件來說，「使用者往前
+ * 拉」的定義就是 lightweight-charts 回呼它說可見範圍到哪裡了，所以測試呼叫的
+ * 就是那個回呼。
+ */
+
+const DEPTH = 300
+
+function deepBars(count: number, from = DEPTH) {
+  return {
+    symbol: '0050.TW',
+    timeframe: '1d',
+    bars: Array.from({ length: count }, (_, i) => ({
+      // 往回數，所以最舊的那一根會隨著問得更深而更早。
+      time: new Date(Date.UTC(2026, 0, 1) - (from - i) * 86_400_000).toISOString(),
+      open: 100,
+      high: 104,
+      low: 99,
+      close: 103,
+      volume: 1200,
+    })),
+  }
+}
+
+/** 後端：問幾根就給幾根，最多到 `available` 根。 */
+function sourceWith(available: number) {
+  vi.mocked(api.get).mockImplementation((path: string) => {
+    if (path.includes('/indicators/available')) return Promise.resolve(CATALOGUE) as never
+    if (path.includes('/timeframes')) return Promise.resolve(TIMEFRAMES) as never
+    const asked = Number(new URL(path, 'http://x').searchParams.get('limit') ?? DEPTH)
+    return Promise.resolve(deepBars(Math.min(asked, available), asked)) as never
+  })
+}
+
+/** 每一次問 K 棒時帶的深度，依序。 */
+function depthsAsked(): number[] {
+  return vi
+    .mocked(api.get)
+    .mock.calls.map(([path]) => path)
+    .filter((path) => path.includes('/bars'))
+    .map((path) => Number(new URL(path, 'http://x').searchParams.get('limit') ?? 0))
+}
+
+/** 使用者把畫面拉到最舊那一根。`to` 小於已載入的根數＝畫面裝不下全部。 */
+async function panToOldest(to = 60) {
+  await act(async () => {
+    for (const handler of [...rangeHandlers]) handler({ from: 0, to })
+  })
+}
+
+describe('往前拉要看得到更早的資料，不是一片空白', () => {
+  it('捲不出資料範圍以外 —— 空白畫面本身就是那個 bug 的樣子', async () => {
+    show()
+
+    await drawn()
+    expect(chartOptions.at(-1)?.timeScale).toMatchObject({ fixLeftEdge: true })
+  })
+
+  it('第一次只問預設的深度', async () => {
+    sourceWith(10_000)
+    show()
+
+    await drawn()
+    expect(depthsAsked()).toEqual([DEPTH])
+  })
+
+  it('拉到最舊那一根就再問一次，而且問得更深', async () => {
+    sourceWith(10_000)
+    show()
+    await drawn()
+
+    await panToOldest()
+
+    await vi.waitFor(() => {
+      expect(depthsAsked().at(-1)).toBeGreaterThan(DEPTH)
+    })
+    await vi.waitFor(async () => {
+      expect((await drawn()).length).toBeGreaterThan(DEPTH)
+    })
+  })
+
+  it('全部 K 棒都在畫面上時不會亂問 —— 沒有更早的可以拉', async () => {
+    // fitContent 之後可見範圍就是全部，from 也是 0。只看 from 會讓每一張圖一
+    // 載入就自己往下挖到上限，把單一請求變成一連串的請求。
+    sourceWith(10_000)
+    show()
+    await drawn()
+
+    await act(async () => {
+      for (const handler of [...rangeHandlers]) handler({ from: 0, to: DEPTH - 1 })
+    })
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(depthsAsked()).toEqual([DEPTH])
+  })
+
+  it('上游回的比問的少，就是沒有更早的了，不要一直問', async () => {
+    // 一支剛上市的股票就是這樣：問 300 根拿回 120 根。再問 600 根還是 120 根，
+    // 而每一次都是一趟被限流的上游請求。
+    sourceWith(120)
+    show()
+    await drawn()
+
+    await panToOldest()
+    await panToOldest()
+
+    await new Promise((r) => setTimeout(r, 50))
+    expect(depthsAsked()).toEqual([DEPTH])
+  })
+
+  it('問到來源宣告的上限就停', async () => {
+    // 日線在 TIMEFRAMES 裡宣告 10000 根。問超過那個數字，後端會回 422，而 422
+    // 在畫面上的樣子就是往前拉之後那一片空白。
+    sourceWith(1_000_000)
+    show()
+    await drawn()
+
+    for (let i = 0; i < 12; i += 1) await panToOldest()
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(Math.max(...depthsAsked())).toBeLessThanOrEqual(10_000)
+  })
+
+  it('載入更深的時候，畫面不會先被清空', async () => {
+    // 深度是 query key 的一部分，所以問得更深就是一個新的 query。沒有保留舊資
+    // 料的話，每拉一次畫面就閃一下「載入中…」——那正是使用者說的空白畫面，只是
+    // 這次是我們自己畫的。
+    sourceWith(10_000)
+    show()
+    await drawn()
+    const before = setData.mock.calls.length
+
+    await panToOldest()
+
+    await vi.waitFor(() => {
+      expect(depthsAsked().length).toBeGreaterThan(1)
+    })
+    const since = setData.mock.calls.slice(before).map((call) => call[0])
+    expect(since.some((data) => (data as unknown[]).length === 0)).toBe(false)
+    expect(screen.queryByText(/載入中…/)).not.toBeInTheDocument()
+  })
+
+  it('載入更深之後不會跳回全圖 —— 使用者原本在看的位置要留著', async () => {
+    sourceWith(10_000)
+    show()
+    await drawn()
+    const fitted = fitContent.mock.calls.length
+
+    await panToOldest()
+    // 等到更深的那一批真的畫上去為止。只等請求送出去的話，這一條會在畫圖之前
+    // 就通過，而「有沒有跳回全圖」正是畫圖那一刻才決定的事。
+    await vi.waitFor(async () => {
+      expect((await drawn()).length).toBeGreaterThan(DEPTH)
+    })
+
+    expect(fitContent.mock.calls.length).toBe(fitted)
+    expect(setVisibleRange).toHaveBeenCalled()
+  })
+
+  it('換代號會回到預設深度', async () => {
+    sourceWith(10_000)
+    const { rerender } = show()
+    await drawn()
+    await panToOldest()
+    await vi.waitFor(() => {
+      expect(depthsAsked().length).toBeGreaterThan(1)
+    })
+
+    rerender('2330.TW')
+
+    await vi.waitFor(() => {
+      const last = vi
+        .mocked(api.get)
+        .mock.calls.map(([path]) => path)
+        .filter((path) => path.includes('2330.TW'))
+        .at(-1)
+      expect(last).toBeTruthy()
+      expect(Number(new URL(last!, 'http://x').searchParams.get('limit'))).toBe(DEPTH)
+    })
+  })
+
+  it('指標跟著同一個深度，不然線會在半路斷掉', async () => {
+    // K 棒往回長到 600 根而指標只算了 300 根，畫出來會像「這個指標從這裡才開始
+    // 存在」。那不是真的，而且沒有任何東西會說它不是真的。
+    sourceWith(10_000)
+    withIndicators([{ name: 'sma', params: { period: 20 } }])
+    show()
+    await drawn()
+
+    await panToOldest()
+
+    await vi.waitFor(() => {
+      const bars = depthsAsked().at(-1)!
+      expect(bars).toBeGreaterThan(DEPTH)
+      const posted = vi.mocked(api.post).mock.calls.at(-1)?.[1] as { limit?: number }
+      expect(posted?.limit).toBe(bars)
+    })
   })
 })

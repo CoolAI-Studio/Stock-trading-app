@@ -22,7 +22,17 @@ vi.mock('lightweight-charts', () => ({
     removeSeries: () => {},
     panes: () => [{ setStretchFactor: () => {} }],
     removePane: () => {},
-    timeScale: () => ({ fitContent: () => {} }),
+    timeScale: () => ({
+      fitContent: () => {},
+      // The chart now asks for more history when the view reaches the oldest
+      // candle. A stub without these throws on mount, which would fail every
+      // page that merely contains a chart for a reason that is about jsdom.
+      subscribeVisibleLogicalRangeChange: () => {},
+      unsubscribeVisibleLogicalRangeChange: () => {},
+      getVisibleRange: () => null,
+      setVisibleRange: () => {},
+      applyOptions: () => {},
+    }),
     applyOptions: () => {},
     remove: () => {},
   }),

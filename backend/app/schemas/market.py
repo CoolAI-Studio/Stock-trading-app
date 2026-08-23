@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
-from app.services.market_data.base import Timeframe
+from app.services.market_data.base import MAX_CHART_BARS, Timeframe
 from app.services.market_data.service import DEFAULT_BAR_LIMIT
 
 
@@ -94,8 +94,11 @@ class IndicatorRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
     timeframe: Timeframe = Timeframe.DAY_1
     # Matches GET /bars and the market loop, so all three share one cache
-    # entry and one upstream fetch. See the comment on that endpoint.
-    limit: int = Field(default=DEFAULT_BAR_LIMIT, ge=1, le=1000)
+    # entry and one upstream fetch. See the comment on that endpoint. The
+    # ceiling is imported rather than repeated: a chart whose candles scroll
+    # further back than its indicator lines draws an 「這個指標從這裡才開始存
+    # 在」 that is not true of the indicator.
+    limit: int = Field(default=DEFAULT_BAR_LIMIT, ge=1, le=MAX_CHART_BARS)
     data_source: DataSource = DataSource.YFINANCE
     indicators: list["IndicatorSpecRequest"] = Field(default_factory=list)
 
