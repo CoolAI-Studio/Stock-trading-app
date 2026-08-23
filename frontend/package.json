@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:chart": "vitest run --config vitest.chart.config.ts"
+    "test:chart": "vitest run --config vitest.browser.config.ts src/test/chart.browser.test.ts",
+    "test:firstrun": "vitest run --config vitest.browser.config.ts src/test/firstrun.browser.test.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

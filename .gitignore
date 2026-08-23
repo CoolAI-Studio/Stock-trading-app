@@ -38,3 +38,8 @@ Thumbs.db
 # still described code that had since changed -- and the next run could just
 # as easily sweep up a .env.
 repomix-output.*
+
+# 只有「全新使用者走一遍」那一關會用到的建置產物（frontend/src/test/firstrun.browser.test.ts）。
+dist-firstrun/
+# 同一關每次跑都會重建的資料庫。
+backend/firstrun_walk.db
