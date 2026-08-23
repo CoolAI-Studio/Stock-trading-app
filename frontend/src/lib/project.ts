@@ -25,6 +25,12 @@
  * 改過這份程式碼的人要指向自己的 repo，就設 `VITE_PROJECT_URL`（前端建置時的環境
  * 變數，Vercel 那類平台上填一格就好），或直接改下面這個常數——他既然已經在改程
  * 式碼，改一行不是負擔；而沒改的人自動跟著上游更新。
+ *
+ * 指向的是 `docs/index.html`（GitHub Pages），不是 repo 首頁。這個 repo 有五百多
+ * 個檔案、其中一百八十幾個是測試，而一個只想在手機上收提醒的人打開它只會迷路。
+ * 那一頁把兩件事講完——放自己電腦還是放雲端、雲端要用哪一家——然後才連回原始碼。
+ * **同一個 repo 裡的一頁 HTML，不是第二個 repo**：安全修補一次到位，沒有兩份要
+ * 同步的東西。
  */
 export const PROJECT_URL =
-  import.meta.env.VITE_PROJECT_URL ?? 'https://github.com/CoolAI-Studio/Stock-trading-app'
+  import.meta.env.VITE_PROJECT_URL ?? 'https://coolai-studio.github.io/Stock-trading-app/'

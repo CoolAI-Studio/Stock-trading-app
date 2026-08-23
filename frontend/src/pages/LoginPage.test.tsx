@@ -194,7 +194,8 @@ describe('LoginPage：這個部署還沒有擁有者的時候', () => {
     const href = link.getAttribute('href') ?? ''
     expect(href).not.toContain('render.com/deploy')
     expect(href).not.toContain('vercel.com/new')
-    expect(href).toContain('github.com/CoolAI-Studio/Stock-trading-app')
+    // 指向引導頁（GitHub Pages），那一頁才把本機／雲端攤開講，然後才連回原始碼。
+    expect(href).toMatch(/coolai-studio\.github\.io|github\.com\/CoolAI-Studio/)
     // getAllBy：那句話裡有一個 <span> 把「私人部署」框起來，所以外層段落和它
     // 自己都會命中。要驗的是「有沒有說」，不是「說在哪一個標籤裡」。
     expect(screen.getAllByText(/私人部署|只有擁有者/).length).toBeGreaterThan(0)

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>股票提醒儀表板 — 部署你自己的一份</title>
+<meta name="description" content="盯盤、跑策略、事情發生時通知你。部署一份完全屬於你的：自己的網址、自己的資料庫、自己的通知。">
+<style>
+  /* 自己站得住：GitHub Pages 上沒有建置步驟，而抓不到 CDN 就散掉的頁面，
+     是這個專案第一個對外的畫面。所有樣式都在這裡。 */
+  :root {
+    --bg: #020617;
+    --panel: #0f172a;
+    --panel-2: #111c33;
+    --line: #1e293b;
+    --line-2: #334155;
+    --text: #e2e8f0;
+    --dim: #94a3b8;
+    --dimmer: #64748b;
+    --accent: #38bdf8;
+    --good: #34d399;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC",
+          "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+  a { color: var(--accent); }
+  h1, h2, h3 { line-height: 1.35; margin: 0; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: #0b1220;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  header { border-bottom: 1px solid var(--line); padding: 64px 0 48px; }
+  .eyebrow {
+    color: var(--good); font-size: 13px; letter-spacing: .12em;
+    text-transform: uppercase; margin: 0 0 14px;
+  }
+  h1 { font-size: clamp(28px, 6vw, 42px); font-weight: 700; letter-spacing: -.01em; }
+  .lede { color: var(--dim); font-size: clamp(16px, 2.6vw, 19px); margin: 18px 0 0; max-width: 60ch; }
+  .warning {
+    margin: 28px 0 0; padding: 14px 16px; border-radius: 10px;
+    border: 1px solid #78350f; background: #2a1a05; color: #fde68a; font-size: 15px;
+  }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: clamp(21px, 4vw, 27px); }
+  .sub { color: var(--dim); margin: 12px 0 0; max-width: 62ch; }
+
+  .cards { display: grid; gap: 18px; margin-top: 30px; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .cards { grid-template-columns: 1fr 1fr; } }
+  .card {
+    border: 1px solid var(--line-2); border-radius: 14px;
+    background: var(--panel); padding: 24px;
+  }
+  .card h3 { font-size: 19px; }
+  .card .who { color: var(--good); font-size: 13px; margin: 0 0 10px; font-weight: 600; }
+  .card ul { margin: 16px 0 0; padding-left: 20px; color: var(--dim); }
+  .card li { margin: 7px 0; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 26px; font-size: 15px; }
+  th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dimmer); font-weight: 600; font-size: 13px; letter-spacing: .04em; }
+  td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+  .scroll { overflow-x: auto; }
+
+  ol.steps { counter-reset: s; list-style: none; margin: 30px 0 0; padding: 0; }
+  ol.steps > li {
+    counter-increment: s; position: relative;
+    padding: 0 0 26px 52px; border-left: 2px solid var(--line);
+    margin-left: 15px;
+  }
+  ol.steps > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: -16px; top: -2px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--panel-2); border: 1px solid var(--line-2);
+    color: var(--accent); font-size: 14px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  ol.steps h3 { font-size: 17px; }
+  ol.steps p { color: var(--dim); margin: 8px 0 0; }
+
+  .note {
+    margin-top: 14px; padding: 12px 14px; border-radius: 9px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--dim); font-size: 14.5px;
+  }
+  .note strong { color: var(--text); }
+
+  .cta { display: inline-block; margin-top: 26px; padding: 13px 22px; border-radius: 10px;
+         background: #0369a1; color: #fff; font-weight: 600; text-decoration: none; }
+  .cta:hover { background: #0284c7; }
+  .cta.ghost { background: transparent; border: 1px solid var(--line-2); color: var(--text); margin-left: 10px; }
+  .cta.ghost:hover { border-color: var(--dim); }
+
+  footer { padding: 44px 0 72px; color: var(--dimmer); font-size: 14px; }
+  footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">開源．自己部署．資料在你手上</p>
+    <h1>盯盤這件事，交給它做</h1>
+    <p class="lede">
+      它替你看著行情、跑你設的條件，事情發生的時候通知你的手機。
+      部署一份完全屬於你的——自己的網址、自己的資料庫、自己的通知管道，
+      跟任何其他人的那一份完全無關。
+    </p>
+    <div class="warning">
+      <strong>它不會幫你下單。</strong>
+      這是提醒系統，不是下單系統。條件到了它通知你，要不要買賣、在哪裡買賣，
+      還是你自己在原本用的券商 App 裡決定。
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>第一個決定：放在自己的電腦，還是放在雲端？</h2>
+    <p class="sub">
+      這是唯一一個沒有標準答案的選擇，而且它決定後面所有步驟。兩條路都走得通，
+      差別在「電腦關機的時候會怎樣」。
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <p class="who">適合：想先試試看、或本來就有一台不關機的電腦</p>
+        <h3>跑在自己的電腦上</h3>
+        <ul>
+          <li>不用註冊任何服務，不用信用卡</li>
+          <li>資料就在你的硬碟上，一個檔案</li>
+          <li><strong>電腦關機或睡著，盯盤就停了</strong>——提醒也就不會送出</li>
+          <li>手機在外面連不到家裡那台，除非你自己開通</li>
+          <li>那個檔案要自己備份，系統不會替你備份</li>
+        </ul>
+      </div>
+      <div class="card">
+        <p class="who">適合：想要 24 小時都在盯、手機隨時收得到</p>
+        <h3>放在雲端</h3>
+        <ul>
+          <li>你關電腦它照樣在跑，手機在哪裡都收得到</li>
+          <li>有免費方案，多數不用信用卡</li>
+          <li>要註冊兩到三個服務的帳號（下面說是哪幾種）</li>
+          <li>免費方案通常會在沒人用的時候休眠，醒來要等幾秒</li>
+          <li>資料放在你自己開的資料庫裡，不是別人的</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>不確定就選雲端。</strong>
+      這個系統的價值在「你沒看盤的時候它在看」，而放在會關機的電腦上，
+      它剛好在你最需要的時候不在。選了之後也隨時改得掉——換一個設定值的事。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>選了雲端，要用哪一家？</h2>
+    <p class="sub">
+      <strong>它要的是三樣東西，不是三個品牌。</strong>
+      沒有任何一個地方寫死廠商，下面每一格都可以換成別家、換成付費方案、
+      或換成你自己架的機器。免費的例子只是因為它們免費而且不用信用卡。
+    </p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>要的東西</th><th>它負責什麼</th><th>免費的例子</th><th>換成別的？</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>一個能跑 Docker 的地方</td>
+            <td>盯盤、跑策略、送通知的本體</td>
+            <td>Render</td>
+            <td>可以：Railway、Fly.io、Koyeb、Heroku，或你自己的機器</td>
+          </tr>
+          <tr>
+            <td>一個 Postgres</td>
+            <td>存你的帳號、策略、提醒紀錄</td>
+            <td>Neon、Supabase</td>
+            <td>可以：任何 Postgres，含付費方案和自架的</td>
+          </tr>
+          <tr>
+            <td>一個放前端的地方</td>
+            <td>你在瀏覽器上看到的畫面</td>
+            <td>Vercel</td>
+            <td>可以：Cloudflare Pages、Netlify，或任何能放靜態檔的地方</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <strong>整份設定裡，只有資料庫那一格要去別人家拿。</strong>
+      你需要一串 <code>postgresql://</code> 開頭的<strong>連線字串</strong>，
+      那是註冊完資料庫服務之後它給你的。其他該填的值，系統的設定頁上都有按鈕直接產生——
+      不用在自己電腦上裝任何東西，也不用打指令。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>裝起來是這樣</h2>
+    <p class="sub">整段路大約十五分鐘，最花時間的是註冊資料庫那一步。</p>
+
+    <ol class="steps">
+      <li>
+        <h3>先開一個資料庫</h3>
+        <p>
+          去你選的那一家開一個 Postgres，把它給你的連線字串複製起來。
+          這是唯一一個系統沒辦法替你產生的東西，因為它是別人家的服務。
+        </p>
+      </li>
+      <li>
+        <h3>把後端部署上去</h3>
+        <p>
+          用 <code>backend/Dockerfile</code> 這個映像檔。設定的時候只要填
+          <code>DATABASE_URL</code>（上一步那一串），<strong>其他全部留白</strong>。
+        </p>
+      </li>
+      <li>
+        <h3>把前端部署上去</h3>
+        <p>
+          只要填一個值：後端的網址。即時報價用的連線會自動從它推導出來。
+        </p>
+      </li>
+      <li>
+        <h3>打開你的網址，讓設定頁帶你走完</h3>
+        <p>
+          畫面會自動帶你到設定頁，而不是丟一個壞掉的登入畫面給你。
+          缺什麼它列給你看，<strong>能自己產生的每一項都有一顆按鈕</strong>——
+          按了複製、貼回你的平台，存檔就好。
+        </p>
+      </li>
+      <li>
+        <h3>建立你的帳號</h3>
+        <p>
+          設定完成之後回到首頁，它會請你建立<strong>第一個也是唯一一個</strong>帳號。
+          建好之後註冊就自己關起來，別人打不進來。
+        </p>
+      </li>
+      <li>
+        <h3>照著引導把三件事接上線</h3>
+        <p>
+          資料庫、AI（選配）、通知管道。每一格都有一個會真的去試一次的按鈕——
+          填了不算，通了才算。
+        </p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>AI 是選配的</h2>
+    <p class="sub">
+      不設定 AI，這個系統一樣完整：盯盤、條件判斷、通知、回測，全部照常，
+      一次都不會經過 AI。需要 AI 的那幾塊會整塊關起來，而不是留一顆按了會失敗的按鈕。
+    </p>
+    <div class="note">
+      設定了它能做的事：用一句話產生策略（「台積電跌到 900 提醒我」），
+      以及在事情不對的時候幫你看問題。
+      金鑰是<strong>你自己的</strong>，每次發問算在你自己帳上，
+      存在你自己的資料庫裡而且是加密的，隨時可以刪掉。
+      模型清單系統已經先填好一組免費的，所以多數情況你只要貼一把金鑰。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>準備好了</h2>
+    <p class="sub">
+      完整的步驟、每一個設定值的說明、以及不想用上面那幾家時該怎麼做，都在原始碼那邊。
+      這個專案是公開的，你部署的就是你看到的那一份。
+    </p>
+    <a class="cta" href="https://github.com/CoolAI-Studio/Stock-trading-app#readme">
+      看完整的安裝說明
+    </a>
+    <a class="cta ghost" href="https://github.com/CoolAI-Studio/Stock-trading-app">
+      原始碼
+    </a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      這是提醒系統，不是投資建議，也不會替你下單。
+      部署之後那一份完全屬於你——資料、金鑰、通知，都不會經過任何其他人。
+    </p>
+    <p>
+      <a href="https://github.com/CoolAI-Studio/Stock-trading-app">CoolAI-Studio/Stock-trading-app</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
