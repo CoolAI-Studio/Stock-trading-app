@@ -125,6 +125,42 @@ describe('設定引導（分頁）', () => {
     expect(screen.queryByText(/還沒設定/)).not.toBeInTheDocument()
   })
 
+  it('AI 有設定的時候，資料庫這一格多一條問 AI 的路', async () => {
+    // 使用者：「若 AI 有設，資料庫的設定就可以改跑 AI 引導；若沒有，那就需要事
+    // 前比較多的引導頁去引導如何設定資料庫。」
+    //
+    // 做得到的地方是這裡（登入後、擁有者本人）。登入前的 /setup 做不到：那時候
+    // 還沒有帳號，在那裡放 AI 對話框等於開一個不需要登入的 AI 端點，任何人都能
+    // 燒掉部署者的額度——稽查員的規則就是「沒有帳號閘門的端點一律紅燈」。
+    serve({ system: LOCAL_FILE, ai: { configured: true } })
+    const user = userEvent.setup()
+    renderGuide()
+
+    await user.click(await screen.findByRole('tab', { name: /資料庫/ }))
+
+    await user.type(await screen.findByLabelText(/問 AI/), '我想換成雲端資料庫，該怎麼做')
+    await user.click(screen.getByRole('button', { name: /^問$|問問看/ }))
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(api.post).mock.calls.some(([path]) => String(path).includes('system/assist')),
+      ).toBe(true),
+    )
+  })
+
+  it('AI 沒設定的時候不給那條路 —— 靜態的引導自己要站得住', async () => {
+    // 那份靜態引導不是備案，它是永遠都在的那一條。CLAUDE.md：設定流程不可以依賴
+    // AI，因為 AI 需要一把金鑰，那本身就是一格空白。
+    serve({ system: LOCAL_FILE, ai: { configured: false } })
+    const user = userEvent.setup()
+    renderGuide()
+
+    await user.click(await screen.findByRole('tab', { name: /資料庫/ }))
+
+    expect(screen.queryByLabelText(/問 AI/)).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /改用雲端/ })).toBeInTheDocument()
+  })
+
   it('本機跑的時候，本機和雲端是兩個可以選的，不是系統替他決定', async () => {
     serve({ system: LOCAL_FILE })
     renderGuide()

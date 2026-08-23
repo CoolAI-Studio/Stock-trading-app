@@ -53,6 +53,12 @@ export function SetupGuidePage() {
   // 回報的現況決定（見 done.database）。
   const [dbPlan, setDbPlan] = useState<'local' | 'cloud' | null>(null)
 
+  // 問 AI 那一條。只有在 AI 已經接上線的時候才出現——沒接上線的時候，靜態的引導
+  // 自己要站得住，那不是備案而是永遠都在的那一條（CLAUDE.md：設定流程不可以依賴
+  // AI，因為 AI 需要一把金鑰，那本身就是一格空白）。
+  const [dbQuestion, setDbQuestion] = useState('')
+  const [dbAnswer, setDbAnswer] = useState<string | null>(null)
+
   const database = systemQuery.data?.database
   const platform = systemQuery.data?.platform
   const channels = (channelsQuery.data ?? []).filter((channel) => channel.is_enabled)
@@ -75,6 +81,25 @@ export function SetupGuidePage() {
   const firstUnfinished: TabKey =
     (['database', 'ai', 'notifications'] as TabKey[]).find((key) => !done[key]) ?? 'database'
   const active = tab ?? firstUnfinished
+
+  // 走既有的 /api/system/assist，不另外做一支。那一支已經會把這個部署的真實狀態
+  // （含「還沒填的設定項目」）一起送過去，所以它答得出「你這一台現在缺什麼」，
+  // 而不是泛泛地講資料庫。
+  //
+  // 只在這裡、不在登入前的設定頁：那時候還沒有帳號，在那裡放 AI 對話框等於開一
+  // 個不需要登入的 AI 端點，任何人都能燒掉部署者的額度——而稽查員的規則就是
+  // 「沒有帳號閘門的端點一律紅燈」。
+  const askAboutDatabase = useMutation({
+    mutationFn: () =>
+      api.post<{ ok: boolean; reply?: string | null; error?: string | null }>(
+        '/api/system/assist',
+        { message: `我在設定資料庫這一步。${dbQuestion}` },
+      ),
+    onSuccess: (result) =>
+      setDbAnswer(result.ok ? (result.reply ?? '（沒有回應）') : (result.error ?? '問不到答案。')),
+    onError: (err) =>
+      setDbAnswer(err instanceof ApiError ? err.message : '問不到答案，請再試一次。'),
+  })
 
   const testChannel = useMutation({
     mutationFn: (id: number) =>
@@ -236,6 +261,34 @@ export function SetupGuidePage() {
               </li>
               <li>存檔之後服務會自己重新啟動，然後回到這一頁按「重新檢查」。</li>
             </ol>
+          )}
+
+          {/* AI 有接上線就多這一條。它不取代上面那些步驟——那些是所有人都看得
+              到的，而這裡是「照著做還是卡住」的時候可以問的人。 */}
+          {aiQuery.data?.configured && (
+            <div className="space-y-2 rounded border border-slate-700 bg-slate-900 p-3">
+              <label htmlFor="db-question" className="block text-sm text-slate-300">
+                問 AI（它看得到你這一台現在的狀況）
+              </label>
+              <input
+                id="db-question"
+                value={dbQuestion}
+                onChange={(event) => setDbQuestion(event.target.value)}
+                placeholder="例如：我想換成雲端資料庫，該怎麼做？"
+                className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100"
+              />
+              <button
+                type="button"
+                disabled={askAboutDatabase.isPending || !dbQuestion.trim()}
+                onClick={() => askAboutDatabase.mutate()}
+                className="rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+              >
+                {askAboutDatabase.isPending ? '問問看…' : '問'}
+              </button>
+              {dbAnswer && (
+                <p className="whitespace-pre-wrap text-sm text-slate-300">{dbAnswer}</p>
+              )}
+            </div>
           )}
 
           <button
