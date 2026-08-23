@@ -318,11 +318,13 @@ export function WelcomePage() {
           ) : (
             <>
               <p className="text-sm text-slate-400">
-                AI 需要一把你自己的金鑰，設定在「AI 設定」那一頁。金鑰是你的、存在你自己的
-                資料庫裡而且是加密的，隨時可以刪掉——刪掉之後其他功能一切照常。
+                AI 需要一把你自己的金鑰。金鑰是你的、存在你自己的資料庫裡而且是加密的，
+                隨時可以刪掉——刪掉之後其他功能一切照常。
               </p>
+              {/* 設定引導，不是 /ai-settings：設定發生的地方只有一個，而引導那一頁
+                  現在貼得上金鑰也測得了連線。 */}
               <Link
-                to="/ai-settings"
+                to="/guide"
                 className="block rounded bg-emerald-600 px-3 py-2 text-center font-medium text-white hover:bg-emerald-500"
               >
                 去設定 AI 金鑰

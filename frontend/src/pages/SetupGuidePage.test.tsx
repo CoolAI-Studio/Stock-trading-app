@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 
 const LOCAL_FILE = {
@@ -75,6 +75,7 @@ describe('設定引導（分頁）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.post).mockResolvedValue({ ok: true } as never)
+    vi.mocked(api.put).mockResolvedValue({ configured: true } as never)
   })
 
   it('三件事各一個分頁', async () => {
@@ -160,6 +161,53 @@ describe('設定引導（分頁）', () => {
       ),
     )
     expect(await screen.findByText(/通了/)).toBeInTheDocument()
+  })
+
+  it('沒有金鑰的時候就在這一頁貼上去 —— 不要把人踢到別的頁面', async () => {
+    // 這一格本來只有一串指示：「到 AI 輔助那一頁貼上金鑰，再回來按測試」。
+    // 引導最容易斷掉的就是這種一步——離開了還回不回得來，不在我們手上。而
+    // CLAUDE.md 的第一條規則就是「永遠不要叫他去別的地方拿一個值」：金鑰確實
+    // 要去供應商那裡拿（那是誠實的），但「貼上」發生在哪一頁是我們決定的。
+    serve({
+      ai: {
+        configured: false,
+        provider: 'openai_compatible',
+        base_url: 'https://openrouter.ai/api/v1',
+        model: '',
+        source: 'none',
+      },
+    })
+    const user = userEvent.setup()
+    renderGuide()
+
+    await user.click(await screen.findByRole('tab', { name: /AI/ }))
+
+    await user.type(await screen.findByLabelText('API 金鑰'), 'sk-test-123')
+    await user.type(screen.getByLabelText('模型'), 'anthropic/claude-opus-5')
+    await user.click(screen.getByRole('button', { name: '儲存' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const [path, body] = vi.mocked(api.put).mock.calls.at(-1)!
+    expect(String(path)).toContain('/api/ai-settings')
+    expect(body).toMatchObject({ api_key: 'sk-test-123', model: 'anthropic/claude-opus-5' })
+
+    // 而且人還在引導頁上。
+    expect(screen.getByRole('tab', { name: /AI/ })).toBeInTheDocument()
+    expect(screen.queryByText('AI 設定頁')).not.toBeInTheDocument()
+  })
+
+  it('金鑰要去哪裡拿還是要老實說 —— 那一個 app 真的生不出來', async () => {
+    // 同一條規則的另一半：app 生得出來的就給按鈕，生不出來的就老實說，不要假裝。
+    serve({ ai: { configured: false } })
+    const user = userEvent.setup()
+    renderGuide()
+
+    await user.click(await screen.findByRole('tab', { name: /AI/ }))
+
+    expect(await screen.findByRole('link', { name: /OpenRouter/ })).toHaveAttribute(
+      'href',
+      expect.stringContaining('openrouter.ai'),
+    )
   })
 
   it('測試失敗的時候把原因講出來，不要只說失敗', async () => {

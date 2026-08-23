@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AiCredentialsForm } from '../components/AiCredentialsForm'
 import { ApiError, api } from '../lib/api'
 import { isPushSupported, subscribeToPush } from '../lib/push'
 import type { NotificationChannel } from '../lib/types'
@@ -26,7 +27,6 @@ interface SystemShape {
 export function SetupGuidePage() {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabKey | null>(null)
-  const [aiResult, setAiResult] = useState<{ ok: boolean; error?: string | null } | null>(null)
   const [channelResult, setChannelResult] = useState<{ ok: boolean; error?: string | null } | null>(
     null,
   )
@@ -64,16 +64,6 @@ export function SetupGuidePage() {
   const firstUnfinished: TabKey =
     (['database', 'ai', 'notifications'] as TabKey[]).find((key) => !done[key]) ?? 'database'
   const active = tab ?? firstUnfinished
-
-  const testAi = useMutation({
-    mutationFn: () => api.post<{ ok: boolean; error?: string | null }>('/api/ai-settings/test', {}),
-    onSuccess: (result) => setAiResult(result),
-    onError: (err) =>
-      setAiResult({
-        ok: false,
-        error: err instanceof ApiError ? err.message : '問不到，可能是金鑰或網路的問題。',
-      }),
-  })
 
   const testChannel = useMutation({
     mutationFn: (id: number) =>
@@ -214,23 +204,10 @@ export function SetupGuidePage() {
       {active === 'ai' && (
         <div className="space-y-4">
           {aiQuery.data?.configured ? (
-            <>
-              <div className="rounded border border-emerald-800 bg-emerald-950/40 p-3 text-sm text-emerald-200">
-                <p className="font-medium">AI 的金鑰已經設定好了。</p>
-                <p className="mt-1">按下面的按鈕確認它真的通——設定好不等於問得到。</p>
-              </div>
-              <button
-                onClick={() => testAi.mutate()}
-                disabled={testAi.isPending}
-                className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {testAi.isPending ? '問問看…' : '測試 AI'}
-              </button>
-              {aiResult?.ok && <p className="text-sm text-emerald-300">通了，AI 有回應。</p>}
-              {aiResult && !aiResult.ok && (
-                <p className="text-sm text-red-400">{aiResult.error ?? '沒有通。'}</p>
-              )}
-            </>
+            <div className="rounded border border-emerald-800 bg-emerald-950/40 p-3 text-sm text-emerald-200">
+              <p className="font-medium">AI 的金鑰已經設定好了。</p>
+              <p className="mt-1">按下面的「測試連線」確認它真的通——設定好不等於問得到。</p>
+            </div>
           ) : (
             <>
               <div className="rounded border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
@@ -241,6 +218,9 @@ export function SetupGuidePage() {
                   其他功能完全不受影響——提醒、盯盤、通知、回測都照常。AI 只是幫忙的那一層。
                 </p>
               </div>
+              {/* 金鑰只有供應商生得出來，所以這一步老實說「去哪裡拿」——CLAUDE.md
+                  的規則是 app 生得出來的就給按鈕，生不出來的不要假裝。但「貼上」
+                  就在下面，不再把人送去別的頁面。 */}
               <ol className="list-inside list-decimal space-y-2 text-sm text-slate-300">
                 <li>
                   去拿一把金鑰。
@@ -258,14 +238,15 @@ export function SetupGuidePage() {
                   金鑰是<strong>你自己的</strong>，每次發問的費用算在你自己帳上。它存在你自己的
                   資料庫裡而且是加密的，隨時可以刪掉。
                 </li>
-                <li>
-                  到 <Link to="/ai-settings" className="underline">AI 輔助</Link>{' '}
-                  那一頁貼上金鑰、選一個模型。
-                </li>
-                <li>回到這一頁按「測試 AI」，通了才算完成。</li>
+                <li>貼進下面的「API 金鑰」，選一個模型，按儲存。</li>
+                <li>然後按「測試連線」——通了這一格才算完成。</li>
               </ol>
             </>
           )}
+
+          {/* 跟 /ai-settings 是同一個元件。兩份實作會漂，而漂掉的那天這裡會用一
+              組後端已經不收的欄位存金鑰，然後說「存好了」。 */}
+          <AiCredentialsForm />
         </div>
       )}
 
