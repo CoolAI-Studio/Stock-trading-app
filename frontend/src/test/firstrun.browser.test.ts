@@ -313,6 +313,24 @@ describe('設定填好之後，他要建立第一個帳號', () => {
     await page.close()
   })
 
+  it('帳號建好之後，登入頁改成指路給下一個陌生人', async () => {
+    // 註冊在這一份上關掉了（一份部署一個擁有者），但註冊那條路不該消失——它通往
+    // 的是「部署你自己那一份」。使用者的話：「不然每次都用我的流量。」
+    //
+    // 這一條跑在建立帳號那一條之後，所以它看到的正是一個誤闖進來的陌生人會看到
+    // 的東西：已經有擁有者的登入頁。
+    const { page, errors } = await open()
+    await page.goto(WEB_ORIGIN + '/login')
+    await page.waitForSelector('a:has-text("部署你自己的一份")', { timeout: 30_000 })
+
+    const href = await page.locator('a:has-text("部署你自己的一份")').getAttribute('href')
+    expect(href).toContain('render.com/deploy')
+    // 而且不要留一顆按了必定失敗的註冊鈕。
+    expect(await page.locator('button:has-text("建立帳號")').count()).toBe(0)
+    expect(errors).toEqual([])
+    await page.close()
+  })
+
   it('設定引導的三格都在', async () => {
     const { page } = await open()
     await page.goto(WEB_ORIGIN + '/login')

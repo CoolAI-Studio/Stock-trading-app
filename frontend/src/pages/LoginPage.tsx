@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError, SESSION_EXPIRED_KEY } from '../lib/api'
 import { useAuth } from '../context/useAuth'
+import { DEPLOY_YOUR_OWN_URL } from '../lib/project'
 
 /**
  * 登入，或者——如果這個部署還沒有擁有者——建立那個帳號。
@@ -194,6 +195,34 @@ export function LoginPage() {
           </button>
         )}
       </form>
+
+      {/* 註冊那條路，在每一份部署上都在——只是這一份已經有擁有者了，所以它通往
+          的是「部署你自己那一份」。
+
+          不給任何入口，一個誤闖進來的陌生人只會看到一個他永遠登不進去的表單，
+          然後以為壞了。而給一顆假裝能在這裡註冊的按鈕更糟：按了會走進死路的按
+          鈕，比沒有按鈕還差——這一頁自己已經為了同一條理由做過一次決定。 */}
+      {waitingForOwner === false && (
+        <div className="mt-4 w-full max-w-sm rounded border border-slate-800 bg-slate-900/60 p-4 text-sm text-slate-400">
+          <p>
+            這是一份<span className="text-slate-200">私人部署</span>
+            ，只有擁有者登得進來。註冊在這裡是關著的。
+          </p>
+          <p className="mt-2">
+            想自己用一份的話，部署你自己的——
+            <span className="text-slate-200">自己的網址、自己的資料庫、自己的通知</span>
+            ，跟這一份完全無關，也不會用到別人的額度。
+          </p>
+          <a
+            href={DEPLOY_YOUR_OWN_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 block rounded bg-sky-700 px-3 py-2 text-center font-medium text-white hover:bg-sky-600"
+          >
+            部署你自己的一份
+          </a>
+        </div>
+      )}
     </div>
   )
 }

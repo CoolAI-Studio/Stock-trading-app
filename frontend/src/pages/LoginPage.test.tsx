@@ -172,6 +172,38 @@ describe('LoginPage：這個部署還沒有擁有者的時候', () => {
     expect(await screen.findByRole('button', { name: '登入' })).toBeInTheDocument()
   })
 
+  it('已經有擁有者的時候，註冊那條路還在 —— 只是通往他自己那一份', async () => {
+    // 使用者：「還是沒有註冊按鈕，我認為相當重要。」
+    //
+    // 這一份部署只有一個擁有者，所以在**這裡**註冊是不可能的。但一個誤闖進來的
+    // 陌生人，看到一個他永遠登不進去的表單而沒有任何說明，只會以為壞了。而他要
+    // 的東西是存在的：部署他自己那一份，自己的網址、自己的資料庫、自己的流量。
+    //
+    // 連回同一個正典 repo，不是各自拷貝：拷貝出去的那一份會停在拷貝的那一天，
+    // 而這個 app 修過沙箱逃逸和跨帳號隔離——層層轉發之後最末端的人拿到的是少了
+    // 那些修補的版本，而他不會知道。
+    route([['registration-open', () => jsonResponse({ open: false })]])
+
+    renderLoginPage()
+
+    const link = await screen.findByRole('link', { name: /部署你自己/ })
+    expect(link).toHaveAttribute('href', expect.stringContaining('render.com/deploy'))
+    // getAllBy：那句話裡有一個 <span> 把「私人部署」框起來，所以外層段落和它
+    // 自己都會命中。要驗的是「有沒有說」，不是「說在哪一個標籤裡」。
+    expect(screen.getAllByText(/私人部署|只有擁有者/).length).toBeGreaterThan(0)
+  })
+
+  it('那條路不會假裝能在這一份上註冊', async () => {
+    // 按了會走進死路的按鈕，比沒有按鈕更糟——這一頁自己已經有一條測試在講同一
+    // 件事（「有人搶先註冊的話說清楚，並且切回登入」）。
+    route([['registration-open', () => jsonResponse({ open: false })]])
+
+    renderLoginPage()
+
+    await screen.findByRole('link', { name: /部署你自己/ })
+    expect(screen.queryByRole('button', { name: '建立帳號' })).not.toBeInTheDocument()
+  })
+
   it('已經有擁有者的時候，不給任何建立帳號的入口', async () => {
     route([['registration-open', () => jsonResponse({ open: false })]])
 
