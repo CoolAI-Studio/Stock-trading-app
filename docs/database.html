@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>資料放哪裡 — 股票提醒儀表板</title>
-<meta name="description" content="放在自己的電腦，還是放在雲端。">
+<meta name="description" content="放在自己的電腦，還是放在雲端。每一家怎麼申請都有手把手。">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -44,7 +44,7 @@
         <ul>
           <li>手機在哪裡都收得到</li>
           <li>有免費方案，多數不用卡</li>
-          <li>免費方案會休眠，醒來等幾秒</li>
+          <li>要開一個 Postgres（下面有手把手）</li>
         </ul>
       </div>
     </div>
@@ -57,8 +57,67 @@
 
 <section>
   <div class="wrap">
-    <h2>雲端用哪一家</h2>
-    <p class="lede">它要的是三樣東西，不是三個品牌。</p>
+    <h2>你只需要拿到一串字</h2>
+    <p class="lede">
+      叫做<strong>連線字串</strong>，長得像
+      <code>postgresql://使用者:密碼@主機/資料庫名</code>。
+      註冊完資料庫服務，它就會給你這一串——你只要複製，不用看懂。
+    </p>
+
+    <details>
+      <summary>Neon — 免費，不用信用卡（推薦第一次用）</summary>
+      <div class="detail-body">
+        <ol>
+          <li>開 <a href="https://neon.tech" target="_blank" rel="noreferrer noopener">neon.tech</a>，按 <strong>Sign up</strong>，用 Google 或 GitHub 登入。</li>
+          <li>它會自動幫你建一個 project，不用改任何設定，直接按下一步到底。</li>
+          <li>進到 Dashboard，找 <strong>Connection string</strong> 那一塊。</li>
+          <li>按旁邊的複製按鈕，拿到 <code>postgresql://…</code> 開頭的一串。</li>
+          <li>貼在記事本先存著，第 3 步要用。</li>
+        </ol>
+        <p class="gotcha">
+          如果它問你要 <em>Pooled</em> 還是 <em>Direct</em>，兩個都可以，選預設的就好。
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Supabase — 免費，同樣是 Postgres</summary>
+      <div class="detail-body">
+        <ol>
+          <li>開 <a href="https://supabase.com" target="_blank" rel="noreferrer noopener">supabase.com</a>，按 <strong>Start your project</strong>。</li>
+          <li>建一個 <strong>New project</strong>。它會要你設一個<strong>資料庫密碼</strong>——設一個並記下來。</li>
+          <li>等它建好（約兩分鐘）。</li>
+          <li>左下角 <strong>Project Settings</strong> → <strong>Database</strong> → 找 <strong>Connection string</strong>，選 <strong>URI</strong>。</li>
+          <li>複製那一串。</li>
+        </ol>
+        <p class="gotcha">
+          <strong>最容易卡住的一步：</strong>它給你的那串裡有
+          <code>[YOUR-PASSWORD]</code>，你要自己把它換成第 2 步設的那個密碼，
+          <strong>連中括號一起換掉</strong>。沒換的話系統會說連不上。
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>付費方案、或你自己架的 Postgres</summary>
+      <div class="detail-body">
+        <p>
+          都可以，這個系統不在乎是誰家的。免費方案在沒人用的時候會休眠，醒來要等幾秒；
+          在意這件事就用付費方案。自己架的話，把那串連線字串準備好就行。
+        </p>
+        <p>
+          Render、Railway、Fly.io、Koyeb 自己也都能開 Postgres，
+          在他們的後台按 <strong>New → PostgreSQL</strong>，一樣是複製那串連線字串。
+        </p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>其餘兩樣</h2>
+    <p class="lede">它要的是三樣東西，不是三個品牌。每一格都能換。</p>
 
     <div class="scroll">
       <table>
@@ -83,10 +142,6 @@
           </tr>
         </tbody>
       </table>
-    </div>
-
-    <div class="note">
-      只有資料庫要去別人家拿：一串 <code>postgresql://</code> 開頭的連線字串。其餘系統自己產生。
     </div>
   </div>
 </section>
