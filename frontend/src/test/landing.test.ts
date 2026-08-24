@@ -21,7 +21,7 @@
  * 上限只算收起來時看得到的部分，而每一個要他去別人家做的動作都必須有手把手。
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -217,11 +217,25 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     expect(beforeTrouble).not.toContain('DEPLOYMENT.md')
   })
 
-  it('第三頁也給得出「跑在自己電腦上」那條路', () => {
+  it('第三頁也給得出「跑在自己電腦上」那條路，而且那條路真的存在', () => {
+    // 這一條原本只驗「頁面上有沒有寫 docker compose up」——而那句話當時是假的：
+    // repo 裡根本沒有 compose 檔，照著做會直接失敗。測試通過，因為它驗的是文案，
+    // 不是事實。跟先前把 render.com/deploy 寫進斷言是同一種錯。
+    //
+    // 現在驗兩件事：頁面上寫了，而且那個檔案在。實際跑得起來由人驗過一次
+    // （容器起來、資料庫 ok、註冊是開的），這裡守的是「不要再指向不存在的東西」。
     const text = strip(read('install.html'))
 
     expect(text).toMatch(/docker compose up/)
     expect(text).toMatch(/localhost/)
+
+    const compose = resolve(DOCS, '..', 'docker-compose.yml')
+    expect(existsSync(compose), 'install.html 叫人跑 docker compose up，但沒有 compose 檔').toBe(
+      true,
+    )
+    const yaml = readFileSync(compose, 'utf-8')
+    // 頁面說開 localhost:5173，compose 就必須真的把那個埠開出來。
+    expect(yaml).toContain('5173:5173')
   })
 
   it('三頁互相走得通，而且知道自己是第幾步', () => {

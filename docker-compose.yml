@@ -1,0 +1,80 @@
+# 在自己的電腦上跑一份，一行指令：
+#
+#     docker compose up
+#
+# 然後打開 http://localhost:5173。
+#
+# 引導頁（docs/install.html）上寫著這一行，而在這個檔案出現之前**那句話是假的**
+# ——repo 裡根本沒有 compose 檔。它是這個專案「本機」那條路唯一能給不寫程式的人
+# 的東西，而它指向一個不存在的指令。
+#
+# 三個設計決定，理由都在下面：
+#
+#   一、金鑰由容器自己產生，存在 volume 裡。repo 裡不放任何秘密（放了就是公開
+#       的），而每次重開都重新產生會把上一次加密存起來的 Telegram 權杖變成讀不
+#       出來的亂碼。產生一次、留著。
+#
+#   二、不用 ALLOW_INSECURE_SECRETS。那個逃生門存在是為了讓人不必手動生金鑰就能
+#       開發，而這裡已經自動生了——用真的金鑰比用逃生門好，因為這一份跟線上跑的
+#       是同一條程式路徑。
+#
+#   三、資料庫是 volume 裡的 SQLite。本機不需要 Postgres，而 `docker compose
+#       down -v` 就是「全部清掉重來」。
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - appdata:/data
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      CORS_ORIGINS: http://localhost:5173
+      PUBLIC_BASE_URL: http://localhost:8000
+      LOG_LEVEL: INFO
+      # 手機推播要一對 VAPID 金鑰，本機用不到就留空——Email 和 Telegram 不受影響。
+      VAPID_PUBLIC_KEY: ""
+      VAPID_PRIVATE_KEY: ""
+    # 第一次啟動時生一次金鑰，之後每次都讀同一份。`sh -c` 而不是寫進 Dockerfile：
+    # 這是本機專用的行為，不該進到會部署出去的映像檔裡。
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for name in SECRET_ENCRYPTION_KEY JWT_SECRET TV_WEBHOOK_SECRET; do
+          file="/data/$$name"
+          if [ ! -f "$$file" ]; then
+            if [ "$$name" = SECRET_ENCRYPTION_KEY ]; then
+              python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())' > "$$file"
+            else
+              python -c 'import secrets; print(secrets.token_urlsafe(48))' > "$$file"
+            fi
+          fi
+        done
+        export SECRET_ENCRYPTION_KEY="$$(cat /data/SECRET_ENCRYPTION_KEY)"
+        export JWT_SECRET="$$(cat /data/JWT_SECRET)"
+        export TV_WEBHOOK_SECRET="$$(cat /data/TV_WEBHOOK_SECRET)"
+        exec python scripts/start.py
+
+  frontend:
+    image: node:24-alpine
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - nodemodules:/app/node_modules
+    environment:
+      # 瀏覽器是在你的電腦上跑，所以這裡要寫 localhost，不是 compose 裡的服務名。
+      VITE_API_BASE_URL: http://localhost:8000
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - backend
+
+volumes:
+  appdata:
+  nodemodules:
