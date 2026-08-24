@@ -24,7 +24,7 @@
  * 當成雜訊，然後這一關就等於不存在了。
  */
 
-import { chromium, type Browser } from 'playwright'
+import { chromium, type Browser, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -60,6 +60,29 @@ afterAll(async () => {
  *
  * `initialView` 是唯一的變數，因為它就是這一關存在的理由。
  */
+/** 等版面真的套用完。
+ *
+ * lightweight-charts 把 fitContent() 和 setVisibleLogicalRange() 排進下一個
+ * animation frame 才生效，所以呼叫完立刻讀 getVisibleLogicalRange()，讀到的是**上
+ * 一個**狀態。在我的機器上剛好都來得及，在忙碌的 CI runner 上就不一定——
+ * f8a6825 那一次 chart job 紅在
+ *
+ *     expected 150 to be close to +0
+ *
+ * 150 正是「還沒套用、仍是預設視角」的值。下一次推送又綠了，也就是說它是抖的。
+ *
+ * 等兩個 frame，不是等一個：第一個 frame 是套用，第二個才保證那次套用已經反映在
+ * 讀得到的狀態上。也不用固定毫秒——那只是把同一個賭注換一個賠率。
+ */
+async function afterLayout(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => done()))
+      }),
+  )
+}
+
 async function dragToTheOldest(initialView: 'fitContent' | 'recent') {
   const page = await browser.newPage({ viewport: { width: 1000, height: 600 } })
   const pageErrors: string[] = []
@@ -108,6 +131,7 @@ async function dragToTheOldest(initialView: 'fitContent' | 'recent') {
   // 等版面真的算完，而不是等一個固定的毫秒數：固定等待在慢一點的 CI runner 上
   // 就是偶發紅燈，而偶發紅燈會擋掉修通知路徑的 hotfix。
   await page.waitForFunction(() => (window as never as { __range: () => unknown }).__range() !== null)
+  await afterLayout(page)
   const opened = await page.evaluate(() =>
     (window as never as { __range: () => { from: number; to: number } }).__range(),
   )
@@ -122,6 +146,7 @@ async function dragToTheOldest(initialView: 'fitContent' | 'recent') {
     await page.mouse.up()
   }
   await page.waitForFunction(() => (window as never as { __range: () => unknown }).__range() !== null)
+  await afterLayout(page)
 
   const dragged = await page.evaluate(() =>
     (window as never as { __range: () => { from: number; to: number } }).__range(),
