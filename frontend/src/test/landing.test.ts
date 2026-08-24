@@ -268,6 +268,56 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     }
   })
 
+  it('每一個外部連結都是 https', () => {
+    // 這一頁教人去別人家貼金鑰和連線字串。http 的連結在那個情境下不只是不安全，
+    // 是把「注意網址」這件事教反。
+    for (const name of PAGES) {
+      for (const [, url] of read(name).matchAll(/href="(https?:\/\/[^"]+)"/g)) {
+        expect(url, `${name} 有非 https 的連結`).toMatch(/^https:\/\//)
+      }
+    }
+  })
+
+  it('一鍵部署的網址帶對參數 —— 少一個他會停在一個空表單前面', () => {
+    // 這是連結裡唯一「壞掉但看起來正常」的部分：網址還在、頁面也打得開，只是
+    // 少了 root-directory，Vercel 就會去建置整個 repo 而不是 frontend。
+    //
+    // 刻意不在這裡打網路。platform.openai.com 對機器人回 403（真人瀏覽器 200），
+    // 所以一條會連線的檢查在 CI 上就是看別人臉色的紅燈。連結還活著這件事由每週
+    // 排程去看，不擋 push。
+    const page = read('install.html')
+
+    const render = page.match(/href="(https:\/\/render\.com\/deploy[^"]*)"/)?.[1] ?? ''
+    expect(render).toContain('repo=https://github.com/CoolAI-Studio/Stock-trading-app')
+
+    const vercel = page.match(/href="(https:\/\/vercel\.com\/new\/clone[^"]*)"/)?.[1] ?? ''
+    expect(vercel).toContain('repository-url=https://github.com/CoolAI-Studio/Stock-trading-app')
+    expect(vercel, 'Vercel 會去建置整個 repo 而不是 frontend').toContain('root-directory=frontend')
+    expect(vercel, '不問這一格，前端就不知道後端在哪').toContain('env=VITE_API_BASE_URL')
+  })
+
+  it('要人去別人家點的步驟，都給得出找不到時的搜尋字', () => {
+    // 這是這一輪唯一驗不了的一類：各家後台的實際點擊路徑。要真的有帳號才試得
+    // 出來，而且那些介面本來就會改。
+    //
+    // 驗不了就不要假裝驗過——但也不能只寫「自己找找看」。給一個穩定的關鍵字，
+    // 是介面改版之後仍然找得到那個東西的唯一辦法。
+    for (const [name, vendor] of [
+      ['database.html', 'Neon'],
+      ['database.html', 'Supabase'],
+      ['index.html', 'NVIDIA'],
+      ['index.html', 'Groq'],
+      ['install.html', 'Railway'],
+    ] as const) {
+      const drawer = read(name)
+        .split('<details')
+        .slice(1)
+        .find((chunk) => chunk.slice(0, chunk.indexOf('</details>')).includes(vendor))
+      expect(drawer, `${vendor} 沒有說明`).toBeTruthy()
+      expect(drawer, `${vendor} 沒有給「找不到就找這個字」`).toMatch(/找不到/)
+    }
+  })
+
   it('收起來的時候要短 —— 使用者說第一版讓人視覺疲勞', () => {
     // 只算預設看得到的字。展開的細節不算：那是他自己按開的，而且那些字正是他做得
     // 完的原因。兩件事都要，所以分開量。
