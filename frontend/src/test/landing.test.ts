@@ -55,8 +55,8 @@ describe('引導：預設看起來短，展開之後做得完', () => {
   it('第一頁說得出金鑰要填在哪裡 —— 這是他被卡住的地方', () => {
     // 使用者：「我要去哪裡『填』API key？有申請卻不知道填哪裡？」
     //
-    // 而這一頁存不了任何東西：它是 GitHub 上的一個靜態檔，沒有後端也沒有資料庫。
-    // 所以它能做、也必須做的，是說清楚那一格在哪裡。
+    // 這裡問的是**系統要用的那一份**。這幾頁沒有後端，存不進他的部署裡，所以能做
+    // 也必須做的，是把那一格指出來：部署表單的 AI_API_KEY，或裝完後的 AI 輔助頁。
     const text = strip(read('index.html'))
 
     expect(text).toContain('AI_API_KEY')
@@ -95,6 +95,75 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     for (const alternative of ['Railway', 'Fly.io', 'Neon', 'Supabase']) {
       expect(text, `缺少 ${alternative}`).toContain(alternative)
     }
+  })
+
+  it('第一頁不只介紹一家 AI —— 而且每一家都給得出接進系統要填什麼', () => {
+    // 使用者：「AI 其他金鑰介紹的網站不夠多，我發現 nVidia 似乎不錯，也是免費，
+    // 請在頁面多介紹並且真的可以接入系統的 API。」
+    //
+    // 「真的可以接入」＝要給網址。系統的供應者選「OpenAI 相容」之後，能不能用就
+    // 只取決於那個 base URL 對不對。
+    const page = read('index.html')
+
+    for (const [vendor, baseUrl] of [
+      ['OpenRouter', 'https://openrouter.ai/api/v1'],
+      ['NVIDIA', 'https://integrate.api.nvidia.com/v1'],
+      ['Groq', 'https://api.groq.com/openai/v1'],
+      ['OpenAI', 'https://api.openai.com/v1'],
+    ] as const) {
+      expect(page, `沒有介紹 ${vendor}`).toContain(vendor)
+      expect(page, `${vendor} 沒有給接進系統要填的網址`).toContain(baseUrl)
+    }
+  })
+
+  it('第三頁的替代平台不是一句帶過 —— 不然就是擺明只能用 Render', () => {
+    // 使用者：「不想用 Render 的說明太少，這已經擺明直接用 render 了，對嗎？」
+    const page = read('install.html')
+
+    // 切開來找，不用正則：template literal 裡的 \s 會被 JS 當成跳脫吃掉，寫出
+    // 一個看起來對、實際上在找 [sS] 的表達式。
+    const drawers = page.split('<details').slice(1)
+    for (const vendor of ['Railway', 'Fly.io']) {
+      const block = drawers.find((chunk) => chunk.slice(0, chunk.indexOf('</details>')).includes(vendor))
+      expect(block, `${vendor} 沒有自己的說明`).toBeTruthy()
+      expect(block, `${vendor} 的說明不是步驟`).toMatch(/<ol>/)
+    }
+  })
+
+  it('第一頁收得了金鑰，第二三頁就問得了 AI', () => {
+    // 使用者：「不是第一頁 API key 填完之後，第二、三頁的部分就可以導入 AI 輔助
+    // 了嗎？但這個我看不出來。」——原本完全沒有。
+    expect(read('index.html')).toContain('id="ai-key-form"')
+    for (const name of ['database.html', 'install.html']) {
+      const page = read(name)
+      expect(page, `${name} 沒有問 AI 的區塊`).toContain('id="ai-ask"')
+      // 沒有金鑰就不該出現：按了會失敗的東西不要給。
+      expect(page, `${name} 的問 AI 區塊預設沒有藏起來`).toMatch(/id="ai-ask"[^>]*\shidden/)
+      // 要帶著這一頁在講什麼過去，不然它只會泛泛地回答。
+      expect(page, `${name} 沒有把這一步的脈絡帶給 AI`).toMatch(/data-context="[^"]{40,}"/)
+    }
+  })
+
+  it('分得清「引導頁暫存的金鑰」和「系統要用的金鑰」', () => {
+    // 使用者：「你這邊怎麼有辦法第一頁就輸入 API key 啟動第二三頁的說明？」
+    //
+    // 因為那是兩件事，而我把它們寫成同一件：同一頁上一邊寫「這一頁存不了你的金
+    // 鑰」，一邊放一個收金鑰的表單。兩句話都對不了同一個對象——引導頁暫存的那一
+    // 份只讓這幾頁能問 AI，系統要用的那一份在部署表單或 AI 輔助頁。
+    const text = strip(read('index.html'))
+
+    expect(text).toMatch(/這不是系統的設定|不等於系統設定/)
+    // 而且不可以再出現「存不了金鑰」那種絕對句：頁面現在真的會暫存一份。
+    expect(text).not.toMatch(/這一頁存不了/)
+  })
+
+  it('金鑰不落地 —— 只留在這個分頁，關掉就沒了', () => {
+    // 把 API 金鑰貼進網頁本來就是釣魚網站訓練人做的動作。這幾頁沒有後端、原始碼
+    // 公開、金鑰只往他自己填的網址送——但至少不要留在硬碟上。
+    const script = read('assist.js')
+
+    expect(script).toContain('sessionStorage')
+    expect(script, '不可以用 localStorage：那會留在硬碟上').not.toContain('localStorage')
   })
 
   it('第三頁是可以照著按的步驟，不是叫他去讀 GitHub', () => {
@@ -138,7 +207,9 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     for (const name of PAGES) {
       const page = read(name)
       // Pages 上沒有建置步驟，抓不到 CDN 就散掉的頁面不能當第一個對外的畫面。
-      expect(page, `${name} 有外部腳本`).not.toMatch(/<script[^>]+src=/i)
+      // 禁的是外部主機，不是同一個 repo 裡的相對檔案：assist.js 三頁共用，
+      // 抄三份才是問題。
+      expect(page, `${name} 抓了外部腳本`).not.toMatch(/<script[^>]+src=["']https?:/i)
       expect(page, `${name} 抓了外部樣式表`).not.toMatch(/<link[^>]+stylesheet[^>]*https?:/i)
       expect(page, `${name} 沒有 viewport`).toMatch(/<meta[^>]+viewport/i)
       // 行內樣式會讓三頁慢慢長出三套外觀。

@@ -119,30 +119,34 @@
     <h2>其餘兩樣</h2>
     <p class="lede">它要的是三樣東西，不是三個品牌。每一格都能換。</p>
 
-    <div class="scroll">
-      <table>
-        <thead>
-          <tr><th>要的東西</th><th>免費的例子</th><th>也可以</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>跑 Docker</td>
-            <td>Render</td>
-            <td>Railway、Fly.io、Koyeb、自己的機器</td>
-          </tr>
-          <tr>
-            <td>一個 Postgres</td>
-            <td>Neon、Supabase</td>
-            <td>任何 Postgres，含自架</td>
-          </tr>
-          <tr>
-            <td>放前端</td>
-            <td>Vercel</td>
-            <td>Cloudflare Pages、Netlify</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <details>
+      <summary>跑 Docker 的地方 — 免費例子：Render</summary>
+      <div class="detail-body">
+        <p>它負責盯盤、跑策略、送通知，是這個系統的本體。</p>
+        <p>也可以：Railway、Fly.io、Koyeb、Heroku，或你自己的機器。
+          它們要的是同一件事——用 <code>backend/Dockerfile</code> 建一個容器。</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>一個 Postgres — 免費例子：Neon、Supabase</summary>
+      <div class="detail-body">
+        <p>存你的帳號、策略、提醒紀錄。上面已經有手把手。</p>
+        <p>也可以：任何 Postgres，含付費方案和自己架的。</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>放前端的地方 — 免費例子：Vercel</summary>
+      <div class="detail-body">
+        <p>你在瀏覽器上看到的畫面，就是一堆靜態檔。</p>
+        <p>也可以：Cloudflare Pages、Netlify，或任何能放靜態檔的地方。</p>
+      </div>
+    </details>
+
+    <details class="assist" id="ai-ask" hidden
+      data-context="使用者正在選這套系統要用的資料庫。選項是：跑在自己電腦上的 SQLite 檔案，或雲端的 Postgres（Neon、Supabase、付費方案、自架都可以）。他需要的是一串 postgresql:// 開頭的連線字串。"></details>
+
   </div>
 </section>
 
@@ -162,5 +166,6 @@
   </div>
 </footer>
 
+<script src="assist.js"></script>
 </body>
 </html>

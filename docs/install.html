@@ -56,12 +56,42 @@
           </div>
         </details>
         <details>
-          <summary>不想用 Render</summary>
+          <summary>不想用 Render — Railway 怎麼做</summary>
           <div class="detail-body">
-            <p>
-              Railway、Fly.io、Koyeb 或你自己的機器都可以。它們要的是同一個東西：
-              用 <code>backend/Dockerfile</code> 建一個容器，並設好上面那幾個環境變數。
-            </p>
+            <ol>
+              <li>開 <a href="https://railway.app" target="_blank" rel="noreferrer noopener">railway.app</a>，用 GitHub 登入。</li>
+              <li><strong>New Project</strong> → <strong>Deploy from GitHub repo</strong>，
+                  選這個專案（先在 GitHub 上按 Fork 複製一份到你的帳號）。</li>
+              <li><strong>Settings</strong> → <strong>Root Directory</strong> 填 <code>backend</code>。</li>
+              <li><strong>Variables</strong> 加上 <span class="field">DATABASE_URL</span>
+                  （和選填的 <span class="field">AI_API_KEY</span>）。</li>
+              <li><strong>Settings</strong> → <strong>Generate Domain</strong>，拿到你的後端網址。</li>
+            </ol>
+          </div>
+        </details>
+        <details>
+          <summary>不想用 Render — Fly.io 怎麼做</summary>
+          <div class="detail-body">
+            <ol>
+              <li>裝 <a href="https://fly.io/docs/flyctl/install/" target="_blank" rel="noreferrer noopener">flyctl</a>，然後 <code>fly auth signup</code>。</li>
+              <li>下載這個專案，在 <code>backend</code> 資料夾裡執行 <code>fly launch</code>。</li>
+              <li>它問要不要建資料庫時選 <strong>Yes</strong>，Fly 會自己設好
+                  <span class="field">DATABASE_URL</span>。</li>
+              <li><code>fly deploy</code>。</li>
+            </ol>
+            <p class="gotcha">這條路要打指令。不習慣終端機的話用上面兩家。</p>
+          </div>
+        </details>
+        <details>
+          <summary>不想用 Render — 我自己有一台機器</summary>
+          <div class="detail-body">
+            <ol>
+              <li>那台機器要裝 Docker。</li>
+              <li>下載這個專案，在 <code>backend</code> 資料夾執行
+                  <code>docker build -t stock-alerts .</code></li>
+              <li><code>docker run -p 8000:8000 -e DATABASE_URL=… stock-alerts</code></li>
+            </ol>
+            <p class="gotcha">要從外面連得到的話，那台機器需要一個對外網址和 HTTPS。</p>
           </div>
         </details>
       </li>
@@ -164,6 +194,8 @@
 <section>
   <div class="wrap">
     <h2>卡住了</h2>
+    <details class="assist" id="ai-ask" hidden
+      data-context="使用者正在安裝一套自架的股票提醒系統。流程是：在 Render 或別家建一個 Docker 後端（要填 DATABASE_URL）、在 Vercel 建前端（要填 VITE_API_BASE_URL 指向後端網址）、打開前端網址讓設定頁列出還缺什麼、按產生按鈕把值貼回平台的環境變數、然後建立第一個帳號。"></details>
     <details>
       <summary>畫面說「讀不到歷史資料」或一片空白</summary>
       <div class="detail-body">
@@ -211,5 +243,6 @@
   </div>
 </footer>
 
+<script src="assist.js"></script>
 </body>
 </html>

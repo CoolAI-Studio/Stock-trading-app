@@ -61,50 +61,80 @@
     <p class="lede">五分鐘。金鑰在第 3 步填進去。</p>
 
     <details>
-      <summary>手把手：在 OpenRouter 拿金鑰</summary>
+      <summary>OpenRouter — 一把金鑰用很多家，有免費模型</summary>
       <div class="detail-body">
         <ol>
-          <li>開 <a href="https://openrouter.ai" target="_blank" rel="noreferrer noopener">openrouter.ai</a>，右上角 <strong>Sign in</strong>，用 Google 帳號登入。</li>
-          <li>登入後開 <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer noopener">openrouter.ai/keys</a>。</li>
-          <li>按 <strong>Create Key</strong>，名字隨便打（例如 <code>stock-alerts</code>），Credit limit 留空。</li>
-          <li>按 <strong>Create</strong>，畫面會給你一串 <code>sk-or-v1-…</code>。</li>
-          <li><strong>複製它，貼在記事本先存著。</strong>關掉視窗之後就看不到完整的了。</li>
+          <li>開 <a href="https://openrouter.ai" target="_blank" rel="noreferrer noopener">openrouter.ai</a>，右上 <strong>Sign in</strong>，用 Google 登入。</li>
+          <li>開 <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer noopener">openrouter.ai/keys</a>，按 <strong>Create Key</strong>。</li>
+          <li>名字隨便打，Credit limit 留空，按 <strong>Create</strong>。</li>
+          <li>複製 <code>sk-or-v1-…</code>，<strong>關掉就看不到完整的了</strong>。</li>
         </ol>
-        <p class="gotcha">
-          不用綁信用卡。只用免費模型（名字結尾有 <code>:free</code>）就不會產生費用，
-          系統預設就是選免費的。
-        </p>
+        <p>系統裡填：供應者「OpenAI 相容」，網址 <code>https://openrouter.ai/api/v1</code>。</p>
+        <p class="gotcha">不用綁卡。只挑名字結尾有 <code>:free</code> 的模型就不會產生費用。</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>NVIDIA — 免費額度大方，模型很多</summary>
+      <div class="detail-body">
+        <ol>
+          <li>開 <a href="https://build.nvidia.com" target="_blank" rel="noreferrer noopener">build.nvidia.com</a>，用 Google 或 email 註冊。</li>
+          <li>隨便點一個模型（例如 Llama 3.3 70B），右上角按 <strong>Get API Key</strong>。</li>
+          <li>按 <strong>Generate Key</strong>，複製 <code>nvapi-…</code>。</li>
+        </ol>
+        <p>系統裡填：供應者「OpenAI 相容」，網址
+          <code>https://integrate.api.nvidia.com/v1</code>，模型例如
+          <code>meta/llama-3.3-70b-instruct</code>。</p>
+        <p class="gotcha">註冊即送額度，不用綁卡。額度用完就停，不會自動扣款。</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Groq — 免費，回應非常快</summary>
+      <div class="detail-body">
+        <ol>
+          <li>開 <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">console.groq.com/keys</a>，用 Google 登入。</li>
+          <li>按 <strong>Create API Key</strong>，複製 <code>gsk_…</code>。</li>
+        </ol>
+        <p>系統裡填：供應者「OpenAI 相容」，網址 <code>https://api.groq.com/openai/v1</code>，
+          模型例如 <code>llama-3.3-70b-versatile</code>。</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>OpenAI 或 Anthropic — 付費，品質最穩</summary>
+      <div class="detail-body">
+        <p>OpenAI：<a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer noopener">platform.openai.com/api-keys</a>，
+          網址填 <code>https://api.openai.com/v1</code>。</p>
+        <p>Anthropic：<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer noopener">console.anthropic.com</a>，
+          供應者選「Anthropic」，網址不用改。</p>
+        <p class="gotcha">這兩家要先儲值，用多少扣多少。</p>
       </div>
     </details>
 
     <details>
       <summary>那這把金鑰要填在哪裡？</summary>
       <div class="detail-body">
-        <p>兩個地方都可以，選一個：</p>
+        <p><strong>要讓系統用它</strong>，兩個地方選一個：</p>
         <ol>
-          <li><strong>第 3 步部署的時候</strong>——部署表單上有一格叫
-              <span class="field">AI_API_KEY</span>，貼進去就好。</li>
-          <li><strong>裝完之後</strong>——在系統左邊選單的
-              <strong>AI 輔助</strong>，貼上、按儲存、按測試連線。</li>
+          <li><strong>第 3 步部署的時候</strong>——表單上有一格
+              <span class="field">AI_API_KEY</span>，貼進去。</li>
+          <li><strong>裝完之後</strong>——系統左邊選單
+              <strong>AI 輔助</strong>，貼上、儲存、按測試連線。</li>
         </ol>
+        <p>
+          這兩個地方都會把金鑰加密存進<strong>你自己那份部署的資料庫</strong>。
+        </p>
         <p class="gotcha">
-          這一頁存不了你的金鑰，它只是 GitHub 上的一個檔案，沒有後端也沒有資料庫。
-          金鑰只會進到<strong>你自己那一份部署</strong>，加密後存在你自己的資料庫裡。
+          下面那一格是<strong>另一回事</strong>：它只讓這份引導的第 2、3 步能問 AI，
+          金鑰留在你這個瀏覽器分頁裡、關掉就沒了。
+          <strong>在那裡貼過，不等於系統設定好了</strong>——裝完之後還是要照上面兩條做一次。
         </p>
       </div>
     </details>
 
-    <details>
-      <summary>想用 OpenAI 或 Anthropic 的金鑰</summary>
-      <div class="detail-body">
-        <p>也可以，裝完之後在「AI 輔助」那一頁改兩個欄位：</p>
-        <ol>
-          <li>OpenAI：供應者選「OpenAI 相容」，網址填
-              <code>https://api.openai.com/v1</code>。</li>
-          <li>Anthropic：供應者選「Anthropic」，網址不用改。</li>
-        </ol>
-      </div>
-    </details>
+    <details class="assist" id="ai-key-form"></details>
+
   </div>
 </section>
 
@@ -123,5 +153,6 @@
   </div>
 </footer>
 
+<script src="assist.js"></script>
 </body>
 </html>

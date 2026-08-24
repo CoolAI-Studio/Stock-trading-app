@@ -130,3 +130,14 @@ ol.steps .gotcha {
   margin-top: 8px; padding: 10px 12px; border-radius: 8px;
   background: #2a1a05; border: 1px solid #78350f; color: #fde68a; font-size: 14px;
 }
+
+/* 引導頁自己的 AI 助手 */
+.assist-input {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line-2); background: #0b1220; color: var(--text);
+  font-size: 15px;
+}
+.assist-state { color: var(--good); font-size: 14px; min-height: 1.2em; }
+.assist-answer { white-space: pre-wrap; color: var(--text); font-size: 15px; }
+details.assist { border-color: #115e59; }
+details.assist > summary { color: var(--good); }
