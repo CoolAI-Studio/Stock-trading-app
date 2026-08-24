@@ -73,6 +73,9 @@ def get_bars(
     limit: int = Query(default=DEFAULT_BAR_LIMIT, ge=1, le=MAX_CHART_BARS),
     data_source: DataSource = DataSource.YFINANCE,
     service: MarketDataService = Depends(get_market_data_service),
+    # 存下來的 K 棒從這裡讀、也寫回這裡。休眠醒來之後上游若不通，這是圖表唯一還
+    # 畫得出東西的來源。
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_active_user),
 ) -> BarsRead:
     """Candles for one symbol, oldest first.
@@ -95,11 +98,19 @@ def get_bars(
 
     _refuse_unsupported(data_source, timeframe)
 
-    bars = service.get_bars(cleaned, timeframe, data_source, limit=limit)
+    bars = service.get_bars(cleaned, timeframe, data_source, limit=limit, db=db)
     return BarsRead(
         symbol=cleaned,
         timeframe=timeframe.value,
-        fetch_failed=not bars and service.bar_fetch_failed(cleaned, timeframe, data_source),
+        # NOT 「and there are no bars」 any more. That form was correct while
+        # nothing was stored: no bars plus a recent failure meant the fetch had
+        # failed. Once bars survive a restart the list is rarely empty, and the
+        # condition would silently stop being true -- 「抓不到」 would vanish
+        # from the screen exactly when it started mattering most.
+        fetch_failed=service.bar_fetch_failed(cleaned, timeframe, data_source),
+        served_from=(
+            "stored" if service.bars_are_stored(cleaned, timeframe, data_source) else "live"
+        ),
         # An empty list is a real answer, not an error: a newly listed stock
         # genuinely has no candles yet, and 500ing over it would make the page
         # look broken rather than empty.

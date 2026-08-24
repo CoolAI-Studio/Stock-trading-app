@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.enums import DataSource
 from app.models.market import MarketQuote
+from app.services import bar_store
 from app.models.mixins import utcnow
 from app.services.market_data.base import (
     Bar,
@@ -74,6 +75,11 @@ _DEFAULT_BAR_TTL_SEC: dict[Timeframe, float] = {
 # and few enough rows that replaying them through a sandboxed strategy on
 # startup costs milliseconds.
 DEFAULT_BAR_LIMIT = 300
+
+# 從資料庫撈多深。比 DEFAULT_BAR_LIMIT 深，因為圖表往前拉會問到更深；但有上限，
+# 因為這是「抓不到時的底」，不是一份完整的歷史檔案——真的要幾千根的回測，值得為
+# 它去問一次上游。
+MAX_STORED_BARS = 1_000
 
 
 logger = logging.getLogger("app.market_data")
@@ -207,6 +213,7 @@ class MarketDataService:
         timeframe: Timeframe,
         data_source: DataSource,
         limit: int = DEFAULT_BAR_LIMIT,
+        db: Session | None = None,
     ) -> list[Bar]:
         """Closed candles for one symbol, newest last, served from cache
         between refreshes.
@@ -237,7 +244,51 @@ class MarketDataService:
             served = self._cached_bars(key, timeframe, limit)
             if served is not None:
                 return served
-            return self._fetch_bars(key, symbol, timeframe, data_source, limit)
+            self._prime_from_storage(db, key, symbol, timeframe, data_source)
+            return self._fetch_bars(key, symbol, timeframe, data_source, limit, db)
+
+    def _prime_from_storage(
+        self,
+        db: Session | None,
+        key: tuple[DataSource, str, Timeframe],
+        symbol: str,
+        timeframe: Timeframe,
+        data_source: DataSource,
+    ) -> None:
+        """把存下來的 K 棒放進快取，但標成**不新鮮**。
+
+        `cached_at=None` 是這整件事的關鍵。`_cached_bars` 本來就把 None 當成過期，
+        所以存下來的東西：
+
+          - 永遠不會走快取捷徑（圖表不會停在重開機那一刻）
+          - 永遠不會壓住一次即時重試
+          - 但在 `bars = fetched or cached` 和失敗時的 `return cached[-limit:]`
+            這兩行既有的韌性裡，變成「抓不到的時候還有東西可以畫」
+
+        也就是說：存下來的不是快取，是抓不到時的底。
+        """
+        if db is None or key in self._bar_cache:
+            return
+        try:
+            stored = bar_store.load(db, data_source, symbol, timeframe, MAX_STORED_BARS)
+        except Exception:  # noqa: BLE001 -- 讀不到存量只是沒有底，不是這次請求的錯
+            logger.warning("stored bars unreadable for %s", symbol, exc_info=True)
+            return
+        if stored:
+            self._bar_cache[key] = (None, 0, stored)
+
+    def bars_are_stored(self, symbol: str, timeframe: Timeframe, data_source: DataSource) -> bool:
+        """這一批是硬碟上的存量，不是剛剛抓到的。
+
+        判準就是 `_prime_from_storage` 寫進去的那個 `cached_at=None`：一次成功的
+        抓取一定會蓋掉它（帶著真的時間戳），所以 None 還在，就代表這一輪沒有任何
+        一次抓取成功過。
+
+        圖上要說出來。一張永遠畫得出來的圖會掩蓋一個已經死掉一週的資料源，而那是
+        提醒類產品最不能有的東西——畫面看起來正常，而它正在說謊。
+        """
+        cached_at, _, cached = self._bar_cache.get((data_source, symbol, timeframe), (0.0, 0, []))
+        return cached_at is None and bool(cached)
 
     def bar_fetch_failed(self, symbol: str, timeframe: Timeframe, data_source: DataSource) -> bool:
         """Whether this symbol's last bar fetch could not reach the provider.
@@ -291,6 +342,7 @@ class MarketDataService:
         timeframe: Timeframe,
         data_source: DataSource,
         limit: int,
+        db: Session | None = None,
     ) -> list[Bar]:
         now = self._clock()
         _, _, cached = self._bar_cache.get(key, (None, 0, []))
@@ -339,6 +391,16 @@ class MarketDataService:
         # served from cache rather than hammering a symbol that has nothing.
         self._bar_cache[key] = (now, limit, bars)
         self._bar_failed_at.pop(key, None)
+
+        # 只寫真的抓到的那些。`bars` 在空答案時會退回舊的快取內容，把它再寫一次
+        # 只是把同一批資料重存一遍——而更糟的是，那會讓「這次沒抓到」看起來像一
+        # 次成功的抓取。
+        if db is not None and fetched:
+            try:
+                bar_store.save(db, data_source, symbol, timeframe, fetched)
+            except Exception:  # noqa: BLE001 -- 存不進去不該讓這次請求失敗
+                logger.warning("could not store bars for %s", symbol, exc_info=True)
+                db.rollback()
         return bars[-limit:]
 
     def upsert_quotes(self, db: Session, quotes: dict[str, Quote]) -> None:

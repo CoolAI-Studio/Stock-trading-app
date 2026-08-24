@@ -61,6 +61,11 @@ class BarsRead(BaseModel):
     # for the second is how a stock with fifty years of candles reads as
     # delisted.
     fetch_failed: bool = False
+    # 「live」＝這一批是剛剛抓到的；「stored」＝上游不通，畫的是硬碟上的存量。
+    #
+    # 這不是裝飾。一張永遠畫得出來的圖會掩蓋一個已經死掉一週的資料源，而畫面看
+    # 起來正常、實際上在說謊，是提醒類產品最不能有的東西。
+    served_from: str = "live"
 
 
 class IndicatorPointRead(BaseModel):

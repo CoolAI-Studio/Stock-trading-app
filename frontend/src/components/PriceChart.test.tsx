@@ -924,6 +924,51 @@ describe('K 棒週期', () => {
 })
 
 
+// --- 畫得出來，不等於是真的 -------------------------------------------------
+
+/**
+ * 一張永遠畫得出來的圖，會掩蓋一個已經死掉一週的資料源。
+ *
+ * K 棒現在存進資料庫了，所以休眠醒來、上游不通的時候，圖表照樣畫得出東西——那正
+ * 是存下來的目的。但代價是畫面看起來完全正常，而它正在說謊：上面那條線可能停在
+ * 上週。對一個提醒類產品，那比畫不出來更糟。
+ */
+describe('畫的是存下來的資料時，要說出來', () => {
+  it('存量畫出來的圖上要有一條橫幅', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.includes('/indicators/available')) return Promise.resolve(CATALOGUE) as never
+      if (path.includes('/timeframes')) return Promise.resolve(TIMEFRAMES) as never
+      return Promise.resolve({ ...BARS, served_from: 'stored' }) as never
+    })
+    show()
+
+    await drawn()
+    // getAllBy：那句話裡有一個 <strong> 把「存下來的」框起來，外層段落和它自己
+    // 都會命中。要驗的是「有沒有說」，不是「說在哪一個標籤裡」。
+    await vi.waitFor(() => expect(screen.getAllByText(/存下來的|不是最新/).length).toBeGreaterThan(0))
+  })
+
+  it('而且要說到哪一天為止 —— 「舊的」沒有資訊，日期才有', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.includes('/indicators/available')) return Promise.resolve(CATALOGUE) as never
+      if (path.includes('/timeframes')) return Promise.resolve(TIMEFRAMES) as never
+      return Promise.resolve({ ...BARS, served_from: 'stored' }) as never
+    })
+    show()
+
+    await drawn()
+    // BARS 最後一根是 2026-08-19。
+    expect(await screen.findByText(/2026/)).toBeInTheDocument()
+  })
+
+  it('即時抓到的圖上不要有那條橫幅 —— 每張圖都掛著它就等於沒掛', async () => {
+    show()
+
+    await drawn()
+    expect(screen.queryByText(/存下來的|不是最新/)).not.toBeInTheDocument()
+  })
+})
+
 // --- 往前拉 ---------------------------------------------------------------------
 
 /**

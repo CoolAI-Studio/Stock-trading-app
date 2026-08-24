@@ -589,6 +589,10 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
   // shape is not what this version expects -- an older backend, a proxy
   // returning something else -- would otherwise throw during render and
   // unmount the whole dashboard over a chart.
+  // 最後一根 K 棒的日期，給上面那條橫幅用。toLocaleDateString 而不是 ISO：讀
+  // 這一句的人要判斷的是「這還能不能信」，而 2026-08-19T00:00:00Z 要先翻譯一次。
+  const lastBar = query.data?.bars?.at(-1)?.time
+  const lastBarAt = lastBar ? new Date(lastBar).toLocaleDateString() : null
   const empty = query.isSuccess && !query.data?.bars?.length
   // 「Could not ask」 and 「there is nothing here」 need different words: one
   // clears on its own and one never will, and showing the permanent message
@@ -649,6 +653,19 @@ export function PriceChart({ symbol, dataSource }: { symbol: string; dataSource?
             : indicatorQuery.error instanceof ApiError && indicatorQuery.error.status === 404
               ? '後端還沒有指標功能 —— 線上的後端比這個畫面舊。部署是自動的（CI 全綠就會部署），等一兩分鐘重新整理通常就好；一直這樣就去 GitHub 的 Actions 看最後一次有沒有失敗。'
               : '指標算不出來 —— 稍後重新整理看看。K 棒和報價不受影響。'}
+        </p>
+      )}
+
+      {/* 畫得出來不等於是真的。K 棒存進資料庫之後，休眠醒來、上游不通的時候圖
+          表照樣有東西可以畫——那正是存下來的目的，但代價是畫面看起來完全正常，
+          而上面那條線可能停在上週。
+
+          這條橫幅不是裝飾，是這個功能本身。而且它說日期不說「舊的」：「舊的」
+          沒有資訊，日期才讓人判斷得出來還能不能信。 */}
+      {query.data?.served_from === 'stored' && lastBarAt && (
+        <p role="status" className="text-xs text-amber-400">
+          上游現在連不上，這是<strong>存下來的</strong>資料——到 {lastBarAt} 為止，
+          不是最新的。提醒仍然照設定在跑。
         </p>
       )}
 

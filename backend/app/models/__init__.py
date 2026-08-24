@@ -7,7 +7,7 @@ from app.models.ai import AiSettings  # noqa: F401
 from app.models.backtest import BacktestRun  # noqa: F401
 from app.models.backup import BackupSchedule  # noqa: F401,E402
 from app.models.broker import BrokerCredential  # noqa: F401
-from app.models.market import MarketQuote  # noqa: F401
+from app.models.market import MarketBar, MarketQuote  # noqa: F401
 from app.models.notification import NotificationChannel, NotificationLog  # noqa: F401
 from app.models.order import Order  # noqa: F401
 from app.models.position import Position  # noqa: F401

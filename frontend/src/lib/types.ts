@@ -693,6 +693,13 @@ export interface BarsResponse {
     close: number
     volume: number
   }[]
+  /** 「live」＝剛剛抓到的；「stored」＝上游不通，畫的是資料庫裡的存量。
+   *
+   * 圖上要說出來。一張永遠畫得出來的圖會掩蓋一個已經死掉一週的資料源，而畫面看
+   * 起來正常、實際上停在上週，對提醒類產品比畫不出來更糟。
+   *
+   * 選填：比這個欄位舊的後端不會回它，那時候當成 live 是對的——它本來就沒有存量。 */
+  served_from?: 'live' | 'stored'
 }
 
 /** GET /api/ai-settings -- which model to ask, and enough about the key to
