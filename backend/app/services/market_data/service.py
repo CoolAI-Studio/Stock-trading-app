@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models.enums import DataSource
 from app.models.market import MarketQuote
-from app.services import bar_store
 from app.models.mixins import utcnow
+from app.services import bar_store
 from app.services.market_data.base import (
     Bar,
     BarFetchError,

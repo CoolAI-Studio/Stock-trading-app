@@ -218,8 +218,6 @@ def test_without_a_session_nothing_changes(provider_and_service):
 @pytest.fixture
 def api_with_storage(db_session):
     """一個已經存過 K 棒、但上游現在抓不到的部署。"""
-    from app.api.deps import get_current_active_user
-    from app.db.session import get_db
     from app.main import app
     from app.services.market_data.service import get_market_data_service
 
