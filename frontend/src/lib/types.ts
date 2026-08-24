@@ -590,6 +590,10 @@ export interface SetupStatus {
       detail: string
       url: string | null
     }[]
+    /** 這一格還要一起貼哪幾個環境變數。多數是空的——一個值就是一個值。
+     * 推播那一對不是：只照標題貼一個，每一則推播都會失敗，而畫面上不會有東西
+     * 說是因為少了另一半。 */
+    also?: string[]
   }[]
   /** Where to paste the answers, in the words of the platform this deployment
    * is actually on -- the backend works that out from the environment

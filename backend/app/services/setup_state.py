@@ -80,6 +80,12 @@ class MissingSetting:
     # 可以選的做法。空的代表這一格沒有「選哪一種」的問題（一把金鑰就是一把金
     # 鑰），有東西的時候畫面要把它們並排攤開，而不是寫成一段話。
     options: tuple[SetupOption, ...] = ()
+    # 這一格還要一起貼哪幾個環境變數。多數格子是空的——一個值就是一個值。
+    #
+    # 推播那一對不是：標題寫 VAPID_PUBLIC_KEY，內文說「兩個值都要貼回」，而照著
+    # 標題走的人只會貼一個。只貼一半的下場是每一則推播都失敗，而畫面上沒有任何
+    # 東西會說是因為少了另一半。
+    also: tuple[str, ...] = ()
     # Which step of the deploy flow this belongs to. render.yaml presents seven
     # values as a flat parallel list; three of them are a chain, and a stranger
     # cannot see the chain. The number is what puts them back in order.
@@ -330,6 +336,7 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                 ),
                 generator="vapid",
                 blocking=False,
+                also=("VAPID_PRIVATE_KEY",),
                 step=3,
             )
         )

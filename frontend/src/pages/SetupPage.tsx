@@ -83,7 +83,11 @@ function MissingRow({
             步驟 {item.step}
           </span>
         )}
-        <span className="font-mono text-sm font-medium text-amber-300">{item.name}</span>
+        {/* 成對的值要一起顯示。標題只寫一半，照著標題走的人就會只貼一半——
+            而推播少一半是每一則都失敗，畫面上不會有東西說原因。 */}
+        <span className="font-mono text-sm font-medium text-amber-300">
+          {[item.name, ...(item.also ?? [])].join(' ＋ ')}
+        </span>
       </p>
       <p className="mt-1 text-sm text-slate-300">{item.why}</p>
       <p className="mt-1 text-sm text-slate-400">{item.how}</p>

@@ -66,6 +66,9 @@ class MissingSettingRead(BaseModel):
     blocking: bool
     # 可以選的做法，空的代表這一格沒有「選哪一種」的問題。
     options: list[SetupOptionRead] = []
+    # 這一格還要一起貼哪幾個環境變數。畫面要把它們跟 name 一起顯示——只照標題走
+    # 的人會漏掉另一半，而推播少一半就是每一則都失敗。
+    also: list[str] = []
     # Which step of the deploy flow this belongs to. Seven parallel blanks is
     # what render.yaml already gave them; the order is the part that was
     # missing, and three of these cannot even be known until the step before

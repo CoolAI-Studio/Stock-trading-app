@@ -130,6 +130,30 @@ describe('app 自己產生得出來的值', () => {
     expect(screen.getAllByText(/步驟 1/)).toHaveLength(1)
   })
 
+  it('一格要貼兩個值的時候，標題就要說兩個', async () => {
+    // 走過一遍全空部署時看到的：標題是 VAPID_PUBLIC_KEY，內文說「兩個值都要貼
+    // 回」。照標題走的人只會貼一個，而推播少一半的下場是每一則都失敗——畫面上
+    // 沒有任何東西會說是因為少了另一半。
+    vi.mocked(api.get).mockResolvedValue({
+      ...STATUS,
+      missing: [
+        {
+          name: 'VAPID_PUBLIC_KEY',
+          why: '手機推播用的一對金鑰。',
+          how: '按「產生」會一次給你完整的一對。',
+          generator: 'vapid',
+          blocking: false,
+          step: 3,
+          also: ['VAPID_PRIVATE_KEY'],
+        },
+      ],
+    } as never)
+    show()
+
+    expect(await screen.findByText(/VAPID_PUBLIC_KEY/)).toBeInTheDocument()
+    expect(screen.getByText(/VAPID_PRIVATE_KEY/)).toBeInTheDocument()
+  })
+
   it('資料庫那一格把方案攤開，不是塞成一段話', async () => {
     // 使用者的話：「render 只是其一的解法不是嗎？你要提供方案給他們選。」
     //
