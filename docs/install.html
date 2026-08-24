@@ -195,7 +195,10 @@
   <div class="wrap">
     <h2>卡住了</h2>
     <details class="assist" id="ai-ask" hidden
-      data-context="使用者正在安裝一套自架的股票提醒系統。流程是：在 Render 或別家建一個 Docker 後端（要填 DATABASE_URL）、在 Vercel 建前端（要填 VITE_API_BASE_URL 指向後端網址）、打開前端網址讓設定頁列出還缺什麼、按產生按鈕把值貼回平台的環境變數、然後建立第一個帳號。"></details>
+      data-context="使用者正在安裝一套自架的股票提醒系統。流程是：在 Render 或別家建一個 Docker 後端（要填 DATABASE_URL）、在 Vercel 建前端（要填 VITE_API_BASE_URL 指向後端網址）、打開前端網址讓設定頁列出還缺什麼、按產生按鈕把值貼回平台的環境變數、然後建立第一個帳號。">
+      <summary>問 AI（用你第 1 步存的金鑰）</summary>
+      <div class="detail-body" id="ai-ask-body"></div>
+    </details>
     <details>
       <summary>畫面說「讀不到歷史資料」或一片空白</summary>
       <div class="detail-body">

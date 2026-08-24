@@ -157,6 +157,43 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     expect(text).not.toMatch(/這一頁存不了/)
   })
 
+  it('模型名稱一律問供應商，不可以寫死', () => {
+    // 使用者隨手一試就撞到：
+    //   The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.
+    //
+    // 那是我從記憶裡寫進去的 id。模型會改名、會下架，各家帳號的權限也不同——而
+    // 系統自己早就做對了（AI 輔助那一頁的清單是抓來的）。
+    const script = read('assist.js')
+
+    expect(script, '沒有去問供應商要模型清單').toContain("'/models'")
+    // 程式面只斷言「有去問供應商」。assist.js 的註解裡引用了使用者實際看到的錯
+    // 誤訊息，那是這條規則存在的理由，不該被自己的規則擋掉。寫死的 id 出現在文
+    // 案裡才是他會撞到的東西。
+    for (const source of PAGES.map(read)) {
+      expect(source).not.toMatch(/llama-3\.3-70b/)
+      expect(source).not.toMatch(/gpt-4o-mini/)
+      expect(source).not.toMatch(/gemma-\d/)
+    }
+  })
+
+  it('沒有選到模型就不給問 —— 有金鑰不等於能用', () => {
+    const script = read('assist.js')
+
+    expect(script).toMatch(/if \(!get\(KEY\) \|\| !get\(MODEL\)\) return/)
+  })
+
+  it('每一個抽屜都有自己的標題 —— 不然瀏覽器會畫出「詳細資料」', () => {
+    // 使用者：「而且頁面圖示也沒有統一。」少一個 <summary>，瀏覽器就用它自己的
+    // 預設標題和三角形，跟旁邊自訂的「＋」對不起來。
+    for (const name of PAGES) {
+      const drawers = read(name).split('<details').slice(1)
+      drawers.forEach(function (chunk, index) {
+        const head = chunk.slice(0, chunk.indexOf('</details>'))
+        expect(head, `${name} 第 ${index + 1} 個抽屜沒有 summary`).toContain('<summary>')
+      })
+    }
+  })
+
   it('金鑰不落地 —— 只留在這個分頁，關掉就沒了', () => {
     // 把 API 金鑰貼進網頁本來就是釣魚網站訓練人做的動作。這幾頁沒有後端、原始碼
     // 公開、金鑰只往他自己填的網址送——但至少不要留在硬碟上。
