@@ -112,6 +112,67 @@ def _handle(message: dict) -> dict:
             "declared_params": loaded.declared_params,
         }
 
+    if command == "replay":
+        # 一場回測的訊號，**一次往返**。
+        #
+        # 只搬「跑出訊號」，不搬整個 run_backtest：帳戶模擬和計分不碰使用者的程
+        # 式碼（_dispatch 只餵一根 K 棒進去，策略看不到帳戶），而把它們也搬過來
+        # 要讓 BacktestAssumptions 和 BacktestResult 都過一次 JSON——這個 app 裡
+        # 欄位最多的兩個東西。這樣切一樣是一次往返，序列化面小得多。
+        from app.services.strategy_runtime import compile_strategy, effective_warmup
+
+        loaded = compile_strategy(message["source_code"], params=message.get("params") or {})
+        instance = loaded.instance
+
+        # 暖身要幾根，在**這裡**算。呼叫端不知道答案：它取決於原始碼有沒有宣告
+        # self.warmup_bars，而那要編過才知道。讓呼叫端先編一次去問，就等於在 API
+        # 行程裡又跑了一次使用者的程式碼——那正是這張票要消滅的東西。
+        if loaded.entry_point == "on_bar":
+            warmup = effective_warmup(loaded, message["stored_warmup_bars"])
+        else:
+            # 盯盤迴圈對 on_tick 也不做暖身：_run_tick_strategy 拿到第一個報價就
+            # 動作，「資料還不夠」留給策略自己的 `if len(self.prices) < 5`。這裡
+            # 加了就會讓回測比實際嚴格。
+            warmup = 0
+
+        described = {
+            "name": loaded.name,
+            "symbol": loaded.symbol,
+            "entry_point": loaded.entry_point,
+            "timeframe": loaded.timeframe.value,
+            "warmup": warmup,
+        }
+
+        all_bars = message["bars"]
+        call = instance.on_bar if loaded.entry_point == "on_bar" else None
+
+        def _one(wire):
+            bar = _bar_from_wire(wire)
+            return call(bar) if call else instance.on_tick(bar.close)
+
+        # 暖身那幾根的訊號全部丟掉：它們在這個實例存在之前就收盤了。這是
+        # market_loop 的規則，回測照抄——兩邊如果不一樣，回測評的就是一支跟實際
+        # 跑起來不同時機開始發訊號的策略。
+        tested = all_bars[warmup:]
+        if warmup and tested:
+            try:
+                for wire in all_bars[:warmup]:
+                    _one(wire)
+            except Exception as exc:  # noqa: BLE001
+                # -1 是「暖身就爆了」。跟回放中途爆掉分開，因為使用者看到的訊息
+                # 不一樣：暖身沒有「哪一根」可以指。
+                return {**described, "signals": [], "failed_at": -1, "error": f"{exc}"}
+
+        signals = []
+        for index, wire in enumerate(tested):
+            try:
+                signals.append(str(_one(wire)))
+            except Exception as exc:  # noqa: BLE001
+                # 是**哪一根**爆的要說出來。例外送不過 JSON 管線，所以這裡只回索
+                # 引和文字，訊息由父行程重建——它手上才有那根 K 棒的時間。
+                return {**described, "signals": signals, "failed_at": index, "error": f"{exc}"}
+        return {**described, "signals": signals, "failed_at": None}
+
     if command == "validate":
         # compile ＋ 試跑，**一次往返**。
         #

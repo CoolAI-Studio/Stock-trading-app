@@ -271,6 +271,23 @@ class StrategyWorker:
     # 每一支策略在子行程裡有一個 key。狀態（self.prices）活在那邊，這邊只留一個
     # 名字——那正是常駐子行程買到的東西：跨輪的記憶，而秘密不在那裡。
 
+    def replay(
+        self,
+        source_code: str,
+        params: dict,
+        bars: list[dict],
+        stored_warmup_bars: int,
+        timeout: float,
+    ) -> dict:
+        return self.request(
+            "replay",
+            timeout=timeout,
+            source_code=source_code,
+            params=params,
+            bars=bars,
+            stored_warmup_bars=stored_warmup_bars,
+        )
+
     def validate(self, source_code: str, prices: list[float], timeout: float) -> dict:
         return self.request("validate", timeout=timeout, source_code=source_code, prices=prices)
 

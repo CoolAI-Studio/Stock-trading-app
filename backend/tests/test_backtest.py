@@ -29,7 +29,6 @@ from app.services.backtest import (
 )
 from app.services.market_data.base import Bar, Timeframe
 from app.services.market_data.service import MarketDataService
-from app.services.strategy_runtime import StrategyValidationError
 
 _START = datetime(2026, 1, 5, tzinfo=UTC)
 
@@ -182,8 +181,13 @@ class Strategy:
 def test_the_backtest_refuses_source_the_live_sandbox_refuses():
     """Same sandbox, not a looser one. A strategy that only backtests because
     the replay let it reach the filesystem is a strategy the owner can never
-    actually run."""
-    with pytest.raises(StrategyValidationError):
+    actually run.
+
+    斷言的是**理由**，不是例外型別。策略搬進子行程之後（#18），
+    StrategyValidationError 到不了這裡——例外送不過 JSON 管線，只有文字過得來。
+    改問理由其實比原本強：使用者讀到的就是那句話，而型別他永遠看不到。
+    """
+    with pytest.raises(BacktestError, match="importing 'os' is not allowed"):
         run_backtest(
             source_code="import os\n" + ALWAYS_BUY,
             bars=_bars([100.0, 101.0]),

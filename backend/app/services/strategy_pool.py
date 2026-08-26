@@ -62,11 +62,18 @@ def bar_to_wire(bar: Bar) -> dict:
         "symbol": bar.symbol,
         "timeframe": bar.timeframe.value,
         "timestamp": bar.timestamp.isoformat(),
-        "open": bar.open,
-        "high": bar.high,
-        "low": bar.low,
-        "close": bar.close,
-        "volume": bar.volume,
+        # 一律 float。Bar 的欄位宣告就是 float，provider 回的也是 float，但這個
+        # repo 裡有些地方（測試、以及任何拿 Decimal 建 Bar 的程式碼）會塞 Decimal
+        # 進來，而 JSON 送不動 Decimal——不在這裡收斂，那就是一個「平常都好、遇到
+        # 某個呼叫端才炸」的邊界。
+        #
+        # 收斂成 float 不是將就：策略本來就宣告會拿到 float，而帳戶那邊的
+        # Decimal 計算用的是父行程手上那份 Bar，沒有經過這條管線。
+        "open": float(bar.open),
+        "high": float(bar.high),
+        "low": float(bar.low),
+        "close": float(bar.close),
+        "volume": None if bar.volume is None else float(bar.volume),
     }
 
 
@@ -316,23 +323,32 @@ def validate(source_code: str, prices: list[float]) -> dict:
         return _scratch.validate(source_code, prices, settings.STRATEGY_VALIDATE_TIMEOUT_SEC)
 
 
-def check_params(source_code: str, params: dict) -> None:
-    """這段程式碼有沒有宣告這幾個參數。不合就拋 StrategyWorkerError。
+def describe(source_code: str, params: dict | None = None) -> dict:
+    """編譯一次，回報這份原始碼是什麼（名字、代號、進場點、K 棒週期、宣告的參數）。
 
-    只是編譯一次，但編譯**會執行**類別主體和 __init__——所以這也是在跑使用者的程
-    式碼，也必須在子行程裡，也必須有期限。
+    「只是編譯一下」不是無害的：編譯會執行類別主體和 `__init__`。所以這也在子行
+    程裡，也有期限。
     """
     global _scratch
     with _scratch_lock:
         if _scratch is None or not _scratch.alive:
             _scratch = StrategyWorker(timeout_sec=WARMUP_TIMEOUT_SEC)
             _scratch.start()
-        _scratch.request(
+        return _scratch.request(
             "compile",
             timeout=settings.STRATEGY_VALIDATE_TIMEOUT_SEC,
             source_code=source_code,
-            params=params,
+            params=params or {},
         )
+
+
+def check_params(source_code: str, params: dict) -> None:
+    """這段程式碼有沒有宣告這幾個參數。不合就拋 StrategyWorkerError。
+
+    只是編譯一次，但編譯**會執行**類別主體和 __init__——所以這也是在跑使用者的程
+    式碼，也必須在子行程裡，也必須有期限。
+    """
+    describe(source_code, params)
 
 
 def shutdown_scratch() -> None:
@@ -341,3 +357,25 @@ def shutdown_scratch() -> None:
         if _scratch is not None:
             _scratch.close()
             _scratch = None
+
+
+def replay(source_code: str, params: dict, bars: list[Bar], stored_warmup_bars: int) -> dict:
+    """一場回測的訊號，在子行程裡跑出來。
+
+    回的是偵測到的東西（name / symbol / entry_point / timeframe / warmup）加上
+    `signals`，外加 `failed_at`：None 是沒事，-1 是暖身就爆了，其他是**被測那一段**
+    的索引。錯誤只回文字，訊息由呼叫端重建——例外送不過 JSON 管線，而呼叫端手上才
+    有那根 K 棒的時間，那是使用者唯一的線索。
+    """
+    global _scratch
+    with _scratch_lock:
+        if _scratch is None or not _scratch.alive:
+            _scratch = StrategyWorker(timeout_sec=WARMUP_TIMEOUT_SEC)
+            _scratch.start()
+        return _scratch.replay(
+            source_code,
+            params,
+            [bar_to_wire(bar) for bar in bars],
+            stored_warmup_bars,
+            settings.STRATEGY_BACKTEST_TIMEOUT_SEC,
+        )

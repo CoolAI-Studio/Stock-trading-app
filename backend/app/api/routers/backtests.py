@@ -16,6 +16,7 @@ from app.schemas.backtest import (
     BacktestRunRead,
     BacktestRunRequest,
 )
+from app.services import strategy_pool
 from app.services.backtest import (
     MAX_BACKTEST_BARS,
     BacktestError,
@@ -28,7 +29,8 @@ from app.services.backtest import (
 from app.services.market_data.base import DEFAULT_TIMEFRAME, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
 from app.services.risk_resolver import get_or_create_global, resolve
-from app.services.strategy_runtime import StrategyValidationError, code_hash, compile_strategy
+from app.services.strategy_runtime import code_hash
+from app.services.strategy_worker import StrategyWorkerError
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 
@@ -199,17 +201,22 @@ def create_backtest(
     # second compile inside the replay is microseconds, and a strategy
     # instance must be fresh per run anyway so no state leaks between them.
     try:
-        loaded = compile_strategy(source_code)
-    except StrategyValidationError as exc:
+        # 子行程裡編（#18）：編譯會執行類別主體和 __init__，所以「只是先編一次看
+        # 看」跟跑使用者的程式碼是同一件事。
+        described = strategy_pool.describe(source_code)
+    except StrategyWorkerError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"這份策略程式碼無法通過驗證，因此不能回測：{exc}",
         ) from exc
 
-    symbol = payload.symbol or (strategy.symbol if strategy else loaded.symbol)
+    symbol = payload.symbol or (strategy.symbol if strategy else described["symbol"])
     data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
     timeframe = _resolve_timeframe(
-        payload.timeframe, loaded.entry_point, loaded.timeframe, data_source
+        payload.timeframe,
+        described["entry_point"],
+        Timeframe(described["timeframe"]),
+        data_source,
     )
     stop_loss_pct, take_profit_pct = _resolve_exit_thresholds(db, user, payload, strategy)
     _guard_range(payload, timeframe)

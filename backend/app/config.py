@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     # /api/strategies/validate 只需要一個登入。
     STRATEGY_VALIDATE_TIMEOUT_SEC: float = 5.0
 
+    # 一場回測的**總**期限。
+    #
+    # 在搬進子行程之前，這裡只有「每一根 K 棒兩秒」，沒有總額——五千根就是兩小時
+    # 多的請求執行緒，外加五千條殺不掉的執行緒（Python 殺不掉執行緒，見
+    # strategy_runtime._guarded 的檔頭）。而回測是使用者最常按的按鈕，按下去跑的
+    # 是自己寫的、還沒驗過的程式碼。
+    #
+    # 三十秒：一場正常的回測是幾千次算術，幾十毫秒的事；這個數字只會在跑不完的
+    # 東西上生效。
+    STRATEGY_BACKTEST_TIMEOUT_SEC: float = 30.0
+
     WS_TICKET_TTL_SECONDS: int = 30
 
     # Closed by default: with registration off, a publicly reachable backend only

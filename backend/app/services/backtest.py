@@ -57,11 +57,17 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
+from app.config import settings
 from app.enums import DataSource
 from app.models.strategy import DEFAULT_WARMUP_BARS
+from app.services import strategy_pool
 from app.services.market_data.base import Bar, Timeframe, bar_end
 from app.services.market_data.service import MarketDataService
-from app.services.strategy_runtime import LoadedStrategy, compile_strategy, effective_warmup
+from app.services.strategy_worker import (
+    StrategyTimedOut,
+    StrategyWorkerError,
+    WorkerUnavailable,
+)
 
 
 class BacktestError(Exception):
@@ -612,13 +618,20 @@ def _execute(
 # --- the replay -------------------------------------------------------------
 
 
-def _dispatch(loaded: LoadedStrategy, bar: Bar) -> str:
-    """The same two entry points market_loop dispatches to, chosen the same
-    way. An on_tick strategy gets the candle's close as its 'quote' -- see the
-    assumption note, which says so to the owner."""
-    if loaded.entry_point == "on_bar":
-        return loaded.on_bar(bar)
-    return loaded.on_tick(bar.close)
+class _Described:
+    """子行程回報的「這份原始碼是什麼」。
+
+    取代原本那個 LoadedStrategy。刻意只有這五個欄位——底下的計分只需要這些，而
+    多留一個 `instance` 就會讓人想在這裡呼叫它，那正是搬走的東西。
+    """
+
+    __slots__ = ("entry_point", "name", "symbol", "timeframe")
+
+    def __init__(self, replayed: dict) -> None:
+        self.name = replayed["name"]
+        self.symbol = replayed["symbol"]
+        self.entry_point = replayed["entry_point"]
+        self.timeframe = Timeframe(replayed["timeframe"])
 
 
 def run_backtest(
@@ -643,23 +656,41 @@ def run_backtest(
     candles to read them off, and a result labelled with the source's
     `self.symbol` in that case would name a stock the run never looked at.
 
-    Raises StrategyValidationError if the source does not compile in the live
-    sandbox, and BacktestError if it compiles but fails mid-replay.
+    每一種失敗都是 BacktestError：編不起來、暖身就爆、回放中途爆掉、跑不完被中
+    止、子行程起不來。刻意收斂成一種——呼叫端要做的事都一樣（回一個使用者讀得懂
+    的 422），而分成五個 except 只是多五個可能忘記寫的地方。訊息裡說得出是哪一
+    種。
     """
     assumptions = assumptions or BacktestAssumptions()
-    # The same parameters the live strategy runs under, or the sweep's
-    # candidate set. A backtest of the author's defaults, when the owner has
-    # tuned them, scores code nobody is running.
-    loaded = compile_strategy(source_code, params=params)
 
-    if loaded.entry_point == "on_bar":
-        warmup = effective_warmup(loaded, stored_warmup_bars)
-    else:
-        # The live loop applies no warm-up to on_tick either: _run_tick_strategy
-        # acts on the very first quote it sees, and "not enough data yet" is
-        # left to the strategy's own `if len(self.prices) < 5: return "HOLD"`.
-        # Imposing one here would make the backtest stricter than reality.
-        warmup = 0
+    # 使用者的程式碼跑在子行程裡（#18）。整段回放**一次往返**：編譯、暖身、逐根
+    # 拿訊號，全部在那一邊，回來的是一串字串。
+    #
+    # 這樣切而不是把整個 run_backtest 搬過去，是因為底下沒有一行碰使用者的程式碼
+    # ——帳戶模擬和計分只看訊號和 K 棒。整段搬過去要讓 BacktestAssumptions 和
+    # BacktestResult 都過一次 JSON，序列化面大得多，而延遲的目標（一次往返）一樣
+    # 達得到。
+    #
+    # 參數用的是實際在跑的那一組，或掃描的候選組：拿作者的預設值去回測，評的是
+    # 一份沒有人在跑的程式碼。
+    try:
+        replayed = strategy_pool.replay(source_code, params or {}, bars, stored_warmup_bars)
+    except StrategyTimedOut as exc:
+        # 這是搬進子行程之後**新**得到的保護，值得說清楚。原本只有「每一根 K 棒
+        # 兩秒」，沒有總額：一支每根都卡住的策略，五千根就是兩小時多的請求執行
+        # 緒，而且每一根都留下一條殺不掉的執行緒。
+        budget = settings.STRATEGY_BACKTEST_TIMEOUT_SEC
+        raise BacktestError(f"這份策略跑不完，回測已經中止（上限 {budget:.0f} 秒）：{exc}") from exc
+    except WorkerUnavailable as exc:
+        # 基礎設施的問題，不是這份程式碼的問題。講清楚是哪一種，不然使用者會去改
+        # 一段其實沒有錯的程式碼。
+        raise BacktestError(f"跑回測的行程暫時起不來，請再試一次：{exc}") from exc
+    except StrategyWorkerError as exc:
+        # 編不起來。原本是 StrategyValidationError，訊息在子行程那端轉成文字了
+        # ——例外送不過 JSON 管線。
+        raise BacktestError(f"這份策略程式碼無法通過驗證，因此不能回測：{exc}") from exc
+    loaded = _Described(replayed)
+    warmup = replayed["warmup"]
 
     notes: list[str] = []
     # The candles that may produce a signal. Everything before them is warm-up
@@ -667,14 +698,14 @@ def run_backtest(
     # the reason a strategy's first backtested decision lands on the same
     # candle it would have landed on live.
     tested = bars[warmup:]
+    replayed_signals = replayed["signals"]
+    failed_at = replayed["failed_at"]
+
+    if failed_at == -1:
+        raise BacktestError(f"策略在暖身階段就發生錯誤：{replayed['error']}")
 
     if not tested:
         notes.append(_no_data_note(bars, warmup))
-    elif warmup:
-        try:
-            loaded.warm_up(bars[:warmup])
-        except Exception as exc:
-            raise BacktestError(f"策略在暖身階段就發生錯誤：{exc}") from exc
 
     account = _Account(cash=assumptions.initial_capital)
     equity_curve: list[EquityPoint] = []
@@ -696,7 +727,7 @@ def run_backtest(
     peak_equity = assumptions.initial_capital
     max_drawdown = Decimal(0)
 
-    for bar in tested:
+    for index, bar in enumerate(tested):
         # 1) An order placed on the previous candle's close executes at this
         #    candle's open -- before the strategy is shown this candle, which
         #    is the order the two events really happen in.
@@ -728,12 +759,16 @@ def run_backtest(
 
         # 3) The strategy sees exactly one candle: this one. It has never been
         #    handed the series, so there is no future for it to read.
-        try:
-            signal = _dispatch(loaded, bar)
-        except Exception as exc:
+        #
+        #    訊號已經在子行程裡跑出來了，這裡是查表。**順序完全一樣**：那邊也是
+        #    一根一根餵、一根一根收，而策略拿到的東西跟以前一模一樣（一根 K 棒，
+        #    不含帳戶）。爆掉的那根在這裡才變成訊息——子行程只回得了索引，時間在
+        #    這邊。
+        if failed_at is not None and index == failed_at:
             raise BacktestError(
-                f"策略在 {bar.timestamp:%Y-%m-%d %H:%M} 這根 K 棒發生錯誤：{exc}"
-            ) from exc
+                f"策略在 {bar.timestamp:%Y-%m-%d %H:%M} 這根 K 棒發生錯誤：{replayed['error']}"
+            )
+        signal = replayed_signals[index]
 
         # 4) Act on the signal. Nothing can still be in flight here -- step 1
         #    executes and clears any order from the previous candle before the
