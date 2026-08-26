@@ -92,3 +92,18 @@ def test_bad_source_comes_back_as_a_clean_error_not_a_crash(worker):
 
     # 而且 worker 還活著。
     assert worker.ping() is True
+
+
+def test_a_closed_worker_says_so_even_with_assertions_off():
+    """關掉之後再叫它做事，是一個講得清楚的錯誤，不是 AttributeError。
+
+    這一條看起來像在測顯而易見的事，其實測的是「檢查本身還在」：這裡原本寫的是
+    `assert`，而 `python -O` 會把 assert 整行拿掉。線上如果用 -O 跑，那個檢查就消
+    失，錯誤會變成管線深處的 AttributeError——盯盤迴圈接到的是一個它不認得的例外。
+    """
+    w = strategy_worker.StrategyWorker()
+    w.start()
+    w.close()
+
+    with pytest.raises(strategy_worker.StrategyWorkerError):
+        w.ping()

@@ -35,9 +35,10 @@ subprocess.Popen 可以明確指定 `env=`，那是唯一能保證「子行程�
 式碼。JSON 只有資料，沒有行為。
 """
 
+import contextlib
 import json
 import os
-import subprocess
+import subprocess  # nosec B404  # 見下面 Popen 的理由：env= 是這張票的核心手段
 import sys
 import threading
 from pathlib import Path
@@ -95,7 +96,14 @@ class StrategyWorker:
     def start(self) -> None:
         if self._process is not None and self._process.poll() is None:
             return
-        self._process = subprocess.Popen(
+        # 下一行的每一個字都是常數：sys.executable 是正在跑的直譯器，模組名寫死在
+        # 這裡，沒有 shell，而且沒有任何一段來自使用者——使用者的程式碼是**之後**
+        # 經由 stdin 以 JSON 送進去的資料，不是命令列。
+        #
+        # 而這個 Popen 存在的理由本身就是安全性：只有它能用 env= 明確指定子行程拿
+        # 得到哪幾個環境變數。multiprocessing 的 fork 會繼承整個位址空間，它的
+        # spawn 會繼承環境變數——兩個都做不到這件事。
+        self._process = subprocess.Popen(  # nosec B603  # 見上方：引數全是常數，且 env= 正是這張票的目的
             [sys.executable, "-m", "app.services.strategy_worker_main"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -121,10 +129,10 @@ class StrategyWorker:
             process.wait(timeout=2)
         except Exception:  # noqa: BLE001 -- 關不乾淨就殺掉，不要卡住呼叫端
             process.kill()
-            try:
+            # 殺過之後收屍失敗就算了：這個把手已經放掉那個行程，而呼叫端多半是盯
+            # 盤迴圈——為了一具屍體卡住它，比留下一具屍體嚴重得多。
+            with contextlib.suppress(Exception):
                 process.wait(timeout=2)
-            except Exception:  # noqa: BLE001
-                pass
 
     @property
     def alive(self) -> bool:
@@ -176,18 +184,20 @@ class StrategyWorker:
         self._process = None
         if process is None:
             return
-        try:
+        # 同上：殺不掉或收不到屍都不能讓呼叫端停下來。
+        with contextlib.suppress(Exception):
             process.kill()
             process.wait(timeout=2)
-        except Exception:  # noqa: BLE001
-            pass
 
     def request(self, command: str, timeout: float | None = None, **payload) -> dict:
         with self._lock:
             if not self.alive:
                 raise StrategyWorkerError("策略子行程不在了")
             process = self._process
-            assert process is not None and process.stdin is not None
+            # 不用 assert：`python -O` 會把 assert 整行拿掉，而這條管線的另一端跑
+            # 的是使用者的程式碼。一個會被編譯器刪掉的檢查，等於沒有檢查。
+            if process is None or process.stdin is None:
+                raise StrategyWorkerError("策略子行程不在了")
             try:
                 process.stdin.write(json.dumps({"cmd": command, **payload}) + "\n")
                 process.stdin.flush()
