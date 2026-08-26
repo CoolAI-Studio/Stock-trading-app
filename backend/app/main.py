@@ -14,7 +14,7 @@ from app.config import Settings, enforce_required_secrets, settings
 from app.logging_setup import configure_logging
 from app.services import build_info
 from app.services.events import bus
-from app.services.market_loop import run_forever
+from app.services.market_loop import run_forever, shutdown_strategy_workers
 from app.services.notification.dispatcher import handle_event as dispatch_notification
 from app.ws.broadcast import broadcaster
 from app.ws.routes import router as ws_router
@@ -39,6 +39,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if worker_task is not None:
         stop_event.set()
         await worker_task
+    # 策略跑在子行程裡（#18）。不關的話它們會活過 app 本身——重新載入一次就多留
+    # 三個，而這台機器只有 512 MB。
+    shutdown_strategy_workers()
     bus.unsubscribe(broadcaster.handle_event)
     bus.unsubscribe(dispatch_notification)
 

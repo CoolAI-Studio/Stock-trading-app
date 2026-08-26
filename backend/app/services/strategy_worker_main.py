@@ -36,6 +36,51 @@ def _reply(ok: bool, **fields) -> None:
     sys.stdout.flush()
 
 
+# 這個行程裡活著的策略，key -> LoadedStrategy。
+#
+# **狀態住在這裡，這就是常駐子行程的全部意義。** 一支 MA20 策略的 self.prices 要
+# 跨輪累積，每輪重建就永遠只看得到一個價——而那不會有任何東西變紅，只會讓它永遠
+# 不發訊號。
+_loaded: dict = {}
+
+
+def _get(key: str):
+    """那支策略的 LoadedStrategy。
+
+    底下每一個指令都直接叫 `.instance.on_tick(...)`，**不是** `loaded.on_tick(...)`
+    ——後者會走 strategy_runtime._guarded，也就是那個開一條執行緒再 join 逾時的守
+    衛。那個守衛的檔頭自己寫著它的極限：Python 殺不掉執行緒，逾時之後那條 while
+    True 會一直燒著一顆核心直到行程重啟。
+
+    這裡的逾時改由父行程做，做法是**殺掉這整個行程**。留著內層那一層不但多花一
+    條執行緒，還會把真正的期限吃掉：內層先逾時就變成一個普通的策略錯誤，父行程
+    永遠等不到該殺行程的那一刻，於是那條迴圈又活下來了——等於這張票什麼都沒換到。
+    """
+    strategy = _loaded.get(key)
+    if strategy is None:
+        # 父行程負責在呼叫之前確保載入過。走到這裡表示子行程被重建過而父行程還沒
+        # 察覺——說清楚比回一個假的 HOLD 好得多。
+        raise KeyError(f"策略 {key!r} 不在這個行程裡（可能剛被重建）")
+    return strategy
+
+
+def _bar_from_wire(wire: dict):
+    from datetime import datetime
+
+    from app.services.market_data.base import Bar, Timeframe
+
+    return Bar(
+        symbol=wire["symbol"],
+        timeframe=Timeframe(wire["timeframe"]),
+        timestamp=datetime.fromisoformat(wire["timestamp"]),
+        open=wire["open"],
+        high=wire["high"],
+        low=wire["low"],
+        close=wire["close"],
+        volume=wire["volume"],
+    )
+
+
 def _handle(message: dict) -> dict:
     command = message.get("cmd")
 
@@ -66,6 +111,47 @@ def _handle(message: dict) -> dict:
             "warmup_bars": loaded.warmup_bars,
             "declared_params": loaded.declared_params,
         }
+
+    if command == "preload":
+        # 只是把沙箱載進來。量到 886 毫秒——那是第一次 load 的成本，而如果讓它落在
+        # 第一輪盯盤上，三個 worker 依序付就是 3.4 秒，而輪詢週期只有五秒。父行程
+        # 在啟動之後、第一輪之前並行地叫這個，把那筆錢先付掉。
+        from app.services.strategy_runtime import compile_strategy  # noqa: F401
+
+        return {}
+
+    if command == "load":
+        from app.services.strategy_runtime import compile_strategy
+
+        loaded = compile_strategy(message["source_code"], params=message.get("params") or {})
+        _loaded[message["key"]] = loaded
+        return {
+            "name": loaded.name,
+            "symbol": loaded.symbol,
+            "entry_point": loaded.entry_point,
+            "code_hash": loaded.code_hash,
+            "timeframe": loaded.timeframe.value,
+            "warmup_bars": loaded.warmup_bars,
+            "declared_params": loaded.declared_params,
+        }
+
+    if command == "tick":
+        return {"signal": _get(message["key"]).instance.on_tick(float(message["price"]))}
+
+    if command == "bar":
+        return {"signal": _get(message["key"]).instance.on_bar(_bar_from_wire(message["bar"]))}
+
+    if command == "warm":
+        # 重播的訊號全部丟掉：那些 K 棒在這個實例存在之前就收盤了，它們產生的 BUY
+        # 是一段對過去的觀察，不是現在的指示。
+        instance = _get(message["key"]).instance
+        for wire in message["bars"]:
+            instance.on_bar(_bar_from_wire(wire))
+        return {}
+
+    if command == "drop":
+        _loaded.pop(message["key"], None)
+        return {}
 
     raise ValueError(f"不認得的指令：{command!r}")
 

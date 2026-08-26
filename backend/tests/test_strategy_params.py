@@ -295,4 +295,12 @@ def test_the_worker_runs_the_stored_parameters(auth_client, db_session):
         strategy.id, strategy.source_code, params=strategy.params
     )
 
-    assert loaded.instance.params["window"] == 20
+    # 隔著管線問，不伸手進 `.instance`：策略的實例住在子行程裡（#18），而那正是重
+    # 點。問法換了，問的東西反而更接近使用者會遇到的事——不是「那個 dict 裡寫著
+    # 20」，而是「它真的等了 20 個價才說話」。
+    #
+    # TUNABLE 在漲勢中滿了 window 個價就會 BUY。原始碼宣告的預設是 5：如果存起來
+    # 的 20 被忽略，第五個價就會發訊號。
+    signals = [loaded.on_tick(100.0 + step) for step in range(5)]
+
+    assert signals == ["HOLD"] * 5, f"用的是原始碼的預設 5，不是存起來的 20：{signals}"

@@ -162,3 +162,17 @@ def second_user_headers(auth_client, db_session):
     db_session.refresh(user)
     token = create_access_token(subject=str(user.id), token_version=user.token_version)
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _close_strategy_workers_at_the_end():
+    """整套跑完把策略子行程關掉。
+
+    #18 之後每一支策略跑在子行程裡，而模組層級的池會被所有測試共用。不收尾的話
+    這台機器上會留下幾個佔記憶體的孤兒，而那正是「跑到一半 Failed to start
+    threads worker」的來源——那個症狀看起來像程式的 bug，其實是記憶體不夠。
+    """
+    yield
+    from app.services import market_loop
+
+    market_loop.shutdown_strategy_workers()

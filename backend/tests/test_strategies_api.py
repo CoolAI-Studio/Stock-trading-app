@@ -217,6 +217,20 @@ def _create(auth_client, name: str = "resume-test") -> int:
     return resp.json()["id"]
 
 
+def _feed(strategy, count: int, start: float = 100.0) -> str:
+    """餵 count 個遞增的價，回傳最後一個訊號。
+
+    隔著管線問，不伸手進 `.instance`：策略的實例現在住在子行程裡（#18），而那正是
+    重點——狀態摸不到，只能從行為看出來。這樣問其實比原本好：原本斷言的是
+    `prices == []`（一個實作細節），現在斷言的是那個細節的**後果**（第五個價還不
+    會 BUY），而後果才是使用者會遇到的東西。
+    """
+    signal = "HOLD"
+    for offset in range(count):
+        signal = strategy.on_tick(start + offset)
+    return signal
+
+
 def test_pausing_a_strategy_throws_away_the_prices_it_had_accumulated(auth_client):
     """Otherwise a strategy paused for two weeks resumes with a price series
     that jumps straight from the old prices to today's -- the gap is invisible
@@ -225,14 +239,14 @@ def test_pausing_a_strategy_throws_away_the_prices_it_had_accumulated(auth_clien
 
     strategy_id = _create(auth_client)
     running = _registry.get_or_load(strategy_id, MA5_SOURCE)
-    running.instance.on_tick(100.0)
-    assert running.instance.prices == [100.0]
+    assert _feed(running, 4) == "HOLD"  # MA5 要五個價才說得出話
 
     auth_client.post(f"/api/strategies/{strategy_id}/deactivate")
 
     resumed = _registry.get_or_load(strategy_id, MA5_SOURCE)
     assert resumed is not running
-    assert resumed.instance.prices == [], "resumed with a fresh price series"
+    # 舊的價還在的話，這一個就是第五個，而價一路在漲——會是 BUY。
+    assert _feed(resumed, 1, start=200.0) == "HOLD", "暫停之後接著用了暫停前累積的價"
 
 
 def test_deleting_a_strategy_releases_its_instance(auth_client):
@@ -260,9 +274,11 @@ def test_editing_the_symbol_restarts_the_strategy_clean(auth_client):
 
     strategy_id = _create(auth_client, name="symbol-swap")
     running = _registry.get_or_load(strategy_id, MA5_SOURCE)
-    running.instance.on_tick(100.0)
+    assert _feed(running, 4) == "HOLD"
 
     auth_client.patch(f"/api/strategies/{strategy_id}", json={"symbol": "2330.TW"})
 
     resumed = _registry.get_or_load(strategy_id, MA5_SOURCE)
-    assert resumed.instance.prices == [], "AAPL's prices must not seed 2330.TW's average"
+    assert _feed(resumed, 1, start=200.0) == "HOLD", (
+        "AAPL 累積的價把 2330.TW 的均線墊高了——第一個價就發訊號"
+    )

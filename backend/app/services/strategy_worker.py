@@ -59,9 +59,30 @@ _KEEP_FROM_PARENT = ("PATH", "SYSTEMROOT", "SystemRoot", "TEMP", "TMP")
 class StrategyWorkerError(Exception):
     """子行程回報的失敗，或跟它溝通時的失敗。
 
-    刻意不細分成「策略寫壞了」和「worker 死了」兩種：呼叫端要做的事是一樣的——把
-    它記在那一支策略上，然後繼續跑下一支。分得太細只會讓呼叫端多兩個 except，而
-    每一個 except 都是一個可能忘記寫的地方。
+    底下分成兩種，而且**這個區分不是分類學上的潔癖，是這個產品的鐵律**。
+
+    market_loop 的 _record_strategy_error 連續五次就把策略停用，而輪詢五秒一次。
+    如果「子行程起不來」走那條路，那麼一次 spawn 失敗（記憶體不夠、容器剛重啟、
+    唯讀檔案系統）在二十五秒之後就會把使用者**每一支**策略都停用——而且擋單結束
+    之後沒有任何東西會把它們打開。畫面上只會寫著「停用」，沒有人看得出來為什麼。
+
+    這正是 _record_feed_problem 上方那段註解已經記取過的教訓，只是換了一個來源。
+    """
+
+
+class WorkerUnavailable(StrategyWorkerError):
+    """子行程起不來、死掉了，或管線上的訊息壞掉了。
+
+    **不是策略的錯**，所以不累積錯誤次數、不停用策略。跟抓不到行情同一類：會自己
+    好的事情，只在那一列上留一句話。
+    """
+
+
+class StrategyTimedOut(StrategyWorkerError):
+    """策略在期限內沒有回來。
+
+    **是策略的錯。** 一支永遠不返回的策略不會自己好，所以它走停用那條路——而這一
+    次「停用」是真的做得到的：子行程殺得掉，那個無窮迴圈不會留下來燒 CPU。
     """
 
 
@@ -74,6 +95,22 @@ def _child_environment() -> dict[str, str]:
     # 不寫 .pyc：子行程是短命的，而在唯讀的容器檔案系統上寫不進去會噴警告。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
+
+
+# 每一個被殺掉的子行程都留在這裡，直到確認它真的不在了。
+#
+# 存在的理由只有一個：讓「無窮迴圈真的被殺掉了」**驗得到**。舊做法的檔頭誠實地寫
+# 著它做不到（Python 殺不掉執行緒，被放棄的呼叫會一直燒著一顆核心直到行程重啟），
+# 而這張票宣稱換掉了那件事——一個宣稱做到了卻沒有辦法檢查的改善，跟沒改的差別只在
+# 文件上。
+_abandoned: list[subprocess.Popen] = []
+
+
+def abandoned_children_still_running() -> list[int]:
+    """被殺掉之後還活著的子行程 PID。正常情況下永遠是空的。"""
+    global _abandoned
+    _abandoned = [process for process in _abandoned if process.poll() is None]
+    return [process.pid for process in _abandoned]
 
 
 class StrategyWorker:
@@ -117,7 +154,7 @@ class StrategyWorker:
         ready = self._read_line(self._timeout)
         if ready.get("ready") is not True:
             self.close()
-            raise StrategyWorkerError(f"策略子行程沒有起來：{ready}")
+            raise WorkerUnavailable(f"策略子行程沒有起來：{ready}")
 
     def close(self) -> None:
         process, self._process = self._process, None
@@ -128,6 +165,7 @@ class StrategyWorker:
                 process.stdin.close()
             process.wait(timeout=2)
         except Exception:  # noqa: BLE001 -- 關不乾淨就殺掉，不要卡住呼叫端
+            _abandoned.append(process)
             process.kill()
             # 殺過之後收屍失敗就算了：這個把手已經放掉那個行程，而呼叫端多半是盯
             # 盤迴圈——為了一具屍體卡住它，比留下一具屍體嚴重得多。
@@ -149,7 +187,7 @@ class StrategyWorker:
         """
         process = self._process
         if process is None or process.stdout is None:
-            raise StrategyWorkerError("策略子行程不在了")
+            raise WorkerUnavailable("策略子行程不在了")
 
         box: list[str] = []
 
@@ -165,25 +203,26 @@ class StrategyWorker:
         reader.join(timeout)
         if reader.is_alive():
             self._kill()
-            raise StrategyWorkerError(f"策略子行程在 {timeout} 秒內沒有回應，已經殺掉")
+            raise StrategyTimedOut(f"策略在 {timeout} 秒內沒有回來，子行程已經殺掉")
 
         line = box[0] if box else ""
         if not line:
             self._kill()
-            raise StrategyWorkerError("策略子行程死掉了")
+            raise WorkerUnavailable("策略子行程死掉了")
         try:
             return json.loads(line)
         except json.JSONDecodeError as exc:
             # 半截的訊息不可以被當成「策略沒有訊號」。那會讓一次通訊故障看起來像一
             # 個正常的 hold，而使用者永遠不會知道那一輪其實沒有跑。
             self._kill()
-            raise StrategyWorkerError(f"策略子行程回了讀不懂的東西：{line[:200]!r}") from exc
+            raise WorkerUnavailable(f"策略子行程回了讀不懂的東西：{line[:200]!r}") from exc
 
     def _kill(self) -> None:
         process = self._process
         self._process = None
         if process is None:
             return
+        _abandoned.append(process)
         # 同上：殺不掉或收不到屍都不能讓呼叫端停下來。
         with contextlib.suppress(Exception):
             process.kill()
@@ -192,18 +231,18 @@ class StrategyWorker:
     def request(self, command: str, timeout: float | None = None, **payload) -> dict:
         with self._lock:
             if not self.alive:
-                raise StrategyWorkerError("策略子行程不在了")
+                raise WorkerUnavailable("策略子行程不在了")
             process = self._process
             # 不用 assert：`python -O` 會把 assert 整行拿掉，而這條管線的另一端跑
             # 的是使用者的程式碼。一個會被編譯器刪掉的檢查，等於沒有檢查。
             if process is None or process.stdin is None:
-                raise StrategyWorkerError("策略子行程不在了")
+                raise WorkerUnavailable("策略子行程不在了")
             try:
                 process.stdin.write(json.dumps({"cmd": command, **payload}) + "\n")
                 process.stdin.flush()
             except Exception as exc:  # noqa: BLE001
                 self._kill()
-                raise StrategyWorkerError(f"送不出去：{exc}") from exc
+                raise WorkerUnavailable(f"送不出去：{exc}") from exc
 
             answer = self._read_line(timeout if timeout is not None else self._timeout)
 
@@ -226,3 +265,27 @@ class StrategyWorker:
 
     def compile(self, source_code: str, params: dict | None = None) -> dict:
         return self.request("compile", source_code=source_code, params=params or {})
+
+    # --- 盯盤迴圈用的（#18 第 3 步）-----------------------------------------
+    #
+    # 每一支策略在子行程裡有一個 key。狀態（self.prices）活在那邊，這邊只留一個
+    # 名字——那正是常駐子行程買到的東西：跨輪的記憶，而秘密不在那裡。
+
+    def preload(self, timeout: float) -> None:
+        """把沙箱先載進子行程。只有暖機用，跟任何一支策略無關。"""
+        self.request("preload", timeout=timeout)
+
+    def load(self, key: str, source_code: str, params: dict | None = None) -> dict:
+        return self.request("load", key=key, source_code=source_code, params=params or {})
+
+    def on_tick(self, key: str, price: float, timeout: float) -> str:
+        return str(self.request("tick", timeout=timeout, key=key, price=price)["signal"])
+
+    def on_bar(self, key: str, bar: dict, timeout: float) -> str:
+        return str(self.request("bar", timeout=timeout, key=key, bar=bar)["signal"])
+
+    def warm_up(self, key: str, bars: list[dict], timeout: float) -> None:
+        self.request("warm", timeout=timeout, key=key, bars=bars)
+
+    def drop(self, key: str) -> None:
+        self.request("drop", key=key)

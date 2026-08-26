@@ -21,6 +21,7 @@ from app.services import (
     market_calendar,
     risk,
     risk_resolver,
+    strategy_worker,
     worker_health,
 )
 from app.services.events import Event, bus
@@ -28,11 +29,13 @@ from app.services.market_data.base import Bar, Quote, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
 from app.services.notification import retry as notification_retry
 from app.services.signals import SignalIn, create_pending_order
+from app.services.strategy_pool import PooledStrategy, StrategyPool
 from app.services.strategy_runtime import (
     LoadedStrategy,
     StrategyRegistry,
     effective_warmup,
 )
+from app.services.strategy_worker import WorkerUnavailable
 
 logger = logging.getLogger("app.market_loop")
 
@@ -58,7 +61,39 @@ CLOSED_POLL_INTERVAL_SEC = 300.0
 # database.
 _last_watched: list[tuple[str, DataSource]] = []
 
-_registry = StrategyRegistry()
+# 使用者的策略跑在這裡面的子行程，不在這個行程（#18 第 3 步）。
+#
+# 名字保持 _registry，而 StrategyPool 的介面刻意跟 StrategyRegistry 一模一樣，所以
+# 這次搬家在 tick_once 裡的 diff 幾乎是零——看得出來哪幾行才真的改變了行為。
+_registry: StrategyPool | StrategyRegistry = StrategyPool()
+
+
+def reset_strategy_workers() -> None:
+    """關掉所有子行程，下一次呼叫再重建。
+
+    測試用它把每一條隔開；正式環境不需要呼叫——1900 個測試如果各自留下幾個子行
+    程，就是這台機器上那個「跑到一半 Failed to start threads worker」的來源。
+    """
+    global _registry
+    if isinstance(_registry, StrategyPool):
+        _registry.shutdown()
+    _registry = StrategyPool()
+
+
+def shutdown_strategy_workers() -> None:
+    """關掉所有策略子行程。app 收攤的時候呼叫。"""
+    if isinstance(_registry, StrategyPool):
+        _registry.shutdown()
+
+
+def stuck_children_still_running() -> list[int]:
+    """逾時之後還活著的子行程 PID。正常永遠是空的。
+
+    這是 #18 相對於舊做法真正買到的東西，而它必須**驗得到**：
+    strategy_runtime._guarded 的檔頭誠實地寫著 Python 殺不掉執行緒，逾時的策略會
+    一直燒著一顆核心直到行程重啟。子行程殺得掉——這個函式就是問「真的殺掉了嗎」。
+    """
+    return strategy_worker.abandoned_children_still_running()
 
 
 def release_strategy(strategy_id: int) -> None:
@@ -76,6 +111,9 @@ def release_strategy(strategy_id: int) -> None:
     _registry.invalidate(strategy_id)
 
 
+# 盯盤迴圈只要求策略有這幾個東西，不在乎它跑在哪個行程裡。
+RunnableStrategy = LoadedStrategy | PooledStrategy
+
 _MAX_CONSECUTIVE_ERRORS = 5
 
 # NOTE: v1 does not skip closed-market equities -- the per-provider TTL cache
@@ -87,6 +125,19 @@ _MAX_CONSECUTIVE_ERRORS = 5
 def _record_strategy_error(
     db: Session, strategy: Strategy, exc: Exception, events: list[Event]
 ) -> None:
+    if isinstance(exc, WorkerUnavailable):
+        # **子行程壞掉不是策略的錯，所以不能累積、不能停用。**
+        #
+        # 這裡連續五次就把策略停用，而輪詢五秒一次。一次 spawn 失敗（記憶體不夠、
+        # 容器剛重啟、唯讀的檔案系統）如果走這條路，二十五秒之後使用者每一支策略
+        # 都會被永久停用——而且狀況恢復之後沒有任何東西會把它們打開，畫面上只會寫
+        # 著「停用」。
+        #
+        # 跟 _record_feed_problem 同一個道理，只是換了一個來源：壞掉的程式碼不會自
+        # 己好，所以那條路留給它；子行程起不來會自己好，所以只留一句話在那一列上。
+        _record_feed_problem(db, strategy, f"策略行程暫時不可用：{exc}")
+        return
+
     strategy.consecutive_errors += 1
     strategy.last_error = str(exc)
     strategy.last_run_at = utcnow()
@@ -115,12 +166,12 @@ def _record_feed_problem(db: Session, strategy: Strategy, detail: str) -> None:
     retires the strategy.
     """
     strategy.last_run_at = utcnow()
-    strategy.last_error = f"抓不到 K 棒：{detail}"
+    strategy.last_error = detail
     db.commit()
 
 
 def _run_tick_strategy(
-    db: Session, strategy: Strategy, loaded: LoadedStrategy, quote: Quote, events: list[Event]
+    db: Session, strategy: Strategy, loaded: RunnableStrategy, quote: Quote, events: list[Event]
 ) -> None:
     try:
         signal_str = loaded.on_tick(float(quote.price))
@@ -135,7 +186,7 @@ def _run_tick_strategy(
 
 
 def _run_bar_strategy(
-    db: Session, strategy: Strategy, loaded: LoadedStrategy, bars: list[Bar], events: list[Event]
+    db: Session, strategy: Strategy, loaded: RunnableStrategy, bars: list[Bar], events: list[Event]
 ) -> None:
     """Feeds closed candles to on_bar: at most one call per candle, and never
     for a candle the strategy has already been shown."""
@@ -354,7 +405,7 @@ def tick_once(
         # Compiled up front rather than at call time, because the entry point
         # a strategy turned out to use decides what data it needs fetched:
         # a price tick, or a candle series at its own timeframe.
-        loaded_by_id: dict[int, LoadedStrategy] = {}
+        loaded_by_id: dict[int, RunnableStrategy] = {}
         for strategy in strategies:
             try:
                 # The owner's tuned parameters, not just the source. Loading
@@ -471,7 +522,7 @@ def tick_once(
                 if problem is not None:
                     # 不能拿空清單當答案：那會被下面讀成「還在暖身」，而暖身是
                     # 一句會自己過去的話。抓不到就說抓不到。
-                    _record_feed_problem(session, strategy, problem)
+                    _record_feed_problem(session, strategy, f"抓不到 K 棒：{problem}")
                     continue
                 _run_bar_strategy(session, strategy, loaded, bars_by_key.get(key, []), events)
                 continue
@@ -590,6 +641,11 @@ async def run_forever(stop_event: asyncio.Event) -> None:
         "--workers 1 -- multiple worker processes would each run their own "
         "loop and duplicate signals for the same tick."
     )
+    # 在第一輪之前，不是在第一輪裡面。策略子行程第一次載入沙箱要將近一秒，而輪
+    # 詢週期是五秒——不先暖，重啟後的第一輪會被自己的暖機吃掉大半。
+    if isinstance(_registry, StrategyPool):
+        await asyncio.to_thread(_registry.prewarm)
+
     while not stop_event.is_set():
         # Marked before the tick, so a tick that hangs (and therefore never
         # returns to mark anything) shows up in /healthz as a stalled loop
