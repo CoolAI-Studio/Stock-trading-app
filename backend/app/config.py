@@ -70,6 +70,21 @@ class Settings(BaseSettings):
     # 東西上生效。
     STRATEGY_BACKTEST_TIMEOUT_SEC: float = 30.0
 
+    # 一個策略子行程最多能配多少記憶體。
+    #
+    # 逾時擋的是時間，這一項擋的是空間，而空間的失效模式不會逾時：
+    #
+    #     def on_bar(self, bar):
+    #         self.junk = [0] * 10**10
+    #
+    # 這一行跑得很快，只是要一百 GB。沒有上限的話，作業系統開始換頁，然後 API、
+    # 盯盤迴圈和通知一起停下來——而警告不能停擺是這個產品的最高優先。
+    #
+    # 256 MB：目標機器（Render 免費方案）總共只有 512 MB，而一支策略是價格清單上
+    # 的算術。真正的策略用不到這個數字的百分之一；會撞到它的，是本來就該被擋下來
+    # 的那種。**只有 POSIX 有效**（Windows 沒有 resource 模組），而線上是 Linux。
+    STRATEGY_MEMORY_LIMIT_MB: int = 256
+
     WS_TICKET_TTL_SECONDS: int = 30
 
     # Closed by default: with registration off, a publicly reachable backend only

@@ -21,9 +21,89 @@ pickle 會反序列化成任意物件，而這條管線的另一端跑的正是�
 有資料，沒有行為。
 """
 
+import contextlib
 import json
 import os
 import sys
+
+
+def apply_limits(memory_bytes: int) -> dict:
+    """把這個行程的記憶體上限設下去。回報設成什麼樣，**絕對不拋例外**。
+
+    設不起來只能是「沒設成」，不可以是「行程起不來」。在唯讀的容器、已經被外層
+    cgroup 限制過的環境、或 setrlimit 被 seccomp 擋掉的沙箱裡，這一句都可能失
+    敗——而正確的反應是繼續跑。**警告不能停擺，優先於一個沒設成的上限。**
+
+    Windows 沒有 resource 模組，所以那裡永遠是 applied=False。那不是退化：開發機
+    上起不來的話，等於在每一個貢獻者寫程式的地方把整個策略功能關掉。
+    """
+    try:
+        import resource  # noqa: PLC0415 -- 只有 POSIX 有，不能放在檔頭
+    except ImportError:
+        return {"applied": False, "memory_bytes": 0, "why": "這個平台沒有 resource 模組"}
+
+    try:
+        # RLIMIT_AS 是位址空間，不是 RSS。選它是因為它是唯一在 Linux 上真的會讓
+        # 配置失敗（丟 MemoryError）的那一個——RLIMIT_DATA 在現代 glibc 的 mmap
+        # 配置上根本不生效，而那正是 list 變大時走的路。
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        # 不要把 hard limit 調高（調不動，而且會拋）。取小的那個。
+        ceiling = memory_bytes if hard == resource.RLIM_INFINITY else min(memory_bytes, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, hard))
+    except Exception as exc:  # noqa: BLE001
+        return {"applied": False, "memory_bytes": 0, "why": f"{type(exc).__name__}: {exc}"}
+
+    return {"applied": True, "memory_bytes": ceiling, "why": ""}
+
+
+_limits: dict = {"applied": False, "memory_bytes": 0, "why": "還沒設"}
+
+
+def lift_limits() -> None:
+    """把記憶體上限拿掉。**只有在上限緊到連沙箱都載不起來的時候才走這條。**
+
+    這是這個功能唯一可以接受的失敗方式。RLIMIT_AS 限的是位址空間不是 RSS，而
+    CPython 光是啟動就會 mmap 一大片——所以「256 MB 夠不夠」不是一個看得出來的數
+    字，它取決於 glibc 的版本、執行緒堆疊、和容器的設定。
+
+    設得太緊的後果不是「策略被擋下來」，是**每一支策略都永遠載不起來**：呼叫端會
+    一直收到子行程不可用，而那被歸類成基礎設施問題（不停用策略，只留一句話），於
+    是畫面上每一支都寫著「行程暫時不可用」，而它永遠不會好。**警告全面停擺**——那
+    比沒有上限糟得多。
+
+    所以寧可沒有上限也要活著，並且把這件事記下來讓 limits 指令說得出來。
+    """
+    global _limits
+    # **先記錄再嘗試解除。** 這件事發生過的紀錄，比解除本身更重要：解除可能失敗
+    # （沒有 resource 模組、setrlimit 被擋），但「載不起來所以退讓過」是使用者和
+    # /system 都應該看得到的事實。記在解除成功之後，就會在最需要它的那些環境裡剛
+    # 好消失。
+    _limits = {
+        "applied": False,
+        "memory_bytes": 0,
+        "why": "上限緊到連沙箱都載不起來，已經拿掉——警告不能停擺優先",
+    }
+    try:
+        import resource  # noqa: PLC0415
+    except ImportError:
+        return
+    with contextlib.suppress(Exception):
+        _, hard = resource.getrlimit(resource.RLIMIT_AS)
+        resource.setrlimit(resource.RLIMIT_AS, (hard, hard))
+
+
+def _sandbox():
+    """沙箱的 compile_strategy，在上限之下載入。
+
+    載不起來（MemoryError）就把上限拿掉再試一次。不是吞掉錯誤：試不起來的第二次
+    會照樣往上拋。
+    """
+    try:
+        from app.services.strategy_runtime import compile_strategy
+    except MemoryError:
+        lift_limits()
+        from app.services.strategy_runtime import compile_strategy
+    return compile_strategy
 
 
 def _reply(ok: bool, **fields) -> None:
@@ -87,6 +167,11 @@ def _handle(message: dict) -> dict:
     if command == "ping":
         return {"pong": True}
 
+    if command == "limits":
+        # 讓上限**驗得到**。一個宣稱有邊界但沒有辦法檢查的邊界，跟沒有邊界的差別
+        # 只在文件上——跟 env 這個指令存在的理由是同一個。
+        return dict(_limits)
+
     if command == "env":
         # 讓「這裡沒有秘密」驗得到。只回名字不回值——回值就等於在管線上再洩一次，
         # 而這個指令的用途是證明那裡是空的。
@@ -95,9 +180,7 @@ def _handle(message: dict) -> dict:
     if command == "compile":
         # 在函式裡 import，不在檔頭：ping 和 env 是父行程確認這裡活著用的，不該為
         # 了它們付沙箱的載入時間。
-        from app.services.strategy_runtime import compile_strategy
-
-        loaded = compile_strategy(message["source_code"], params=message.get("params") or {})
+        loaded = _sandbox()(message["source_code"], params=message.get("params") or {})
         # 回的是**資料**，不是那個 LoadedStrategy 物件。物件本身留在這裡是重點：
         # 它裡面有使用者寫的程式碼建出來的實例，而把那種東西送過管線就等於把隔離
         # 拆掉。`declared_params` 是原始碼宣告的預設值，不是現在生效的值——表單要
@@ -119,9 +202,9 @@ def _handle(message: dict) -> dict:
         # 式碼（_dispatch 只餵一根 K 棒進去，策略看不到帳戶），而把它們也搬過來
         # 要讓 BacktestAssumptions 和 BacktestResult 都過一次 JSON——這個 app 裡
         # 欄位最多的兩個東西。這樣切一樣是一次往返，序列化面小得多。
-        from app.services.strategy_runtime import compile_strategy, effective_warmup
+        from app.services.strategy_runtime import effective_warmup
 
-        loaded = compile_strategy(message["source_code"], params=message.get("params") or {})
+        loaded = _sandbox()(message["source_code"], params=message.get("params") or {})
         instance = loaded.instance
 
         # 暖身要幾根，在**這裡**算。呼叫端不知道答案：它取決於原始碼有沒有宣告
@@ -180,9 +263,8 @@ def _handle(message: dict) -> dict:
         # 而逾時可能落在那個縫裡——那時候該不該殺行程沒有答案。一次往返就沒有那
         # 個縫：不是整件事做完，就是整個行程被殺掉。
         from app.services.market_data.base import bars_from_closes
-        from app.services.strategy_runtime import compile_strategy
 
-        loaded = compile_strategy(message["source_code"])
+        loaded = _sandbox()(message["source_code"])
         detected = {
             "name": loaded.name,
             "symbol": loaded.symbol,
@@ -207,14 +289,12 @@ def _handle(message: dict) -> dict:
         # 只是把沙箱載進來。量到 886 毫秒——那是第一次 load 的成本，而如果讓它落在
         # 第一輪盯盤上，三個 worker 依序付就是 3.4 秒，而輪詢週期只有五秒。父行程
         # 在啟動之後、第一輪之前並行地叫這個，把那筆錢先付掉。
-        from app.services.strategy_runtime import compile_strategy  # noqa: F401
+        _sandbox()
 
         return {}
 
     if command == "load":
-        from app.services.strategy_runtime import compile_strategy
-
-        loaded = compile_strategy(message["source_code"], params=message.get("params") or {})
+        loaded = _sandbox()(message["source_code"], params=message.get("params") or {})
         _loaded[message["key"]] = loaded
         return {
             "name": loaded.name,
@@ -248,6 +328,13 @@ def _handle(message: dict) -> dict:
 
 
 def main() -> int:
+    global _limits
+    # 在回報 ready **之前**設下去，所以父行程一收到 ready，這個行程就已經被限制
+    # 住了。晚一步的話，中間那個縫裡跑的第一支策略是沒有上限的。
+    limit_mb = int(os.environ.get("STRATEGY_MEMORY_LIMIT_MB") or 0)
+    if limit_mb > 0:
+        _limits = apply_limits(limit_mb * 1024 * 1024)
+
     _reply(True, ready=True)
 
     for line in sys.stdin:

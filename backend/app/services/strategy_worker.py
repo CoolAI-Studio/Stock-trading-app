@@ -43,6 +43,8 @@ import sys
 import threading
 from pathlib import Path
 
+from app.config import settings
+
 BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # 子行程只拿得到這幾個。
@@ -94,6 +96,12 @@ def _child_environment() -> dict[str, str]:
     env["PYTHONIOENCODING"] = "utf-8"
     # 不寫 .pyc：子行程是短命的，而在唯讀的容器檔案系統上寫不進去會噴警告。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # 上限用環境變數傳，不用命令列參數：命令列在 `ps` 裡看得到，而這裡的原則是
+    # 「子行程只拿到我明確給的東西」——多開一條管道就多一個要記得檢查的地方。
+    #
+    # 這個名字在白名單之外，是**我們自己加的**，不是繼承來的。子行程讀得到它，
+    # 而它不是秘密。
+    env["STRATEGY_MEMORY_LIMIT_MB"] = str(settings.STRATEGY_MEMORY_LIMIT_MB)
     return env
 
 
@@ -254,6 +262,13 @@ class StrategyWorker:
 
     def ping(self) -> bool:
         return self.request("ping").get("pong") is True
+
+    def limits(self) -> dict:
+        """子行程實際被限成什麼樣。
+
+        跟 child_environment() 同一個理由：宣稱有上限而驗不到，等於只有文件上有。
+        """
+        return self.request("limits")
 
     def child_environment(self) -> list[str]:
         """子行程看得到的環境變數名稱。
