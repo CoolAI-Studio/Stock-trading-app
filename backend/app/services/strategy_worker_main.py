@@ -112,6 +112,36 @@ def _handle(message: dict) -> dict:
             "declared_params": loaded.declared_params,
         }
 
+    if command == "validate":
+        # compile ＋ 試跑，**一次往返**。
+        #
+        # 拆成兩次的話，中間那段時間父行程手上會有一個「編好了但還沒跑」的狀態，
+        # 而逾時可能落在那個縫裡——那時候該不該殺行程沒有答案。一次往返就沒有那
+        # 個縫：不是整件事做完，就是整個行程被殺掉。
+        from app.services.market_data.base import bars_from_closes
+        from app.services.strategy_runtime import compile_strategy
+
+        loaded = compile_strategy(message["source_code"])
+        detected = {
+            "name": loaded.name,
+            "symbol": loaded.symbol,
+            "entry_point": loaded.entry_point,
+            "timeframe": loaded.timeframe.value,
+            "declared_params": loaded.declared_params,
+        }
+        prices = [float(price) for price in message["prices"]]
+        try:
+            if loaded.entry_point == "on_bar":
+                bars = bars_from_closes(loaded.symbol, loaded.timeframe, prices)
+                signals = [loaded.instance.on_bar(bar) for bar in bars]
+            else:
+                signals = [loaded.instance.on_tick(price) for price in prices]
+        except Exception as exc:  # noqa: BLE001
+            # 編得起來但跑不動，跟編不起來是兩件事：前者要把偵測到的欄位還給表
+            # 單（使用者才知道我們讀到了什麼），後者沒有東西可以還。
+            return {**detected, "run_error": f"{type(exc).__name__}: {exc}"}
+        return {**detected, "signals": [str(signal) for signal in signals]}
+
     if command == "preload":
         # 只是把沙箱載進來。量到 886 毫秒——那是第一次 load 的成本，而如果讓它落在
         # 第一輪盯盤上，三個 worker 依序付就是 3.4 秒，而輪詢週期只有五秒。父行程

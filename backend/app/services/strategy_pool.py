@@ -288,3 +288,56 @@ class StrategyPool:
             slot.specs.clear()
             slot.loaded.clear()
         self._handles.clear()
+
+
+# --- 一次性的工作（驗證、回測）------------------------------------------------
+#
+# 跟常駐池分開，而且這個分開是必要的：常駐池裡活著的是盯盤策略的**狀態**，而驗證
+# 是陌生人按一個按鈕就打得到的東西。排在一起的話，任何人送一支跑不完的策略，就會
+# 連帶清掉同一格上真正在盯盤的那幾支的累積狀態——一個不需要權限的操作，弄掉了別人
+# 的東西。
+#
+# 這裡的 worker 反過來是**故意可拋棄的**：它沒有任何要保住的狀態，所以逾時被殺掉
+# 之後下一次呼叫重建就好。
+_scratch: StrategyWorker | None = None
+_scratch_lock = threading.Lock()
+
+
+def validate(source_code: str, prices: list[float]) -> dict:
+    """在子行程裡編譯並試跑一支策略。
+
+    回傳的是資料，不是物件：那個實例留在子行程裡，而把它送過管線就等於把隔離拆掉。
+    """
+    global _scratch
+    with _scratch_lock:
+        if _scratch is None or not _scratch.alive:
+            _scratch = StrategyWorker(timeout_sec=WARMUP_TIMEOUT_SEC)
+            _scratch.start()
+        return _scratch.validate(source_code, prices, settings.STRATEGY_VALIDATE_TIMEOUT_SEC)
+
+
+def check_params(source_code: str, params: dict) -> None:
+    """這段程式碼有沒有宣告這幾個參數。不合就拋 StrategyWorkerError。
+
+    只是編譯一次，但編譯**會執行**類別主體和 __init__——所以這也是在跑使用者的程
+    式碼，也必須在子行程裡，也必須有期限。
+    """
+    global _scratch
+    with _scratch_lock:
+        if _scratch is None or not _scratch.alive:
+            _scratch = StrategyWorker(timeout_sec=WARMUP_TIMEOUT_SEC)
+            _scratch.start()
+        _scratch.request(
+            "compile",
+            timeout=settings.STRATEGY_VALIDATE_TIMEOUT_SEC,
+            source_code=source_code,
+            params=params,
+        )
+
+
+def shutdown_scratch() -> None:
+    global _scratch
+    with _scratch_lock:
+        if _scratch is not None:
+            _scratch.close()
+            _scratch = None

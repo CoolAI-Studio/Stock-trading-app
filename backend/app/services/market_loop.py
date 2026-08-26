@@ -21,6 +21,7 @@ from app.services import (
     market_calendar,
     risk,
     risk_resolver,
+    strategy_pool,
     strategy_worker,
     worker_health,
 )
@@ -84,6 +85,8 @@ def shutdown_strategy_workers() -> None:
     """關掉所有策略子行程。app 收攤的時候呼叫。"""
     if isinstance(_registry, StrategyPool):
         _registry.shutdown()
+    # 驗證用的那個一次性 worker 也要關。它不在池裡，所以池的 shutdown 碰不到它。
+    strategy_pool.shutdown_scratch()
 
 
 def stuck_children_still_running() -> list[int]:

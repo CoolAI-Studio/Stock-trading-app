@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     # an infinite loop or a hung network call.
     STRATEGY_TICK_TIMEOUT_SEC: float = 2.0
 
+    # 驗證一支策略的期限：編譯 ＋ 拿十個樣本價試跑，全部在一次往返裡。
+    #
+    # 比 tick 的期限寬，因為它做的事比較多（compile 本身就要執行類別主體和
+    # __init__）；但仍然是個小數字，因為另一端是一個等著看結果的人。在搬進子行程
+    # 之前這裡**沒有任何期限**——_guarded 只包 on_tick / on_bar，不包建構式，所以
+    # 一支在 __init__ 裡 while True 的策略會讓那個請求執行緒永遠回不來，而
+    # /api/strategies/validate 只需要一個登入。
+    STRATEGY_VALIDATE_TIMEOUT_SEC: float = 5.0
+
     WS_TICKET_TTL_SECONDS: int = 30
 
     # Closed by default: with registration off, a publicly reachable backend only

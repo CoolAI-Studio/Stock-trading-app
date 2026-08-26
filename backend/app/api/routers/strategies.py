@@ -31,6 +31,7 @@ from app.services import (
     ai_settings,
     risk_resolver,
     strategy_performance,
+    strategy_pool,
     strategy_templates,
     symbol_search,
 )
@@ -39,7 +40,6 @@ from app.services.market_data.base import (
     SUPPORTED_TIMEFRAMES,
     TIMEFRAME_LABELS,
     Timeframe,
-    bars_from_closes,
     supports_timeframe,
 )
 from app.services.market_loop import release_strategy
@@ -50,7 +50,12 @@ from app.services.strategy_generator import (
     extract_code,
     extract_question,
 )
-from app.services.strategy_runtime import StrategyValidationError, code_hash, compile_strategy
+from app.services.strategy_runtime import code_hash
+from app.services.strategy_worker import (
+    StrategyTimedOut,
+    StrategyWorkerError,
+    WorkerUnavailable,
+)
 
 router = APIRouter(prefix="/strategies", tags=["strategies"])
 
@@ -64,45 +69,56 @@ _NO_CODE_ERROR = "AI 沒有回傳任何程式碼，請把策略描述講得更�
 
 
 def _validate(source_code: str, sample_prices: list[float] | None = None) -> StrategyValidateResult:
+    """編譯並試跑一支策略——**在子行程裡**（#18）。
+
+    這個端點只需要一個登入，而它會編譯程式碼、跑 on_tick，然後把回傳值放進 HTTP
+    回應。test_sandbox_escape.py 的檔頭把這條路叫做「the worst thing in the app」，
+    而且說了真正的答案是獨立行程；那個檔案關掉的是已知的每一條路，不是這件事。
+
+    搬過來還順手補掉一個**沒有任何期限**的洞：`_guarded` 只包 on_tick / on_bar，
+    不包建構式，而 compile_strategy 會執行類別主體和 __init__。一支在 __init__ 裡
+    `while True` 的策略，會讓這個請求的執行緒永遠回不來。現在期限由父行程用殺行
+    程執行，建構式也在裡面。
+    """
+    prices = [float(price) for price in (sample_prices or _DEFAULT_SAMPLE_PRICES)]
     try:
-        loaded = compile_strategy(source_code)
-    except StrategyValidationError as exc:
+        answer = strategy_pool.validate(source_code, prices)
+    except StrategyTimedOut as exc:
+        return StrategyValidateResult(ok=False, error=f"策略跑不完，已經中止：{exc}")
+    except WorkerUnavailable as exc:
+        # 基礎設施的問題，不是這段程式碼的問題。講清楚是哪一種，不然使用者會去改
+        # 一段其實沒有錯的程式碼。
+        return StrategyValidateResult(ok=False, error=f"驗證用的行程暫時起不來，請再試一次：{exc}")
+    except StrategyWorkerError as exc:
+        # 編不起來。StrategyValidationError 的訊息也是從這裡回來的——它在子行程那
+        # 端被轉成文字了，因為例外送不過 JSON 管線。
         return StrategyValidateResult(ok=False, error=str(exc))
 
     detected = {
-        "detected_name": loaded.name,
-        "detected_symbol": loaded.symbol,
+        "detected_name": answer["name"],
+        "detected_symbol": answer["symbol"],
         # Reported here rather than left to the save step. The editor printed
         # 「偵測到：均線（2330）」 in green, which reads as approval; the refusal
         # did happen, later, from a different field, with nothing connecting
         # it to the symbol the code had chosen.
-        "symbol_problem": symbol_search.looks_unpriceable(loaded.symbol or ""),
+        "symbol_problem": symbol_search.looks_unpriceable(answer["symbol"] or ""),
         # What the form needs to render a field per parameter, with the
         # author's own defaults already in the boxes.
-        "declared_params": loaded.declared_params,
-        "entry_point": loaded.entry_point,
+        "declared_params": answer["declared_params"],
+        "entry_point": answer["entry_point"],
         # Left out for a tick strategy: it has no candles, and reporting the
         # default would read as a choice the code never made.
-        "timeframe": loaded.timeframe.value if loaded.entry_point == "on_bar" else None,
+        "timeframe": answer["timeframe"] if answer["entry_point"] == "on_bar" else None,
     }
 
-    prices = [float(p) for p in (sample_prices or _DEFAULT_SAMPLE_PRICES)]
-    try:
-        if loaded.entry_point == "on_bar":
-            # The same sample prices, turned into candles closing at them, so
-            # the dry run is comparable whichever entry point the code uses.
-            bars = bars_from_closes(loaded.symbol, loaded.timeframe, prices)
-            signals = [loaded.on_bar(bar) for bar in bars]
-        else:
-            signals = [loaded.on_tick(price) for price in prices]
-    except Exception as exc:
+    if "run_error" in answer:
         return StrategyValidateResult(
             ok=False,
-            error=f"Strategy compiled but {loaded.entry_point}() raised: {exc}",
+            error=f"Strategy compiled but {answer['entry_point']}() raised: {answer['run_error']}",
             **detected,
         )
 
-    return StrategyValidateResult(ok=True, sample_signals=signals, **detected)
+    return StrategyValidateResult(ok=True, sample_signals=answer["signals"], **detected)
 
 
 def _check_params(source_code: str, params: dict | None) -> None:
@@ -115,8 +131,10 @@ def _check_params(source_code: str, params: dict | None) -> None:
     if not params:
         return
     try:
-        compile_strategy(source_code, params=params)
-    except StrategyValidationError as exc:
+        # 子行程裡編（#18）：編譯會執行類別主體和 __init__，所以這也是在跑使用者
+        # 的程式碼。錯誤訊息從那一端轉成文字回來——例外送不過 JSON 管線。
+        strategy_pool.check_params(source_code, params)
+    except StrategyWorkerError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
