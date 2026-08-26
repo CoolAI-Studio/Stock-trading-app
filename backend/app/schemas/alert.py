@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 
-from app.models.enums import NotificationStatus, OrderSide
+from app.enums import NotificationStatus, OrderSide
 from app.schemas.common import MoneyStr, UtcDatetime
 
 

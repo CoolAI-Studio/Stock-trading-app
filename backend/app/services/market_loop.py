@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import SessionLocal
-from app.models.enums import DataSource, OrderSide, OrderSource, OrderStatus
+from app.enums import DataSource, OrderSide, OrderSource, OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.position import Position

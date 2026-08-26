@@ -32,7 +32,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models.enums import ChannelType
+from app.enums import ChannelType
 from app.models.notification import NotificationChannel, NotificationLog
 
 

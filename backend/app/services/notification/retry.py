@@ -25,7 +25,7 @@ from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
 from app.services.notification.base import SendResult

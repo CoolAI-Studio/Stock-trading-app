@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
-from app.models.enums import OrderSide, OrderStatus
+from app.enums import OrderSide, OrderStatus
 from app.models.order import Order
 from app.models.position import Position
 from app.models.strategy import Strategy, StrategyAlert

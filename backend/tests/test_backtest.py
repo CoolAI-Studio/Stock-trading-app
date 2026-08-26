@@ -18,7 +18,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.backtest import (
     BacktestAssumptions,
     BacktestError,

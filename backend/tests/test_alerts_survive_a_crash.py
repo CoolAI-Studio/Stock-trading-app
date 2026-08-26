@@ -37,7 +37,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
 from app.services import market_loop

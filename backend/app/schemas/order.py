@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import OrderSide, OrderSource, OrderStatus
+from app.enums import OrderSide, OrderSource, OrderStatus
 from app.schemas.common import MoneyStr, UtcDatetime
 
 

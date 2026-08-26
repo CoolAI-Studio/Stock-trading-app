@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
-from app.models.enums import OrderSource, OrderStatus
+from app.enums import OrderSource, OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.user import User

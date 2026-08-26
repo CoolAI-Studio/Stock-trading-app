@@ -31,7 +31,7 @@ PROVIDER answered, not when somebody last asked us.
 import logging
 from decimal import Decimal
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Quote
 from app.services.market_data.service import MarketDataService
 

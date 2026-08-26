@@ -26,7 +26,7 @@ dropped, and no state has to be written to arrange that.
 
 from datetime import timedelta
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.user import User

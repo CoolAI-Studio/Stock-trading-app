@@ -2,7 +2,7 @@ import threading
 from datetime import timedelta
 from decimal import Decimal
 
-from app.models.enums import DataSource, OrderSide, OrderStatus
+from app.enums import DataSource, OrderSide, OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.position import Position

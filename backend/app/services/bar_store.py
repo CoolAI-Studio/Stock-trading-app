@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.market import MarketBar
 from app.services.market_data.base import Bar, Timeframe
 

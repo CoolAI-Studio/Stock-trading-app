@@ -247,7 +247,7 @@ def _own_the_symbol(db_session, symbol: str) -> None:
     """
     from decimal import Decimal
 
-    from app.models.enums import DataSource
+    from app.enums import DataSource
     from app.models.strategy import Strategy
     from app.models.user import User
 

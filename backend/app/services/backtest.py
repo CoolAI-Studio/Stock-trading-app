@@ -57,7 +57,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.strategy import DEFAULT_WARMUP_BARS
 from app.services.market_data.base import Bar, Timeframe, bar_end
 from app.services.market_data.service import MarketDataService

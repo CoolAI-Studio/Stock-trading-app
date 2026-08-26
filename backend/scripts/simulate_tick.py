@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.models.enums import DataSource  # noqa: E402
+from app.enums import DataSource  # noqa: E402
 from app.services import market_loop  # noqa: E402
 from app.services.market_data.providers.mock_provider import MockProvider  # noqa: E402
 from app.services.market_data.service import MarketDataService  # noqa: E402

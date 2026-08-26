@@ -79,7 +79,7 @@ def test_the_question_is_sent_with_the_current_state_attached(auth_client):
 def test_the_state_includes_the_symbols_that_are_not_pricing(auth_client, db_session, monkeypatch):
     from decimal import Decimal
 
-    from app.models.enums import DataSource
+    from app.enums import DataSource
     from app.models.strategy import Strategy
     from app.models.user import User
     from app.services import worker_health

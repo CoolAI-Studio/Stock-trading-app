@@ -1,5 +1,5 @@
+from app.enums import DataSource
 from app.main import app
-from app.models.enums import DataSource
 from app.services.market_data.providers.mock_provider import MockProvider
 from app.services.market_data.service import MarketDataService, get_market_data_service
 

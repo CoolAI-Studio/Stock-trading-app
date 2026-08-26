@@ -336,8 +336,8 @@ def stub_market_data():
     """The same rising daily series tests/test_backtest_api.py uses, so the run
     actually produces a result and the echo assertion has something to read.
     Without it the endpoint answers 「no candles」 and the test proves nothing."""
+    from app.enums import DataSource
     from app.main import app
-    from app.models.enums import DataSource
     from app.services.market_data.service import MarketDataService, get_market_data_service
 
     class _Rising:

@@ -33,7 +33,7 @@ That protection stays. What changes is that it now applies to an ANSWER of
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Bar, BarFetchError, Timeframe
 from app.services.market_data.service import MarketDataService
 

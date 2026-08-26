@@ -14,7 +14,7 @@ distinguishing from the timeout that clears in ten seconds.
 
 from unittest.mock import patch
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.user import User

@@ -26,7 +26,7 @@ Stdlib only -- zoneinfo, no new dependency for what is a table of two markets.
 from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services import symbol_search
 
 

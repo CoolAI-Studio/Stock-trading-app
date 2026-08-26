@@ -13,7 +13,7 @@ a broken file.
 
 from decimal import Decimal
 
-from app.models.enums import NotificationStatus, OrderSide, OrderSource, OrderStatus
+from app.enums import NotificationStatus, OrderSide, OrderSource, OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.strategy import Strategy, StrategyAlert

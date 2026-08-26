@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 import httpx
 import yfinance as yf
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Bar, BarFetchError, Quote, Timeframe, currency_for
 
 # HOW FAR BACK TO ASK, AS A FUNCTION OF HOW MUCH WAS ASKED FOR.

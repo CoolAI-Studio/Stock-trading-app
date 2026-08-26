@@ -30,7 +30,7 @@ polling one that turns out not to price.
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services import market_calendar, symbol_search
 
 # --- refused where somebody is present to fix it ----------------------------

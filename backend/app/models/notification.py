@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.types import EncryptedJSON
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import TimestampMixin, utcnow
 
 

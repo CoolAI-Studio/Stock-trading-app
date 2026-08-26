@@ -282,8 +282,8 @@ def test_a_period_longer_than_the_window_is_a_sentence_not_a_blank_line():
 
 
 def test_the_endpoint_turns_that_into_a_sentence_the_page_can_show(auth_client):
+    from app.enums import DataSource
     from app.main import app
-    from app.models.enums import DataSource
     from app.services.market_data.service import MarketDataService, get_market_data_service
 
     bars = _bars(120)
@@ -463,8 +463,8 @@ def test_the_endpoint_needs_a_login(client):
 
 
 def test_the_endpoint_returns_points_for_the_same_bars_the_chart_drew(auth_client):
+    from app.enums import DataSource
     from app.main import app
-    from app.models.enums import DataSource
     from app.services.market_data.service import MarketDataService, get_market_data_service
 
     bars = _bars(120)

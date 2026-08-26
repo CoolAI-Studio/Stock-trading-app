@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 
 
 class SymbolMatchRead(BaseModel):

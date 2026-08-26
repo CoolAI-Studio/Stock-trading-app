@@ -27,7 +27,7 @@ extra, so the hot poll path gets it for free.
 
 from decimal import Decimal
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Quote, currency_for
 
 # --- what the symbol itself already tells us --------------------------------

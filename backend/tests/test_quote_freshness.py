@@ -163,7 +163,7 @@ def test_a_position_falls_back_to_when_we_fetched(auth_client, db_session):
     """positions.py already reads `quote.quote_time or quote.fetched_at`. That
     fallback was dead code while the providers always supplied a value; it is
     now the normal path for yfinance, and it has to actually work."""
-    from app.models.enums import DataSource
+    from app.enums import DataSource
     from app.models.market import MarketQuote
     from app.models.mixins import utcnow
     from app.models.position import Position

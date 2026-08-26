@@ -12,7 +12,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, event, text
 
 from alembic import command
-from app.models.enums import ChannelType, DataSource, NotificationStatus, OrderSide
+from app.enums import ChannelType, DataSource, NotificationStatus, OrderSide
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel
 from app.models.order import Order

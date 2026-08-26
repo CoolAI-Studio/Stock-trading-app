@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from app.models.enums import ChannelType
+from app.enums import ChannelType
 from app.schemas.common import UtcDatetime
 
 

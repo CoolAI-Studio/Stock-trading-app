@@ -21,7 +21,7 @@ was refused.
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services import symbol_search
 from app.services.symbol_search import normalise, search
 

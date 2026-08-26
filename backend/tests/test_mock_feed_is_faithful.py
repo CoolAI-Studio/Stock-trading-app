@@ -27,7 +27,7 @@ WHAT IT REFUSES, AND WHY THOSE:
 
 from decimal import Decimal
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Timeframe
 from app.services.market_data.providers.mock_provider import MockProvider
 

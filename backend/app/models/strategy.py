@@ -6,7 +6,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.models.enums import DataSource, NotificationStatus, OrderSide
+from app.enums import DataSource, NotificationStatus, OrderSide
 from app.models.mixins import TimestampMixin, utcnow
 
 # Generic fallback for source that declares no `self.warmup_bars`. Named

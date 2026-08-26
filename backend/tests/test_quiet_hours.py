@@ -17,7 +17,7 @@ from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from app.models.enums import ChannelType, NotificationStatus, OrderSide, OrderSource, OrderStatus
+from app.enums import ChannelType, NotificationStatus, OrderSide, OrderSource, OrderStatus
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.order import Order
 from app.models.user import User

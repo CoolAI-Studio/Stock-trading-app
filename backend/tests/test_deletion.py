@@ -17,7 +17,7 @@ the answer is 拒絕, which keeps the record. Only decided-and-inert rows go.
 from datetime import timedelta
 from decimal import Decimal
 
-from app.models.enums import (
+from app.enums import (
     ChannelType,
     NotificationStatus,
     OrderSide,

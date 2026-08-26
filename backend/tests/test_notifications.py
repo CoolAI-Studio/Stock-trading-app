@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.user import User
 from app.services.events import Event

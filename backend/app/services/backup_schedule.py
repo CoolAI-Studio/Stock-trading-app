@@ -20,8 +20,8 @@ from email.message import EmailMessage
 
 from sqlalchemy.orm import Session
 
+from app.enums import ChannelType
 from app.models.backup import BackupSchedule
-from app.models.enums import ChannelType
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel
 from app.models.user import User

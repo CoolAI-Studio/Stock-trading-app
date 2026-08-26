@@ -17,7 +17,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.models.enums import ChannelType, OrderSide, OrderSource, OrderStatus
+from app.enums import ChannelType, OrderSide, OrderSource, OrderStatus
 from app.models.notification import NotificationChannel
 from app.models.order import Order
 from app.models.strategy import Strategy

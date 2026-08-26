@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.models.enums import OrderSide, OrderSource, OrderStatus
+from app.enums import OrderSide, OrderSource, OrderStatus
 from app.models.risk import RiskSettings
 from app.models.user import User
 from app.services.signals import SignalIn, create_pending_order

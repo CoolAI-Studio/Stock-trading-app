@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.market import MarketQuote
 from app.models.mixins import utcnow
 from app.services import bar_store

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
 from app.services import symbol_search
 

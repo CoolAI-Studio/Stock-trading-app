@@ -28,7 +28,7 @@ is behind a login and can therefore say how long, how many, and which.
 
 from datetime import UTC, datetime, timedelta
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.user import User
 
@@ -101,7 +101,7 @@ def test_it_names_the_symbols_that_have_no_price(auth_client, db_session, monkey
     """
     from decimal import Decimal
 
-    from app.models.enums import DataSource
+    from app.enums import DataSource
     from app.models.strategy import Strategy
     from app.models.user import User
     from app.services import worker_health

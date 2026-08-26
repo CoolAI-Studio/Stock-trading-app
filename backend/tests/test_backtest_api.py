@@ -9,9 +9,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.enums import DataSource
 from app.main import app
 from app.models.backtest import BacktestRun
-from app.models.enums import DataSource
 from app.services.backtest import MAX_BACKTEST_BARS
 from app.services.market_data.base import Bar, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service

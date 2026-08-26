@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.enums import OrderStatus
+from app.enums import OrderStatus
 from app.models.market import MarketQuote
 from app.models.order import Order
 from app.models.position import Position

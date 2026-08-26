@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import currency_for
 
 _DATA = Path(__file__).resolve().parent.parent / "data" / "tw_listings.json"
@@ -619,7 +619,7 @@ def market_mismatch(symbol: str, data_source) -> str | None:
     holding a .TW listing is certain. A seven-character symbol ending in USDT
     being a US ticker is certain. Everything else passes.
     """
-    from app.models.enums import DataSource
+    from app.enums import DataSource
 
     text = normalise(symbol)
     if not text:

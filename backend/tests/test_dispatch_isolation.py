@@ -17,7 +17,7 @@ as plain integers and a bad timezone string on the user row reaches
 `zoneinfo.ZoneInfo` inside the calculation.
 """
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.notification import NotificationChannel, NotificationLog
 from app.services.events import Event
 from app.services.notification.base import SendResult

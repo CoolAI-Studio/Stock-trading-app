@@ -21,7 +21,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.models.enums import OrderSide, OrderStatus
+from app.enums import OrderSide, OrderStatus
 from app.models.order import Order
 from app.models.strategy import Strategy
 

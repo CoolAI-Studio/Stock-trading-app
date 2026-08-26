@@ -24,7 +24,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.services import market_loop

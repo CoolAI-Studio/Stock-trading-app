@@ -2,7 +2,7 @@ import random
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services import symbol_search
 from app.services.market_data.base import (
     Bar,

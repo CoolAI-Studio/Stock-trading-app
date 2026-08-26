@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.enums import OrderSide, OrderSource, OrderStatus
+from app.enums import OrderSide, OrderSource, OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.position import Position

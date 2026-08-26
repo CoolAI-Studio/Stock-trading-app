@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.db.session import get_db
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.user import User
 from app.schemas.market import (
     AvailableIndicators,

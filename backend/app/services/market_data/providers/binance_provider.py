@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 
 import httpx
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Bar, BarFetchError, Quote, Timeframe, currency_for
 
 _TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"

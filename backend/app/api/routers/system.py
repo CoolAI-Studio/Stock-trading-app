@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_active_user
 from app.config import settings
 from app.db.session import get_db
-from app.models.enums import NotificationStatus
+from app.enums import NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationLog
 from app.models.position import Position

@@ -14,7 +14,7 @@ from sqlalchemy import DateTime
 
 import app.models  # noqa: F401  -- registers every table on Base.metadata
 from app.db.base import Base
-from app.models.enums import OrderSide, OrderSource, OrderStatus
+from app.enums import OrderSide, OrderSource, OrderStatus
 from app.models.order import Order
 from app.models.position import Position
 

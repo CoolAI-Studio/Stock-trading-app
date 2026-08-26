@@ -36,7 +36,7 @@ only thing that makes that impossible to ship.
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import (
     SUPPORTED_TIMEFRAMES,
     Timeframe,

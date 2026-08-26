@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services import market_calendar as cal
 
 # This file is the calendar's own test: the conftest fixture that stubs it

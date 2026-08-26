@@ -81,7 +81,7 @@ def _hold(auth_client, symbol: str, quantity: str, cost: str) -> None:
 
 
 def _quote(db_session, symbol: str, price: str) -> None:
-    from app.models.enums import DataSource
+    from app.enums import DataSource
     from app.models.market import MarketQuote
     from app.models.mixins import utcnow
 

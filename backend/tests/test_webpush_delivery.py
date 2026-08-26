@@ -154,7 +154,7 @@ def test_a_vapid_fault_is_not_blamed_on_the_device(code):
     JWT. Neither is fixable on the phone -- and the advice given was to delete
     the subscription and make a new one, which throws away the only working
     thing in the picture."""
-    from app.models.enums import ChannelType
+    from app.enums import ChannelType
     from app.services.notification.retry import _permanent_explanation
 
     result = _fail_with(code)

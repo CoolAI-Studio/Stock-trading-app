@@ -7,7 +7,7 @@ browsing data -- with nothing on screen ever saying it only existed on that
 one machine.
 """
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.user import User
 
 

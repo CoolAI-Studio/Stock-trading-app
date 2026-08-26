@@ -11,7 +11,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.enums import NotificationStatus, OrderSide
+from app.enums import NotificationStatus, OrderSide
 from app.models.mixins import utcnow
 from app.models.strategy import Strategy, StrategyAlert
 from app.services import risk_resolver

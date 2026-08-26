@@ -15,7 +15,7 @@ Yahoo 上沒有——任何用 mock 寫的測試都不會看到那個失敗，�
 
 import pytest
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import BarFetchError, Timeframe
 from app.services.market_data.providers.mock_provider import MockProvider
 

@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 
 
 class BarFetchError(Exception):

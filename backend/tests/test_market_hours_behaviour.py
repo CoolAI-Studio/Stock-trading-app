@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models.enums import DataSource, OrderSide, OrderSource, OrderStatus
+from app.enums import DataSource, OrderSide, OrderSource, OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.position import Position

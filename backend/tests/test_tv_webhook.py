@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 
 from app.api.routers import webhooks
-from app.models.enums import OrderStatus
+from app.enums import OrderStatus
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.webhook import TradingViewWebhookLog

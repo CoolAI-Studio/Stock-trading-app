@@ -15,7 +15,7 @@ MEASURED: `system.py` 把 `beat.symbol_gap_sec` 的每一項直接攤開（代�
 
 from decimal import Decimal
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.models.strategy import Strategy
 from app.models.user import User
 from app.services import worker_health

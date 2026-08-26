@@ -23,7 +23,7 @@ that as "reached nobody" would cry wolf every night and train the owner to
 ignore the one that matters.
 """
 
-from app.models.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus
 from app.models.notification import NotificationChannel, NotificationLog
 from app.services.events import Event
 from app.services.notification.dispatcher import handle_event

@@ -20,8 +20,8 @@
 import pytest
 
 from app.api.routers.market import MAX_CHART_BARS
+from app.enums import DataSource
 from app.main import app
-from app.models.enums import DataSource
 from app.services.market_data.base import Bar, Timeframe, max_bars_available
 from app.services.market_data.service import MarketDataService, get_market_data_service
 

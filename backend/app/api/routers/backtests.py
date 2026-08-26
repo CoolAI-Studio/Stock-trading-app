@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_active_user
 from app.api.routers.market import _refuse_unsupported
 from app.db.session import get_db
+from app.enums import DataSource
 from app.models.backtest import BacktestRun
-from app.models.enums import DataSource
 from app.models.strategy import DEFAULT_WARMUP_BARS, Strategy
 from app.models.user import User
 from app.schemas.backtest import (

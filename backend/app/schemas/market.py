@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.schemas.common import MoneyStr, UtcDatetime
 from app.services.market_data.base import MAX_CHART_BARS, Timeframe
 from app.services.market_data.service import DEFAULT_BAR_LIMIT

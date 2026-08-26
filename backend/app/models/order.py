@@ -6,7 +6,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.models.enums import OrderSide, OrderSource, OrderStatus
+from app.enums import OrderSide, OrderSource, OrderStatus
 from app.models.mixins import TimestampMixin
 
 

@@ -14,7 +14,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 from alembic import command
-from app.models.enums import (
+from app.enums import (
     ChannelType,
     DataSource,
     NotificationStatus,

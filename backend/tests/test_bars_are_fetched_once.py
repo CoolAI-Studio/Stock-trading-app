@@ -23,7 +23,7 @@ starting a second fetch. Nothing here asserts on timing -- it counts calls.
 import threading
 import time
 
-from app.models.enums import DataSource
+from app.enums import DataSource
 from app.services.market_data.base import Bar, Timeframe
 from app.services.market_data.service import MarketDataService
 
