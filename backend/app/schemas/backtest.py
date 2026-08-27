@@ -265,3 +265,37 @@ class SweepResultRead(BaseModel):
     rows: list[SweepRowRead]
     notes: list[str] = Field(default_factory=list)
     truncated_note: str | None = None
+
+
+class WalkForwardRequest(SweepRunRequest):
+    """一次掃描請求，外加怎麼切分。
+
+    繼承 SweepRunRequest：滾動前進的每一段裡面跑的**就是**一次掃描，而兩邊如果各有
+    一套欄位，總有一天會有一個只加在其中一邊。
+    """
+
+    # 每一段用幾根挑參數、幾根驗證、下一段往前推幾根。
+    train_bars: int = Field(default=250, ge=10)
+    test_bars: int = Field(default=60, ge=5)
+    step_bars: int = Field(default=60, ge=1)
+
+
+class WalkForwardFoldRead(BaseModel):
+    index: int
+    train_from: int
+    train_to: int
+    test_from: int
+    test_to: int
+    chosen_params: dict
+    # 訓練段的成績和驗證段的成績**擺在一起**。分開看都沒有意義：落差才是過度配適的量。
+    train_summary: BacktestSummaryRead | None = None
+    test_summary: BacktestSummaryRead | None = None
+    note: str | None = None
+
+
+class WalkForwardResultRead(BaseModel):
+    symbol: str
+    timeframe: str
+    bars_total: int
+    folds: list[WalkForwardFoldRead]
+    notes: list[str] = Field(default_factory=list)

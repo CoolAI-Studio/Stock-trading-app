@@ -78,6 +78,7 @@ def run(
     bars: list[Bar],
     grid: dict[str, list],
     stored_warmup_bars: int = 0,
+    warmup_override: int | None = None,
     assumptions: BacktestAssumptions | None = None,
     on_bars_used: Callable[[int], None] | None = None,
 ) -> SweepResult:
@@ -114,7 +115,9 @@ def run(
         on_bars_used(len(bars))
 
     try:
-        answer = strategy_pool.sweep(source_code, combos, bars, stored_warmup_bars)
+        answer = strategy_pool.sweep(
+            source_code, combos, bars, stored_warmup_bars, warmup_override=warmup_override
+        )
     except StrategyWorkerError as exc:
         raise SweepError(f"這份策略程式碼跑不起來，所以整個網格都掃不了：{exc}") from exc
 

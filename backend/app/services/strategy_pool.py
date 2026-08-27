@@ -387,6 +387,7 @@ def sweep(
     param_sets: list[dict],
     bars: list[Bar],
     stored_warmup_bars: int,
+    warmup_override: int | None = None,
 ) -> dict:
     """一整個參數網格，在子行程裡跑完。
 
@@ -436,7 +437,12 @@ def sweep(
         # 要一直有東西回來，就不會被這個上限打斷。
         per_combo = max(1.0, settings.STRATEGY_BACKTEST_TIMEOUT_SEC / 4)
         batch = worker.sweep(
-            source_code, remaining, wires, stored_warmup_bars, min(left, per_combo)
+            source_code,
+            remaining,
+            wires,
+            stored_warmup_bars,
+            min(left, per_combo),
+            warmup_override=warmup_override,
         )
         rows.extend(batch["rows"])
         done = len(batch["rows"])

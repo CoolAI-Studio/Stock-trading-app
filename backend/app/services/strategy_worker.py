@@ -310,6 +310,7 @@ class StrategyWorker:
         bars: list[dict],
         stored_warmup_bars: int,
         timeout: float,
+        warmup_override: int | None = None,
     ) -> dict:
         """一整個網格，**邊跑邊收**。
 
@@ -341,6 +342,7 @@ class StrategyWorker:
                             "param_sets": param_sets,
                             "bars": bars,
                             "stored_warmup_bars": stored_warmup_bars,
+                            "warmup_override": warmup_override,
                         }
                     )
                     + "\n"

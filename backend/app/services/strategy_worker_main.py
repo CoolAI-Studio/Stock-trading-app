@@ -225,7 +225,17 @@ def _handle(message: dict) -> dict:
                 _emit({"params": params, "error": f"{type(exc).__name__}: {exc}"})
                 continue
 
-            if loaded.entry_point == "on_bar":
+            # warmup_override 是**呼叫端自己畫的線**，用在滾動前進上。
+            #
+            # 平常由 effective_warmup 決定，而它的規則是「原始碼宣告的贏」——那對
+            # 單次回測是對的（暖身根數是指標的性質，作者最清楚）。但滾動前進要的
+            # 是「被測的剛好是那一段，不多不少」：一支宣告 warmup_bars = 0 的策
+            # 略會讓那幾根本該當暖身的 K 棒被算進成績，而它們來自訓練期——分數就
+            # 混進了樣本內的資料，看起來卻完全正常。
+            override = message.get("warmup_override")
+            if override is not None:
+                warmup = int(override)
+            elif loaded.entry_point == "on_bar":
                 warmup = effective_warmup(loaded, message["stored_warmup_bars"])
             else:
                 warmup = 0

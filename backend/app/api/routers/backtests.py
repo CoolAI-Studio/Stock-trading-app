@@ -18,8 +18,11 @@ from app.schemas.backtest import (
     SweepResultRead,
     SweepRowRead,
     SweepRunRequest,
+    WalkForwardFoldRead,
+    WalkForwardRequest,
+    WalkForwardResultRead,
 )
-from app.services import param_sweep, strategy_pool
+from app.services import param_sweep, strategy_pool, walk_forward
 from app.services.backtest import (
     MAX_BACKTEST_BARS,
     BacktestError,
@@ -413,4 +416,97 @@ def sweep_backtest(
         ],
         notes=swept.notes,
         truncated_note=swept.truncated_note,
+    )
+
+
+@router.post("/walk-forward", response_model=WalkForwardResultRead)
+def walk_forward_backtest(
+    payload: WalkForwardRequest,
+    db: Session = Depends(get_db),
+    service: MarketDataService = Depends(get_market_data_service),
+    user: User = Depends(get_current_active_user),
+) -> WalkForwardResultRead:
+    """每一段各挑一次參數，然後拿它沒看過的下一截去驗證。
+
+    這是 /sweep 那句警語的解藥：掃描問「這組參數在這段歷史上表現如何」，這裡問「它
+    在**沒看過的資料**上還剩多少」。第一個問題的答案永遠找得到——網格夠大，總有一格
+    好看；第二個才是使用者真正想知道的。
+
+    K 棒一樣抓一次、所有段共用。每段各抓一次的話，兩次抓取之間上游做一次除權調整，
+    訓練段和驗證段就跑在兩組不同的價格上，而整個「有沒有過度配適」的結論會失效。
+    """
+    strategy = (
+        None if payload.strategy_id is None else _resolve_strategy(db, user, payload.strategy_id)
+    )
+    source_code = payload.source_code if strategy is None else strategy.source_code
+
+    try:
+        described = strategy_pool.describe(source_code)
+    except StrategyWorkerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"這份策略程式碼無法通過驗證，因此不能做滾動前進：{exc}",
+        ) from exc
+
+    symbol = payload.symbol or (strategy.symbol if strategy else described["symbol"])
+    data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
+    timeframe = _resolve_timeframe(
+        payload.timeframe,
+        described["entry_point"],
+        Timeframe(described["timeframe"]),
+        data_source,
+    )
+    stop_loss_pct, take_profit_pct = _resolve_exit_thresholds(db, user, payload, strategy)
+    _guard_range(payload, timeframe)
+
+    bars = load_backtest_bars(
+        service,
+        symbol=symbol,
+        timeframe=timeframe,
+        data_source=data_source,
+        start=payload.start,
+        end=payload.end,
+    )
+
+    stored_warmup = payload.warmup_bars
+    if stored_warmup is None:
+        stored_warmup = strategy.warmup_bars if strategy else DEFAULT_WARMUP_BARS
+
+    try:
+        report = walk_forward.run(
+            source_code=source_code,
+            bars=bars,
+            grid=payload.grid,
+            train=payload.train_bars,
+            test=payload.test_bars,
+            step=payload.step_bars,
+            stored_warmup_bars=stored_warmup,
+            assumptions=payload.to_assumptions(
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct
+            ),
+        )
+    except (walk_forward.WalkForwardError, param_sweep.SweepError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return WalkForwardResultRead(
+        symbol=symbol,
+        timeframe=timeframe.value,
+        bars_total=len(bars),
+        folds=[
+            WalkForwardFoldRead(
+                index=fold.index,
+                train_from=fold.train[0],
+                train_to=fold.train[1],
+                test_from=fold.test[0],
+                test_to=fold.test[1],
+                chosen_params=fold.chosen_params,
+                train_summary=fold.train_summary,
+                test_summary=fold.test_summary,
+                note=fold.note,
+            )
+            for fold in report.folds
+        ],
+        notes=report.notes,
     )
