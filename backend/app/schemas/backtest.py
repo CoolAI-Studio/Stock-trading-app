@@ -235,3 +235,33 @@ class BacktestRunDetail(BacktestRunRead):
     source_code: str
     code_hash: str
     result: BacktestResultRead
+
+
+class SweepRunRequest(BacktestRunRequest):
+    """一次回測請求，外加一個要掃的參數網格。
+
+    刻意繼承 BacktestRunRequest：掃描的每一列都必須跟單次回測**在完全相同的條件下**
+    跑出來，不然表上的數字跟回測頁對不起來，而沒有人會把兩邊擺在一起比對。繼承讓那
+    件事變成結構上的，不是靠記得同步兩份欄位。
+    """
+
+    # {"window": [5, 10, 20], "threshold": [1.0, 1.5]} -> 6 組
+    grid: dict[str, list[float | int | bool | str]] = Field(default_factory=dict)
+
+
+class SweepRowRead(BaseModel):
+    params: dict
+    summary: BacktestSummaryRead | None = None
+    # 這一列為什麼沒有結果。**不是零分，是沒有答案**——兩者在一張排名表上差很多。
+    error: str | None = None
+
+
+class SweepResultRead(BaseModel):
+    symbol: str
+    timeframe: str
+    bars_total: int
+    first_bar_at: datetime | None = None
+    last_bar_at: datetime | None = None
+    rows: list[SweepRowRead]
+    notes: list[str] = Field(default_factory=list)
+    truncated_note: str | None = None

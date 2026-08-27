@@ -634,75 +634,47 @@ class _Described:
         self.timeframe = Timeframe(replayed["timeframe"])
 
 
-def run_backtest(
-    *,
-    source_code: str,
-    bars: list[Bar],
-    symbol: str | None = None,
-    timeframe: Timeframe | None = None,
-    assumptions: BacktestAssumptions | None = None,
-    stored_warmup_bars: int = DEFAULT_WARMUP_BARS,
-    params: dict | None = None,
-) -> BacktestResult:
-    """Replay `bars` through `source_code` and score the result.
+@dataclass
+class Scored:
+    """計分的結果。回測和參數掃描共用**同一份**，這一點是重點。
 
-    Takes the candles rather than fetching them, so the walk-forward loop --
-    the part that must never see a future bar -- has no I/O in it and can be
-    tested against a handful of hand-written candles. load_backtest_bars() is
-    the other half.
-
-    `symbol` and `timeframe` are what the run was ASKED for. They are stated
-    rather than read off the candles because a symbol with no history has no
-    candles to read them off, and a result labelled with the source's
-    `self.symbol` in that case would name a stock the run never looked at.
-
-    每一種失敗都是 BacktestError：編不起來、暖身就爆、回放中途爆掉、跑不完被中
-    止、子行程起不來。刻意收斂成一種——呼叫端要做的事都一樣（回一個使用者讀得懂
-    的 422），而分成五個 except 只是多五個可能忘記寫的地方。訊息裡說得出是哪一
-    種。
+    如果掃描自己算一套，同一組參數在掃描表上和在回測頁上會給出不同的數字——而那
+    種不一致沒有東西會說：兩邊各自看起來都很正常，只有把它們擺在一起才看得出來，
+    而沒有人會把它們擺在一起。
     """
-    assumptions = assumptions or BacktestAssumptions()
 
-    # 使用者的程式碼跑在子行程裡（#18）。整段回放**一次往返**：編譯、暖身、逐根
-    # 拿訊號，全部在那一邊，回來的是一串字串。
-    #
-    # 這樣切而不是把整個 run_backtest 搬過去，是因為底下沒有一行碰使用者的程式碼
-    # ——帳戶模擬和計分只看訊號和 K 棒。整段搬過去要讓 BacktestAssumptions 和
-    # BacktestResult 都過一次 JSON，序列化面大得多，而延遲的目標（一次往返）一樣
-    # 達得到。
-    #
-    # 參數用的是實際在跑的那一組，或掃描的候選組：拿作者的預設值去回測，評的是
-    # 一份沒有人在跑的程式碼。
-    try:
-        replayed = strategy_pool.replay(source_code, params or {}, bars, stored_warmup_bars)
-    except StrategyTimedOut as exc:
-        # 這是搬進子行程之後**新**得到的保護，值得說清楚。原本只有「每一根 K 棒
-        # 兩秒」，沒有總額：一支每根都卡住的策略，五千根就是兩小時多的請求執行
-        # 緒，而且每一根都留下一條殺不掉的執行緒。
-        budget = settings.STRATEGY_BACKTEST_TIMEOUT_SEC
-        raise BacktestError(f"這份策略跑不完，回測已經中止（上限 {budget:.0f} 秒）：{exc}") from exc
-    except WorkerUnavailable as exc:
-        # 基礎設施的問題，不是這份程式碼的問題。講清楚是哪一種，不然使用者會去改
-        # 一段其實沒有錯的程式碼。
-        raise BacktestError(f"跑回測的行程暫時起不來，請再試一次：{exc}") from exc
-    except StrategyWorkerError as exc:
-        # 編不起來。原本是 StrategyValidationError，訊息在子行程那端轉成文字了
-        # ——例外送不過 JSON 管線。
-        raise BacktestError(f"這份策略程式碼無法通過驗證，因此不能回測：{exc}") from exc
-    loaded = _Described(replayed)
-    warmup = replayed["warmup"]
+    summary: BacktestSummary
+    notes: list[str]
+    trades: list
+    equity_curve: list[EquityPoint]
+    tested: list[Bar]
 
+
+def score_signals(
+    *,
+    bars: list[Bar],
+    warmup: int,
+    signals_in: list[str],
+    assumptions: BacktestAssumptions,
+    failed_at: int | None = None,
+    error: str | None = None,
+) -> Scored:
+    """把一串訊號放進模擬帳戶裡，算出績效。
+
+    這裡**完全不碰使用者的程式碼**——訊號已經在子行程裡跑出來了（#18）。留在這個
+    行程裡的只有算術：成交、成本、停損停利、權益曲線。
+
+    抽成獨立函式是為了讓參數掃描用同一份。見 Scored 的說明。
+    """
     notes: list[str] = []
     # The candles that may produce a signal. Everything before them is warm-up
     # and is replayed with its signals thrown away -- market_loop's rule, and
     # the reason a strategy's first backtested decision lands on the same
     # candle it would have landed on live.
     tested = bars[warmup:]
-    replayed_signals = replayed["signals"]
-    failed_at = replayed["failed_at"]
 
     if failed_at == -1:
-        raise BacktestError(f"策略在暖身階段就發生錯誤：{replayed['error']}")
+        raise BacktestError(f"策略在暖身階段就發生錯誤：{error}")
 
     if not tested:
         notes.append(_no_data_note(bars, warmup))
@@ -765,10 +737,8 @@ def run_backtest(
         #    不含帳戶）。爆掉的那根在這裡才變成訊息——子行程只回得了索引，時間在
         #    這邊。
         if failed_at is not None and index == failed_at:
-            raise BacktestError(
-                f"策略在 {bar.timestamp:%Y-%m-%d %H:%M} 這根 K 棒發生錯誤：{replayed['error']}"
-            )
-        signal = replayed_signals[index]
+            raise BacktestError(f"策略在 {bar.timestamp:%Y-%m-%d %H:%M} 這根 K 棒發生錯誤：{error}")
+        signal = signals_in[index]
 
         # 4) Act on the signal. Nothing can still be in flight here -- step 1
         #    executes and clears any order from the previous candle before the
@@ -838,6 +808,84 @@ def run_backtest(
         curve=equity_curve,
     )
 
+    return Scored(
+        summary=summary,
+        notes=notes,
+        trades=account.trades,
+        equity_curve=equity_curve,
+        tested=tested,
+    )
+
+
+def run_backtest(
+    *,
+    source_code: str,
+    bars: list[Bar],
+    symbol: str | None = None,
+    timeframe: Timeframe | None = None,
+    assumptions: BacktestAssumptions | None = None,
+    stored_warmup_bars: int = DEFAULT_WARMUP_BARS,
+    params: dict | None = None,
+) -> BacktestResult:
+    """Replay `bars` through `source_code` and score the result.
+
+    Takes the candles rather than fetching them, so the walk-forward loop --
+    the part that must never see a future bar -- has no I/O in it and can be
+    tested against a handful of hand-written candles. load_backtest_bars() is
+    the other half.
+
+    `symbol` and `timeframe` are what the run was ASKED for. They are stated
+    rather than read off the candles because a symbol with no history has no
+    candles to read them off, and a result labelled with the source's
+    `self.symbol` in that case would name a stock the run never looked at.
+
+    每一種失敗都是 BacktestError：編不起來、暖身就爆、回放中途爆掉、跑不完被中
+    止、子行程起不來。刻意收斂成一種——呼叫端要做的事都一樣（回一個使用者讀得懂
+    的 422），而分成五個 except 只是多五個可能忘記寫的地方。訊息裡說得出是哪一
+    種。
+    """
+    assumptions = assumptions or BacktestAssumptions()
+
+    # 使用者的程式碼跑在子行程裡（#18）。整段回放**一次往返**：編譯、暖身、逐根
+    # 拿訊號，全部在那一邊，回來的是一串字串。
+    #
+    # 這樣切而不是把整個 run_backtest 搬過去，是因為底下沒有一行碰使用者的程式碼
+    # ——帳戶模擬和計分只看訊號和 K 棒。整段搬過去要讓 BacktestAssumptions 和
+    # BacktestResult 都過一次 JSON，序列化面大得多，而延遲的目標（一次往返）一樣
+    # 達得到。
+    #
+    # 參數用的是實際在跑的那一組，或掃描的候選組：拿作者的預設值去回測，評的是
+    # 一份沒有人在跑的程式碼。
+    try:
+        replayed = strategy_pool.replay(source_code, params or {}, bars, stored_warmup_bars)
+    except StrategyTimedOut as exc:
+        # 這是搬進子行程之後**新**得到的保護，值得說清楚。原本只有「每一根 K 棒
+        # 兩秒」，沒有總額：一支每根都卡住的策略，五千根就是兩小時多的請求執行
+        # 緒，而且每一根都留下一條殺不掉的執行緒。
+        budget = settings.STRATEGY_BACKTEST_TIMEOUT_SEC
+        raise BacktestError(f"這份策略跑不完，回測已經中止（上限 {budget:.0f} 秒）：{exc}") from exc
+    except WorkerUnavailable as exc:
+        # 基礎設施的問題，不是這份程式碼的問題。講清楚是哪一種，不然使用者會去改
+        # 一段其實沒有錯的程式碼。
+        raise BacktestError(f"跑回測的行程暫時起不來，請再試一次：{exc}") from exc
+    except StrategyWorkerError as exc:
+        # 編不起來。原本是 StrategyValidationError，訊息在子行程那端轉成文字了
+        # ——例外送不過 JSON 管線。
+        raise BacktestError(f"這份策略程式碼無法通過驗證，因此不能回測：{exc}") from exc
+    loaded = _Described(replayed)
+    warmup = replayed["warmup"]
+
+    scored = score_signals(
+        bars=bars,
+        warmup=warmup,
+        signals_in=replayed["signals"],
+        assumptions=assumptions,
+        failed_at=replayed["failed_at"],
+        error=replayed.get("error"),
+    )
+    notes = scored.notes
+    tested = scored.tested
+
     return BacktestResult(
         strategy_name=loaded.name,
         symbol=symbol or (bars[0].symbol if bars else loaded.symbol),
@@ -853,9 +901,9 @@ def run_backtest(
         assumptions=assumptions,
         assumption_notes=_assumption_notes(assumptions, loaded.entry_point, warmup),
         notes=notes,
-        trades=account.trades,
-        equity_curve=equity_curve,
-        summary=summary,
+        trades=scored.trades,
+        equity_curve=scored.equity_curve,
+        summary=scored.summary,
     )
 
 

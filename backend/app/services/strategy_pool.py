@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -379,3 +380,75 @@ def replay(source_code: str, params: dict, bars: list[Bar], stored_warmup_bars: 
             stored_warmup_bars,
             settings.STRATEGY_BACKTEST_TIMEOUT_SEC,
         )
+
+
+def sweep(
+    source_code: str,
+    param_sets: list[dict],
+    bars: list[Bar],
+    stored_warmup_bars: int,
+) -> dict:
+    """一整個參數網格，在子行程裡跑完。
+
+    ＊ 卡住的那一組要被**跳過**，不是讓它毀掉整張表。
+
+    子行程是依序跑的，所以卡在第一組會讓後面每一組都沒機會。「邊跑邊回」只救得了
+    已經跑完的那幾組——對這個功能來說那等於沒用：使用者掃參數的時候，網格裡有一整
+    區會卡住是**常態**（`window=0` 觸發一個除不完的迴圈就夠了），而他送掃描的原因
+    正是他還不知道哪一區是合理的。
+
+    所以逾時之後：殺掉子行程、把當時在跑的那一組標成跑不完、換一個乾淨的子行程接
+    著跑剩下的。每一次重建至少消耗掉一組，所以這個迴圈一定會結束。
+
+    ＊ K 棒每一批只序列化一次。
+
+    那才是「一次往返」真正買到的東西，而它在重建之後仍然成立——重送的是剩下那幾組
+    要用的同一批 K 棒。
+    """
+    global _scratch
+    wires = [bar_to_wire(bar) for bar in bars]
+    deadline = time.monotonic() + settings.STRATEGY_BACKTEST_TIMEOUT_SEC
+
+    remaining = list(param_sets)
+    rows: list[dict] = []
+    timed_out = False
+
+    while remaining:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            timed_out = True
+            break
+
+        with _scratch_lock:
+            if _scratch is None or not _scratch.alive:
+                _scratch = StrategyWorker(timeout_sec=WARMUP_TIMEOUT_SEC)
+                _scratch.start()
+            worker = _scratch
+
+        # 每一組的停滯上限：**沒有任何一組可以吃掉整場的預算。**
+        #
+        # 不設的話，第一組卡死就把總預算用完，後面每一組都變成「沒跑完」——一格
+        # 壞掉定義了整張表，而那正是這個設計要避免的事。四分之一是個取捨：夠一
+        # 組正常的回測跑完（一場回測本來就只有幾十毫秒的算術），又留得下至少三
+        # 次重試的空間。
+        #
+        # 量的是「多久沒有回報下一組」，不是「這批跑完了沒」。所以一批五十組只
+        # 要一直有東西回來，就不會被這個上限打斷。
+        per_combo = max(1.0, settings.STRATEGY_BACKTEST_TIMEOUT_SEC / 4)
+        batch = worker.sweep(
+            source_code, remaining, wires, stored_warmup_bars, min(left, per_combo)
+        )
+        rows.extend(batch["rows"])
+        done = len(batch["rows"])
+        remaining = remaining[done:]
+
+        if not batch["timed_out"]:
+            break
+
+        if remaining:
+            # 卡住的就是下一個還沒回報的那一組。標掉它，剩下的用新的子行程繼續。
+            stuck, remaining = remaining[0], remaining[1:]
+            rows.append({"params": stuck, "error": "這一組跑不完，已經中止"})
+        timed_out = True
+
+    return {"rows": rows, "timed_out": timed_out and bool(remaining), "unrun": remaining}

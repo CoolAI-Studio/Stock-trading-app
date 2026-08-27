@@ -303,6 +303,67 @@ class StrategyWorker:
             stored_warmup_bars=stored_warmup_bars,
         )
 
+    def sweep(
+        self,
+        source_code: str,
+        param_sets: list[dict],
+        bars: list[dict],
+        stored_warmup_bars: int,
+        timeout: float,
+    ) -> dict:
+        """一整個網格，**邊跑邊收**。
+
+        跟其他指令不一樣：子行程每跑完一組就回一行，最後才回一行 done。
+
+        為什麼不是等它全部跑完再回一次——**一組卡死不可以毀掉整張表**。網格共用
+        一個期限的話，第一組如果是 `while True`，後面五十九組的結果就跟著不見了。
+        而使用者送掃描的原因，往往正是他還不知道哪組參數是合理的，所以裡面有一組
+        跑不完是**預期中**的事，不是例外。
+
+        K 棒仍然只序列化一次——那才是一次往返真正買到的東西。
+        """
+        # `timeout` 是**每一組**的停滯上限，不是整批的總時間：每收到一列就重新
+        # 計時。一批五十組只要一直有東西回來就不會被打斷，而卡住的那一組最多只
+        # 花掉一份。
+        rows: list[dict] = []
+        with self._lock:
+            if not self.alive:
+                raise WorkerUnavailable("策略子行程不在了")
+            process = self._process
+            if process is None or process.stdin is None:
+                raise WorkerUnavailable("策略子行程不在了")
+            try:
+                process.stdin.write(
+                    json.dumps(
+                        {
+                            "cmd": "sweep",
+                            "source_code": source_code,
+                            "param_sets": param_sets,
+                            "bars": bars,
+                            "stored_warmup_bars": stored_warmup_bars,
+                        }
+                    )
+                    + "\n"
+                )
+                process.stdin.flush()
+            except Exception as exc:  # noqa: BLE001
+                self._kill()
+                raise WorkerUnavailable(f"送不出去：{exc}") from exc
+
+            while True:
+                try:
+                    answer = self._read_line(timeout)
+                except StrategyTimedOut:
+                    # 收到多少算多少。卡住的是下一組還沒回報的那一個，而只有呼叫
+                    # 端知道那是哪一組——它手上才有原本送出去的清單。
+                    return {"rows": rows, "timed_out": True}
+                if answer.get("ok") is not True:
+                    raise StrategyWorkerError(answer.get("error") or "策略子行程沒有說原因")
+                if "row" in answer:
+                    rows.append(answer["row"])
+                    continue
+                return {"rows": rows, "timed_out": False}
+
     def validate(self, source_code: str, prices: list[float], timeout: float) -> dict:
         return self.request("validate", timeout=timeout, source_code=source_code, prices=prices)
 

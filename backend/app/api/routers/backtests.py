@@ -15,8 +15,11 @@ from app.schemas.backtest import (
     BacktestRunDetail,
     BacktestRunRead,
     BacktestRunRequest,
+    SweepResultRead,
+    SweepRowRead,
+    SweepRunRequest,
 )
-from app.services import strategy_pool
+from app.services import param_sweep, strategy_pool
 from app.services.backtest import (
     MAX_BACKTEST_BARS,
     BacktestError,
@@ -327,3 +330,87 @@ def clear_backtests(
     deleted = query.delete(synchronize_session=False)
     db.commit()
     return {"deleted": deleted}
+
+
+@router.post("/sweep", response_model=SweepResultRead)
+def sweep_backtest(
+    payload: SweepRunRequest,
+    db: Session = Depends(get_db),
+    service: MarketDataService = Depends(get_market_data_service),
+    user: User = Depends(get_current_active_user),
+) -> SweepResultRead:
+    """同一支策略、一整個參數網格，排出一張表。
+
+    K 棒抓**一次**，整個網格共用。這是這張表全部的價值所在：列與列之間的差異必須
+    只來自參數，只要抓取跟著動，那張表就從「哪組參數比較好」變成「哪組參數在哪批
+    資料上比較好」——而後者看起來一模一樣，沒有任何東西會說。
+
+    走的是跟單次回測完全相同的抓取與計分路徑，理由同上：兩邊如果各算一套，同一組
+    參數會在掃描表和回測頁給出不同的數字，而那種不一致只有把兩邊擺在一起才看得出
+    來，而沒有人會把它們擺在一起。
+    """
+    strategy = (
+        None if payload.strategy_id is None else _resolve_strategy(db, user, payload.strategy_id)
+    )
+    source_code = payload.source_code if strategy is None else strategy.source_code
+
+    try:
+        described = strategy_pool.describe(source_code)
+    except StrategyWorkerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"這份策略程式碼無法通過驗證，因此不能掃描：{exc}",
+        ) from exc
+
+    symbol = payload.symbol or (strategy.symbol if strategy else described["symbol"])
+    data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
+    timeframe = _resolve_timeframe(
+        payload.timeframe,
+        described["entry_point"],
+        Timeframe(described["timeframe"]),
+        data_source,
+    )
+    stop_loss_pct, take_profit_pct = _resolve_exit_thresholds(db, user, payload, strategy)
+    _guard_range(payload, timeframe)
+
+    bars = load_backtest_bars(
+        service,
+        symbol=symbol,
+        timeframe=timeframe,
+        data_source=data_source,
+        start=payload.start,
+        end=payload.end,
+    )
+
+    stored_warmup = payload.warmup_bars
+    if stored_warmup is None:
+        stored_warmup = strategy.warmup_bars if strategy else DEFAULT_WARMUP_BARS
+
+    try:
+        swept = param_sweep.run(
+            source_code=source_code,
+            bars=bars,
+            grid=payload.grid,
+            stored_warmup_bars=stored_warmup,
+            assumptions=payload.to_assumptions(
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct
+            ),
+        )
+    except param_sweep.SweepError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return SweepResultRead(
+        symbol=symbol,
+        timeframe=timeframe.value,
+        bars_total=len(bars),
+        first_bar_at=bars[0].timestamp if bars else None,
+        last_bar_at=bars[-1].timestamp if bars else None,
+        rows=[
+            SweepRowRead(params=row.params, summary=row.summary, error=row.error)
+            for row in swept.rows
+        ],
+        notes=swept.notes,
+        truncated_note=swept.truncated_note,
+    )

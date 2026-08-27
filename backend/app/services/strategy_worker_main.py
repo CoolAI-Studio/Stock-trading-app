@@ -195,6 +195,73 @@ def _handle(message: dict) -> dict:
             "declared_params": loaded.declared_params,
         }
 
+    if command == "sweep":
+        # 一整個參數網格，**一次往返**。
+        #
+        # K 棒送一次，所有組共用。這不只是省頻寬：每組各送一次的話，就得有人保證
+        # 那幾份是同一批，而「保證兩份資料一樣」是一個沒有人會去檢查的條件。送一
+        # 次就沒有那個條件——它們是同一個 list。
+        from app.services.strategy_runtime import effective_warmup
+
+        compile_strategy = _sandbox()
+        bars = [_bar_from_wire(wire) for wire in message["bars"]]
+
+        def _emit(row):
+            """跑完一組就送回去，不等整個網格跑完。
+
+            **一組卡死不可以毀掉整張表。** 一次往返在延遲上是對的（K 棒只序列化一
+            次），但如果連結果也等到最後才送，那整個網格就共用一個期限——而使用者
+            送掃描的原因，往往正是他還不知道哪組參數是合理的，所以裡面有一組跑不
+            完是**預期中**的事，不是例外。
+
+            邊跑邊回讓卡住只損失還沒跑的那幾組。父行程收到多少算多少。
+            """
+            _reply(True, row=row)
+
+        for params in message["param_sets"]:
+            try:
+                loaded = compile_strategy(message["source_code"], params=params)
+            except Exception as exc:  # noqa: BLE001
+                _emit({"params": params, "error": f"{type(exc).__name__}: {exc}"})
+                continue
+
+            if loaded.entry_point == "on_bar":
+                warmup = effective_warmup(loaded, message["stored_warmup_bars"])
+            else:
+                warmup = 0
+
+            instance = loaded.instance
+            call = instance.on_bar if loaded.entry_point == "on_bar" else None
+
+            def _one(bar, call=call, instance=instance):
+                return call(bar) if call else instance.on_tick(bar.close)
+
+            try:
+                for bar in bars[:warmup]:
+                    _one(bar)
+                signals = [str(_one(bar)) for bar in bars[warmup:]]
+            except Exception as exc:  # noqa: BLE001
+                # 一組壞掉只壞那一組。掃描是 N 倍的曝險：跑一次的時候一支壞策略
+                # 只毀掉一次回測，掃描的時候它會毀掉整張表——而使用者送掃描的原
+                # 因，往往正是他還不知道哪組參數是合理的。
+                _emit({"params": params, "error": f"{type(exc).__name__}: {exc}"})
+                continue
+
+            _emit(
+                {
+                    "params": params,
+                    "error": None,
+                    "warmup": warmup,
+                    "signals": signals,
+                    "name": loaded.name,
+                    "symbol": loaded.symbol,
+                    "entry_point": loaded.entry_point,
+                    "timeframe": loaded.timeframe.value,
+                }
+            )
+
+        return {"done": True}
+
     if command == "replay":
         # 一場回測的訊號，**一次往返**。
         #
