@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** 建置期注入的 commit。見 vite.config.ts 和 src/lib/buildInfo.ts。 */
+declare const __APP_COMMIT__: string

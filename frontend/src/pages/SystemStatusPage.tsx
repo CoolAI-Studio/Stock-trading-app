@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../lib/api'
+import { FRONTEND_COMMIT } from '../lib/buildInfo'
 import type { SystemStatus } from '../lib/types'
 
 /**
@@ -162,6 +163,27 @@ export function SystemStatusPage() {
           更新裡可能包含安全修補——去你部署後端的平台按一次重新部署就會拿到。
         </p>
       )}
+      {/*
+        前端自己是不是舊的。
+
+        後端會自己更新（追 stable、autoDeploy，#52）。前端不會——Vercel 的 clone
+        會複製一份 repo，來源就斷了。我們替那份複製品加了每天同步的工作流程，但它
+        可能不會發生：Actions 沒開、同步有衝突、或者他改過那份程式碼。
+
+        而那些情況下畫面上什麼都不會變。**「後端最新、前端很舊」正是最可能發生、
+        也最不容易被發現的組合**，所以它要自己一格，跟後端那格分開講。
+
+        比不出來（latest 是 null，或這次建置沒有帶 commit）就什麼都不說——誤報會讓
+        他去重新部署一個其實沒有問題的東西。
+      */}
+      {update?.latest && FRONTEND_COMMIT && FRONTEND_COMMIT !== update.latest && (
+        <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+          <strong>你看到的這個畫面是舊的。</strong>
+          它是 <code>{FRONTEND_COMMIT}</code>，最新的是 <code>{update.latest}</code>。
+          前端跟後端是分開部署的，所以它們可以不同步——去你部署前端的平台按一次重新部署。
+        </p>
+      )}
+
       {update && update.behind === null && (
         <p className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-400">
           查不到有沒有新版{update.why ? `：${update.why}` : '。'}

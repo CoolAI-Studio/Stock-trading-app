@@ -4,7 +4,17 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
+// 這一次建置的 commit，注入成一個建置期常數。
+//
+// Vercel 會給 VERCEL_GIT_COMMIT_SHA；自己建的話設 APP_GIT_COMMIT。兩個都沒有就是
+// 空字串，而 buildInfo.ts 會把它讀成「不知道」——**不是「最新」**。
+const APP_COMMIT =
+  process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.APP_GIT_COMMIT ?? ''
+
 export default defineConfig({
+  define: {
+    __APP_COMMIT__: JSON.stringify(APP_COMMIT),
+  },
   plugins: [react(), tailwindcss()],
   test: {
     environment: 'jsdom',

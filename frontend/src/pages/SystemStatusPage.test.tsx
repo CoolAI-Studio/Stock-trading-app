@@ -206,8 +206,11 @@ describe('他這一份是不是舊的', () => {
     // 這一頁是他唯一看得到「我是不是落後了」的地方。
     show({ update: { running: 'aaaaaaa', latest: 'bbbbbbb', behind: true, why: null } })
 
-    expect(await screen.findByText(/有新版/)).toBeInTheDocument()
-    expect(screen.getByText(/bbbbbbb/)).toBeInTheDocument()
+    // closest('p')：findByText 命中的是 <strong>，而版本號在它的兄弟節點上。
+    const notice = (await screen.findByText(/有新版可以更新/)).closest('p')
+    // 只看後端那一格。前端有它自己的一格，而兩個都舊的時候兩個都會出現——
+    // 那是對的（它們是兩個獨立的部署），但這一條問的是後端。
+    expect(notice).toHaveTextContent('bbbbbbb')
   })
 
   it('「不知道」不可以畫成「已經是最新」', async () => {
@@ -240,5 +243,40 @@ describe('他這一份是不是舊的', () => {
     show({ update: { running: 'aaaaaaa', latest: 'bbbbbbb', behind: true, why: null } })
 
     expect(await screen.findByText(/一切正常/)).toBeInTheDocument()
+  })
+})
+
+vi.mock('../lib/buildInfo', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/buildInfo')>()),
+  FRONTEND_COMMIT: 'aaaaaaa',
+}))
+
+describe('前端自己是不是舊的', () => {
+  it('前端落後的時候要說出來 —— 就算後端是最新的', async () => {
+    // Vercel 的 clone 會複製一份 repo，來源就斷了。我們加了每天同步的工作流程，
+    // 但它可能不會發生（Actions 沒開、有衝突、他改過程式碼），而那些情況下畫面上
+    // 什麼都不會變——他看到的是一個正常運作的 app，只是它是三個月前的。
+    //
+    // 後端會自己更新（#52），所以「後端最新、前端很舊」正是最可能發生的組合，
+    // 也是最不容易被發現的。
+    show({ update: { running: 'bbbbbbb', latest: 'bbbbbbb', behind: false, why: null } })
+
+    expect(await screen.findByText(/畫面.*舊|前端.*舊/)).toBeInTheDocument()
+  })
+
+  it('前端跟得上的時候，不要在畫面上多說一句', async () => {
+    show({ update: { running: 'aaaaaaa', latest: 'aaaaaaa', behind: false, why: null } })
+
+    await screen.findByText(/一切正常/)
+    expect(screen.queryByText(/畫面.*舊|前端.*舊/)).not.toBeInTheDocument()
+  })
+
+  it('不知道最新是哪一版的時候，不要說前端舊了', async () => {
+    // 比不出來就不要下結論。誤報會讓他去重新部署一個其實沒有問題的東西，而重新
+    // 部署有它自己的風險。
+    show({ update: { running: 'aaaaaaa', latest: null, behind: null, why: '問不到。' } })
+
+    await screen.findByText(/問不到/)
+    expect(screen.queryByText(/畫面.*舊|前端.*舊/)).not.toBeInTheDocument()
   })
 })

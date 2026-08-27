@@ -1,0 +1,84 @@
+# 把這一份副本從上游的 `stable` 更新上來。
+#
+# ＊ 為什麼需要它。
+#
+# 後端是直接從我們的 repo 部署的，所以它追 `stable` 就會自己更新（#52）。前端不
+# 是：Vercel 的部署按鈕走的是 `new/clone`，會在使用者的 GitHub 帳號下**複製一份
+# repo**，然後從那一份部署。複製品跟上游沒有任何關係——我們修掉的安全洞，它一個都
+# 拿不到。
+#
+# 這個工作流程住在那份複製品裡（它是 repo 的一部分，所以會被一起複製過去），每天把
+# 上游 `stable` 的內容快轉過來。Vercel 看到 push 就會重新部署。
+#
+# ＊ 為什麼是 `stable` 而不是 `main`。
+#
+# `main` 上的東西可能還沒跑完測試。而 `stable` 只在 ci.yml 的 deploy job 最後一步
+# 前進，那時候已經確認過：所有測試綠燈、部署真的送達、送達的那一版在線上是健康的。
+# 換句話說，那一版我們自己已經跑過了。
+#
+# ＊ 只快轉，絕不覆蓋。
+#
+# 使用者可能改過那份程式碼——那是他的權利，這是他自己的副本。快轉失敗的時候這裡
+# 就停下來並說清楚，不會用 --force 把他的東西蓋掉。
+#
+# ＊ 就算它從來沒有跑起來，也不會安靜地失敗。
+#
+# 他的 repo 上 Actions 可能是關的、可能有衝突、可能他根本沒看這一頁。所以前端會把
+# 自己的版本印在系統狀態頁上跟上游比（src/lib/buildInfo.ts）——**沒更新到這件事在
+# app 裡看得見**，而不是只在一個他不會打開的 Actions 分頁裡。
+
+name: 從上游更新這一份副本
+
+on:
+  schedule:
+    # 每天一次。安全修補值得早一點拿到，但更頻繁只是在製造沒有內容的部署。
+    - cron: "17 4 * * *"
+  # 不想等一天的時候，在 Actions 分頁按一下就好。
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: 快轉到上游的 stable
+    runs-on: ubuntu-latest
+    # **絕對不要在上游自己身上跑。**
+    #
+    # 在原始的 repo 上，這會把 main 快轉到 stable——而 stable 永遠落後於 main（它
+    # 只在部署成功後前進）。那不是快轉，會失敗；但就算失敗，一個每天在自己身上跑
+    # 的同步工作流程也只是噪音。
+    if: github.repository != 'CoolAI-Studio/Stock-trading-app'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 拿上游的 stable
+        run: |
+          git remote add upstream https://github.com/CoolAI-Studio/Stock-trading-app.git
+          git fetch upstream stable
+
+      - name: 快轉，不覆蓋
+        run: |
+          current="$(git rev-parse HEAD)"
+          upstream="$(git rev-parse upstream/stable)"
+
+          if [ "$current" = "$upstream" ]; then
+            echo "::notice::已經是最新的（${upstream:0:7}），沒有要做的事。"
+            exit 0
+          fi
+
+          # 快轉的定義：我現在的 HEAD 是上游那一版的祖先。不是的話，代表這份副本
+          # 上有上游沒有的東西——他改過程式碼。那要他自己決定怎麼合，不是我們決定。
+          if ! git merge-base --is-ancestor "$current" "$upstream"; then
+            echo "::error::這一份副本上有上游沒有的修改，所以不能直接快轉。"
+            echo "你自己改過這份程式碼嗎？如果是，要由你決定怎麼把上游的更新合進來。"
+            echo "如果不是，最省事的做法是重新從上游部署一份。"
+            echo "  你的版本：${current:0:7}"
+            echo "  上游 stable：${upstream:0:7}"
+            exit 1
+          fi
+
+          git push origin "$upstream:$GITHUB_REF_NAME"
+          echo "::notice::更新到 ${upstream:0:7}。前端會自動重新部署。"
