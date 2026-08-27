@@ -53,6 +53,42 @@ interface SweepRow {
   error: string | null
 }
 
+interface Fold {
+  index: number
+  train_from: number
+  train_to: number
+  test_from: number
+  test_to: number
+  chosen_params: Record<string, number | boolean | string>
+  train_summary: SweepSummary | null
+  test_summary: SweepSummary | null
+  note: string | null
+}
+
+interface WalkForwardResult {
+  symbol: string
+  timeframe: string
+  bars_total: number
+  folds: Fold[]
+  notes: string[]
+}
+
+interface PortfolioLeg {
+  symbol: string
+  summary: SweepSummary | null
+  opened: number
+  skipped_for_cash: number
+  note: string | null
+}
+
+interface PortfolioResult {
+  timeframe: string
+  legs: PortfolioLeg[]
+  equity_curve: { timestamp: string; cash: string; equity: string; stale_symbols: string[] }[]
+  summary: SweepSummary | null
+  notes: string[]
+}
+
 interface SweepResult {
   symbol: string
   timeframe: string
@@ -77,6 +113,9 @@ export function TuningPage() {
   const [end, setEnd] = useState(todayMinus(0))
   const [problem, setProblem] = useState<string | null>(null)
   const [result, setResult] = useState<SweepResult | null>(null)
+  const [forward, setForward] = useState<WalkForwardResult | null>(null)
+  const [symbols, setSymbols] = useState('')
+  const [basket, setBasket] = useState<PortfolioResult | null>(null)
 
   const strategies = useQuery({
     queryKey: ['strategies'],
@@ -113,6 +152,7 @@ export function TuningPage() {
       }),
     onSuccess: (data) => {
       setResult(data)
+      setForward(null)
       setProblem(null)
     },
     onError: (err: unknown) => {
@@ -121,7 +161,47 @@ export function TuningPage() {
     },
   })
 
-  function submit() {
+  const walkForward = useMutation({
+    mutationFn: (grid: Record<string, (number | boolean | string)[]>) =>
+      api.post<WalkForwardResult>('/api/backtests/walk-forward', {
+        strategy_id: Number(selected),
+        start: `${start}T00:00:00Z`,
+        end: `${end}T23:59:59Z`,
+        grid,
+      }),
+    onSuccess: (data) => {
+      setForward(data)
+      setResult(null)
+      setProblem(null)
+    },
+    onError: (err: unknown) => {
+      setForward(null)
+      setProblem(err instanceof Error ? err.message : '滾動前進失敗了，請再試一次。')
+    },
+  })
+
+  const portfolio = useMutation({
+    mutationFn: (list: string[]) =>
+      api.post<PortfolioResult>('/api/backtests/portfolio', {
+        strategy_id: Number(selected),
+        start: `${start}T00:00:00Z`,
+        end: `${end}T23:59:59Z`,
+        symbols: list,
+      }),
+    onSuccess: (data) => {
+      setBasket(data)
+      setResult(null)
+      setForward(null)
+      setProblem(null)
+    },
+    onError: (err: unknown) => {
+      setBasket(null)
+      setProblem(err instanceof Error ? err.message : '投組回測失敗了，請再試一次。')
+    },
+  })
+
+  /** 兩顆按鈕共用的網格。掃描和滾動前進問的是不同的問題，但問法一樣。 */
+  function buildGrid(): Record<string, (number | boolean | string)[]> | null {
     const grid: Record<string, (number | boolean | string)[]> = {}
     for (const [name] of knobs) {
       const parsed = parseValues(values[name] ?? '')
@@ -132,10 +212,11 @@ export function TuningPage() {
     if (Object.keys(grid).length === 0) {
       setProblem('至少填一個參數要試的值，例如 5, 10, 20。')
       setResult(null)
-      return
+      setForward(null)
+      return null
     }
     setProblem(null)
-    sweep.mutate(grid)
+    return grid
   }
 
   const rows = result?.rows ?? []
@@ -216,20 +297,186 @@ export function TuningPage() {
           </label>
         ))}
 
-        <button
-          type="button"
-          className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
-          onClick={submit}
-          disabled={sweep.isPending}
-        >
-          {sweep.isPending ? '掃描中…' : '開始掃描'}
-        </button>
+        <label className="block text-sm">
+          <span className="mb-1 block text-slate-300">
+            一起跑的代號
+            <span className="ml-2 text-xs text-slate-500">
+              同一支策略，這幾支各跑一份，但<strong>共用一個錢包</strong>。你打的順序有意義。
+            </span>
+          </span>
+          <input
+            type="text"
+            aria-label="代號"
+            placeholder="2330.TW, AAPL"
+            className="w-full rounded border border-slate-700 bg-slate-900 p-2"
+            value={symbols}
+            onChange={(event) => setSymbols(event.target.value)}
+          />
+        </label>
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="rounded bg-sky-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            onClick={() => {
+              const grid = buildGrid()
+              if (grid) sweep.mutate(grid)
+            }}
+            disabled={sweep.isPending || walkForward.isPending}
+          >
+            {sweep.isPending ? '掃描中…' : '開始掃描'}
+          </button>
+          {/*
+            第二顆按鈕在第一顆旁邊，不是在另一頁。
+
+            掃描的結果會附一句「挑最高的那一格通常是雜訊，拿去跑一次滾動前進」，
+            而那句話如果要他去別的地方才做得到，他就不會做。解藥要放在病灶旁邊。
+          */}
+          <button
+            type="button"
+            className="rounded border border-sky-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            onClick={() => {
+              const grid = buildGrid()
+              if (grid) walkForward.mutate(grid)
+            }}
+            disabled={sweep.isPending || walkForward.isPending}
+          >
+            {walkForward.isPending ? '驗證中…' : '滾動前進：在沒看過的資料上試'}
+          </button>
+          <button
+            type="button"
+            className="rounded border border-slate-600 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            onClick={() => {
+              const list = symbols
+                .split(/[,\s]+/)
+                .map((piece) => piece.trim().toUpperCase())
+                .filter(Boolean)
+              if (list.length === 0) {
+                setProblem('先填要一起跑的代號，例如 2330.TW, AAPL。')
+                return
+              }
+              setProblem(null)
+              portfolio.mutate(list)
+            }}
+            disabled={portfolio.isPending}
+          >
+            {portfolio.isPending ? '跑投組中…' : '這幾支一起跑（共用一份資金）'}
+          </button>
+        </div>
       </section>
 
       {problem && (
         <p role="status" className="text-sm text-amber-400">
           {problem}
         </p>
+      )}
+
+      {basket && (
+        <section className="space-y-3">
+          {basket.notes.map((note) => (
+            <p key={note} role="note" className="rounded bg-slate-800 p-3 text-sm text-amber-300">
+              {note.replaceAll('**', '')}
+            </p>
+          ))}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-slate-400">
+                <tr>
+                  <th className="p-2">代號</th>
+                  <th className="p-2">建倉</th>
+                  {/*
+                    這一欄是共用錢包**唯一**新增的資訊。沒有它的話，一個因為排在
+                    後面而幾乎沒買到的代號，看起來會像一支訊號很少的爛策略——而使
+                    用者要做的決定正是「哪一支該拿掉」。
+                  */}
+                  <th className="p-2">錢不夠沒買到</th>
+                  <th className="p-2">單獨跑的淨損益</th>
+                </tr>
+              </thead>
+              <tbody>
+                {basket.legs.map((leg) => (
+                  <tr key={leg.symbol} className="border-t border-slate-800">
+                    <td className="p-2">{leg.symbol}</td>
+                    {leg.note ? (
+                      <td className="p-2 text-slate-500" colSpan={3}>
+                        {leg.note}
+                      </td>
+                    ) : (
+                      <>
+                        <td className="p-2">{leg.opened}</td>
+                        <td className="p-2">
+                          {leg.skipped_for_cash > 0 ? (
+                            <span className="text-amber-300">
+                              {leg.skipped_for_cash} 次因為錢不夠沒買到
+                            </span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="p-2">{leg.summary?.net_pnl ?? '—'}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {basket.summary && (
+            <p className="text-sm text-slate-300">
+              整個投組：淨損益 <strong>{basket.summary.net_pnl}</strong>、
+              成交 {basket.summary.trade_count} 次。
+            </p>
+          )}
+        </section>
+      )}
+
+      {forward && (
+        <section className="space-y-3">
+          {forward.notes.map((note) => (
+            <p key={note} role="note" className="rounded bg-slate-800 p-3 text-sm text-amber-300">
+              {note.replaceAll('**', '')}
+            </p>
+          ))}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-slate-400">
+                <tr>
+                  <th className="p-2">第幾段</th>
+                  <th className="p-2">挑到的參數</th>
+                  {/*
+                    兩欄並排，而不是兩張表。分開看都沒有意義：訓練段上好看是應該
+                    的（那組參數就是在那裡挑出來的），真正的問題是它在沒看過的資
+                    料上還剩多少，而那只有並排才問得出來。
+                  */}
+                  <th className="p-2">訓練段（挑參數用）</th>
+                  <th className="p-2">沒看過的那一段</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forward.folds.map((fold) => (
+                  <tr key={fold.index} className="border-t border-slate-800">
+                    <td className="p-2">{fold.index + 1}</td>
+                    <td className="p-2">
+                      {Object.entries(fold.chosen_params)
+                        .map(([name, value]) => `${name}=${String(value)}`)
+                        .join('、')}
+                    </td>
+                    <td className="p-2">{fold.train_summary?.net_pnl ?? '—'}</td>
+                    <td className="p-2">
+                      {fold.test_summary?.net_pnl ?? '—'}
+                      {fold.note && (
+                        <span className="ml-2 text-xs text-slate-500">{fold.note}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {result && (
