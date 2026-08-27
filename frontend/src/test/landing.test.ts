@@ -334,3 +334,68 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     }
   })
 })
+
+describe('引導：#47 的驗收條件，逐項守住', () => {
+  it('本機和雲端是並排的選擇，不是塞在抽屜裡的補述', () => {
+    // 票上的驗收條件第一項。並排不是版面美感：看 docker-compose.yml，本機那條路
+    // 用的是 SQLite，**完全不需要外部資料庫**。所以這個選擇決定了這一整頁要不要
+    // 做，而它必須在使用者開始做之前就看得到。
+    const page = read('database.html')
+
+    expect(visible(page), '本機那條路在收起來的時候看不到').toMatch(/自己的電腦|本機/)
+    expect(visible(page), '雲端那條路在收起來的時候看不到').toMatch(/雲端/)
+    // 票上指名要寫的那一件事：這個決定的真正差異。
+    expect(visible(page), '沒說電腦關機會怎樣 —— 那是這個決定的全部重點').toMatch(
+      /關機|睡著|沒開/,
+    )
+  })
+
+  it('那個選擇要在申請步驟之前出現 —— 擺在後面就不是選擇了', () => {
+    const page = read('database.html')
+    const choiceAt = page.search(/自己的電腦/)
+    const signupAt = page.indexOf('neon.tech')
+
+    expect(choiceAt, '頁面上找不到本機那條路').toBeGreaterThan(-1)
+    expect(signupAt, '頁面上找不到申請資料庫的步驟').toBeGreaterThan(-1)
+    expect(choiceAt, '選擇出現在申請步驟後面').toBeLessThan(signupAt)
+  })
+
+  it('選了本機的人要被告知這一頁剩下的不用做', () => {
+    // 原本沒有這句話。他看完兩張卡、選了「自己的電腦」，接下來整頁都是 Neon／
+    // Supabase 手把手，而唯一的出口是「下一步：安裝 →」。一個不知道資料庫是什麼
+    // 的人會以為那些步驟他也得做——一整頁白做的工，而且做到一半卡住就放棄了。
+    const text = strip(read('database.html'))
+
+    expect(text, '沒告訴選本機的人可以跳過').toMatch(/不用申請|不需要申請|可以跳過|不必做|跳到/)
+
+    // 而且那句話必須是真的。跟 docker compose up 那一條同一個教訓：驗文案不驗事
+    // 實，就會寫出一句通過測試的假話。
+    const yaml = readFileSync(resolve(DOCS, '..', 'docker-compose.yml'), 'utf-8')
+    expect(yaml, '頁面說本機不用申請資料庫，但 compose 指向外部資料庫').toMatch(
+      /DATABASE_URL:\s*sqlite:/,
+    )
+  })
+
+  it('說得出資料庫是唯一一件要去別人家拿的東西', () => {
+    // CLAUDE.md 的第一條規則：app 生得出來的（加密金鑰、推播金鑰）就在設定頁給
+    // 按鈕；真的生不出來的（資料庫在別人家的服務上）就老實說，不要假裝。
+    //
+    // 對一個不是工程師的人，「還有幾樣要這樣自己去弄？」是他決定要不要開始的依
+    // 據。說不清楚，他會以為每一格空白都是一趟這樣的旅程。
+    const text = strip(read('database.html'))
+
+    expect(text, '沒說這是唯一一件要去別人家拿的東西').toMatch(/唯一/)
+  })
+
+  it('AI 不設定會怎樣，要說出「少掉什麼」和「什麼照常」', () => {
+    // 票上的驗收條件第四項是「AI 是選配，**並說得出不設定會怎樣**」。
+    //
+    // 使用者來這個 app 的原因是提醒。他讀到「先跳過也行」的時候真正想知道的是
+    // 「提醒還會不會動」，而答案是「會，一模一樣」。不寫出來他只能猜，而猜錯的
+    // 方向是放棄。
+    const text = strip(read('index.html'))
+
+    expect(text, '沒說少掉的是哪些功能').toMatch(/產生策略|幫你寫|問它|問 AI/)
+    expect(text, '沒說提醒本身照常 —— 而那才是他來的原因').toMatch(/照常|不受影響|一樣/)
+  })
+})
