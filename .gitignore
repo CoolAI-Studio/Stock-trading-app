@@ -43,3 +43,11 @@ repomix-output.*
 dist-firstrun/
 # 同一關每次跑都會重建的資料庫。
 backend/firstrun_walk.db
+
+# Terraform（infra/）。**state 是明文的**，而且裡面有 Neon 給的那一串
+# postgresql://使用者:密碼@… ——這個 repo 是公開的。
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
