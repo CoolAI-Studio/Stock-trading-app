@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { StrategyVersions } from '../components/StrategyVersions'
 import { ApiError, api } from '../lib/api'
 import { DeleteButton } from '../components/DeleteButton'
 import { SymbolInput } from '../components/SymbolInput'
@@ -590,6 +591,21 @@ function EditStrategyForm({ strategy, onDone }: { strategy: Strategy; onDone: ()
           取消
         </button>
       </div>
+
+      {/*
+        版本歷史就在編輯器裡，不在另一頁。
+
+        他會需要它的那一刻，正是他剛剛（或 AI 剛剛）把程式碼改壞、而畫面上還開著
+        編輯器的那一刻。要他關掉編輯器、去找另一個地方，就是在他最慌的時候多加一
+        步——而多的那一步他不會走。
+
+        currentSource 用編輯器裡的那一份而不是 detailQuery 的：他可能正在打字，而
+        「跟我現在看到的差在哪裡」才是他要問的問題。
+      */}
+      <section className="space-y-2 border-t border-slate-800 pt-4">
+        <h3 className="text-sm font-semibold text-slate-300">改壞了可以回去</h3>
+        <StrategyVersions strategyId={strategy.id} currentSource={sourceCode ?? ''} />
+      </section>
     </div>
   )
 }
