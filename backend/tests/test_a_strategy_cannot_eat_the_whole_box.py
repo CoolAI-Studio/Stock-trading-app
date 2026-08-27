@@ -156,7 +156,13 @@ def test_setting_the_limit_never_raises():
         print(apply_limits(64 * 1024 * 1024))
     """)
     done = subprocess.run(
-        [sys.executable, "-c", code], cwd=BACKEND, capture_output=True, text=True, timeout=120
+        [sys.executable, "-c", code],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
     )
 
     assert done.returncode == 0, done.stderr[-2000:]
@@ -206,7 +212,13 @@ def test_a_limit_too_tight_to_load_the_sandbox_gets_lifted():
         print("OK")
     """)
     done = subprocess.run(
-        [sys.executable, "-c", code], cwd=BACKEND, capture_output=True, text=True, timeout=180
+        [sys.executable, "-c", code],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
     )
 
     assert done.returncode == 0, done.stderr[-3000:]

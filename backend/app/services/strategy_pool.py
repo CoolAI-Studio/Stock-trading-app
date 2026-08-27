@@ -424,6 +424,19 @@ def sweep(
             if _scratch is None or not _scratch.alive:
                 _scratch = StrategyWorker(timeout_sec=WARMUP_TIMEOUT_SEC)
                 _scratch.start()
+                # **暖機，而且不算進下面那個每組的停滯上限裡。**
+                #
+                # 這裡是重建路徑：上一批有一組卡住，子行程被殺掉了。新的子行程要
+                # 啟動（約 190 毫秒）再載入沙箱（約 886 毫秒）——加起來超過一秒，
+                # 而每組的停滯上限可能就是一秒出頭。
+                #
+                # 不先暖的話，那筆重建的錢會被算在「下一組」頭上，於是它被判定成
+                # 卡住、被跳過、又觸發一次重建——**每一組都被前一組的重建成本殺
+                # 掉**，而網格越大越糟。在 Render 免費方案（0.1 顆 CPU）上沙箱載
+                # 入會慢好幾倍，那條路上一組都跑不完。
+                #
+                # preload 用它自己的 20 秒預算，跟策略的執行時間無關。
+                _scratch.preload(timeout=WARMUP_TIMEOUT_SEC)
             worker = _scratch
 
         # 每一組的停滯上限：**沒有任何一組可以吃掉整場的預算。**

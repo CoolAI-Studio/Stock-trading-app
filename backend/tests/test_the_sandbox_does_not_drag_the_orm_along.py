@@ -48,7 +48,13 @@ def _modules_after_importing(target: str) -> set[str]:
         print(",".join(sorted({{name.split(".")[0] for name in sys.modules}})))
     """)
     done = subprocess.run(
-        [sys.executable, "-c", code], cwd=BACKEND, capture_output=True, text=True, timeout=120
+        [sys.executable, "-c", code],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
     )
     assert done.returncode == 0, done.stderr[-2000:]
     return set(done.stdout.strip().split(","))
@@ -88,6 +94,8 @@ def test_no_orm_models(target: str):
         cwd=BACKEND,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert done.stdout.strip() == "False", f"import {target} 觸發了 app.models 套件"

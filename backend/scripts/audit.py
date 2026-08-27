@@ -529,6 +529,8 @@ class Audit:
                 text=True,
                 check=True,
                 timeout=60,
+                encoding="utf-8",
+                errors="replace",
             )
         except Exception as exc:  # noqa: BLE001
             self.note(f"倉庫掃描跳過：git ls-files 失敗（{type(exc).__name__}）")

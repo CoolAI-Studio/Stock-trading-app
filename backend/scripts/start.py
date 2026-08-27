@@ -53,6 +53,15 @@ def run_migrations() -> str | None:
             cwd=BACKEND_ROOT,
             capture_output=True,
             text=True,
+            # **一定要指定編碼。** text=True 在 Windows 上會用系統的字碼頁（這台
+            # 開發機是 cp950）去解，而子行程寫的是 UTF-8——那會在讀取的執行緒裡
+            # 丟 UnicodeDecodeError，而它是在**另一條執行緒**上炸的，所以呼叫端
+            # 只拿得到一段空輸出。
+            #
+            # 這裡捕捉的是要顯示給人看的失敗原因，所以解錯碼會讓一次成功的遷移被
+            # 報成失敗——而這個檔案存在的全部理由就是「起得來而且說得出原因」。
+            encoding="utf-8",
+            errors="replace",
             timeout=180,
         )
     except Exception as exc:  # noqa: BLE001 -- 任何失敗都只是「遷移沒跑成」
