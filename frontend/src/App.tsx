@@ -16,6 +16,7 @@ import { BrokerSettingsPage } from './pages/BrokerSettingsPage'
 import { AccountPage } from './pages/AccountPage'
 import { WebhooksPage } from './pages/WebhooksPage'
 import { BacktestPage } from './pages/BacktestPage'
+import { TuningPage } from './pages/TuningPage'
 import { SetupPage } from './pages/SetupPage'
 import { SystemStatusPage } from './pages/SystemStatusPage'
 import { AiSettingsPage } from './pages/AiSettingsPage'
@@ -72,6 +73,7 @@ function App() {
             <Route path="/risk-settings" element={<RiskSettingsPage />} />
             <Route path="/broker-settings" element={<BrokerSettingsPage />} />
             <Route path="/backtest" element={<BacktestPage />} />
+            <Route path="/tuning" element={<TuningPage />} />
             <Route path="/webhooks" element={<WebhooksPage />} />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/system" element={<SystemStatusPage />} />
