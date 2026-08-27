@@ -199,3 +199,46 @@ describe('看不懂的時候問一下', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/401/)
   })
 })
+
+describe('他這一份是不是舊的', () => {
+  it('有新版的時候說出來，而且說得出是哪一版', async () => {
+    // 他的副本是從我們的 repo 部署的，而我們每一次改動都是他機器上的一次更新。
+    // 這一頁是他唯一看得到「我是不是落後了」的地方。
+    show({ update: { running: 'aaaaaaa', latest: 'bbbbbbb', behind: true, why: null } })
+
+    expect(await screen.findByText(/有新版/)).toBeInTheDocument()
+    expect(screen.getByText(/bbbbbbb/)).toBeInTheDocument()
+  })
+
+  it('「不知道」不可以畫成「已經是最新」', async () => {
+    // 這是這個功能最重要的一條。抓不到 GitHub 的時候說成「已經是最新」，會讓他
+    // 錯過安全修補——而那正是他打開這一頁想確認的事。
+    show({
+      update: {
+        running: 'aaaaaaa',
+        latest: null,
+        behind: null,
+        why: '問不到最新版本（ConnectError）。',
+      },
+    })
+
+    expect(await screen.findByText(/問不到|不知道|查不到/)).toBeInTheDocument()
+    expect(screen.queryByText(/已經是最新/)).not.toBeInTheDocument()
+  })
+
+  it('已經是最新的時候，不要在畫面上大聲嚷嚷', async () => {
+    // 一個永遠有話要說的區塊會讓他學會不看它——而真的有新版的那一次，他也不會看。
+    show({ update: { running: 'aaaaaaa', latest: 'aaaaaaa', behind: false, why: null } })
+
+    await screen.findByText(/一切正常/)
+    expect(screen.queryByText(/有新版/)).not.toBeInTheDocument()
+  })
+
+  it('落後不會把這一頁變成紅燈', async () => {
+    // 這一頁的紅燈是給「提醒現在停擺了」用的。把「有新版」也算進去，那個紅燈就
+    // 失去意義，而他會學會忽略它。
+    show({ update: { running: 'aaaaaaa', latest: 'bbbbbbb', behind: true, why: null } })
+
+    expect(await screen.findByText(/一切正常/)).toBeInTheDocument()
+  })
+})

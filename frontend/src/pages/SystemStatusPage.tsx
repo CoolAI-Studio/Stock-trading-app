@@ -137,7 +137,7 @@ export function SystemStatusPage() {
     return <p className="text-slate-500">載入中…</p>
   }
 
-  const { overall, worker, market_data, notifications, assistant_available } = query.data
+  const { overall, worker, market_data, notifications, assistant_available, update } = query.data
   const headline = HEADLINE[overall]
 
   return (
@@ -145,6 +145,29 @@ export function SystemStatusPage() {
       <h1 className="text-xl font-semibold text-slate-100">系統狀態</h1>
 
       <p className={`rounded border px-3 py-2 ${headline.tone}`}>{headline.text}</p>
+
+      {/*
+        他這一份是不是舊的。
+
+        **已經是最新的時候什麼都不說。** 一個永遠有話要說的區塊會讓他學會不看
+        它——而真的有新版的那一次，他也不會看。
+
+        而「不知道」跟「已經是最新」是兩件事，畫面上必須分得出來：說成最新會讓他
+        錯過安全修補，而那正是他打開這一頁想確認的事。
+      */}
+      {update?.behind === true && (
+        <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+          <strong>有新版可以更新。</strong>
+          你這一份是 <code>{update.running}</code>，最新的是 <code>{update.latest}</code>。
+          更新裡可能包含安全修補——去你部署後端的平台按一次重新部署就會拿到。
+        </p>
+      )}
+      {update && update.behind === null && (
+        <p className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-400">
+          查不到有沒有新版{update.why ? `：${update.why}` : '。'}
+          {update.running && <> 你這一份是 <code>{update.running}</code>。</>}
+        </p>
+      )}
 
       <Section title="背景 worker（負責跑策略、盯價格）">
         {worker.enabled ? (

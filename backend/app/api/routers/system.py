@@ -39,7 +39,13 @@ from app.models.notification import NotificationLog
 from app.models.position import Position
 from app.models.strategy import Strategy
 from app.models.user import User
-from app.services import ai_settings, hosting, setup_state, worker_health
+from app.services import (
+    ai_settings,
+    hosting,
+    setup_state,
+    update_check,  # noqa: F401
+    worker_health,
+)
 from app.services.ai_provider import get_ai_provider
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -142,6 +148,12 @@ def system_status(
 ) -> dict[str, Any]:
     beat = worker_health.heartbeat.snapshot()
     overall = _OK
+
+    # 他這一份是不是舊的。
+    #
+    # 刻意**不影響 overall**：落後不是故障。這一頁的紅燈是給「提醒現在停擺了」用
+    # 的，而把「有新版」也算進去會讓那個紅燈失去意義——他會學會忽略它。
+    update = update_check.status()
 
     worker: dict[str, Any] = {
         "enabled": settings.WORKER_ENABLED,
@@ -290,6 +302,8 @@ def system_status(
         # 對 Fly.io 的使用者說「Render 後台」比含糊更糟——他會真的去找那一頁。
         "platform": {"name": host.name, "env_where": host.env_where},
         "assistant_available": _assistant_available(db, user.id),
+        # behind 是 None 的時候代表**不知道**，前端不可以把它畫成「已經是最新」。
+        "update": update,
     }
 
 

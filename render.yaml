@@ -1,16 +1,27 @@
 services:
   - type: web
     name: trading-app-backend
-    # OFF, and CI deploys instead. Render's own auto-deploy fires on PUSH, so
-    # it would ship a commit whose tests have not finished -- and this
-    # project's rule is that CI green is the only green. The deploy job at the
-    # end of .github/workflows/ci.yml calls a Deploy Hook once every job
-    # passes, which is the same automation with the gate in the right place.
+    # 追 `stable`，不是 `main`。
     #
-    # This also ends the manual step: 「按一次 Manual Deploy」 was in the
-    # release path for weeks, and a manual step in a release path is a step
-    # that gets skipped.
-    autoDeploy: false
+    # Render 自己的 auto-deploy 是**在 push 的當下**觸發的，所以直接追 main 會送
+    # 出測試還沒跑完的 commit。這個專案的規則是「CI 綠才算綠」，而那條規則不可以
+    # 因為對象換成使用者就放寬——他沒有 CI，也沒有辦法判斷剛送到他機器上的是什麼。
+    #
+    # `stable` 只在 .github/workflows/ci.yml 的 deploy job **最後一步**前進，而
+    # 那時候已經確認過三件事：所有測試綠燈、部署真的送達、送達的那一版在線上是
+    # 健康的。換句話說——
+    #
+    #     使用者拿到的每一版，都是我們自己的實例已經跑起來而且活著的那一版。
+    #
+    # 我們自己的服務**追 main**，用 Deploy Hook 觸發。那不是不一致，那是分工：
+    # 我們是先當白老鼠的那一個，而 stable 是白老鼠活下來之後才前進的那條線。
+    #
+    # ⚠️ 如果我們自己的服務是由這份 blueprint 管理的，改這個檔案可能會把我們也
+    #    切到 stable。那會讓 CI 的「等它變成這個 commit」那一步逾時而紅——loud，
+    #    不是 silent，而且那一步的錯誤訊息會提到這個可能。修法是在 Render 後台把
+    #    我們那個服務的分支改回 main。
+    autoDeploy: true
+    branch: stable
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend

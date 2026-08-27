@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # 的那種。**只有 POSIX 有效**（Windows 沒有 resource 模組），而線上是 Linux。
     STRATEGY_MEMORY_LIMIT_MB: int = 256
 
+    # 去哪裡問「有沒有新版」。空字串代表關掉。
+    #
+    # 有預設值，所以它不是部署表單上的一格空白（#51 的規則）。問的是 `stable` 分
+    # 支——那是 CI 全綠、部署送達、而且線上健康之後才前進的那條線。
+    UPDATE_CHECK_REPO: str = "CoolAI-Studio/Stock-trading-app"
+
     WS_TICKET_TTL_SECONDS: int = 30
 
     # Closed by default: with registration off, a publicly reachable backend only

@@ -372,6 +372,10 @@ jobs:
     needs: [backend, frontend, first-deploy]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # 只有這個 job 需要寫入權限，而它只用在最後一步：把 stable 移到已經上線且健
+    # 康的那一版。整份工作流程的預設仍然是 contents: read。
+    permissions:
+      contents: write
     # Longer than a build takes, shorter than a stuck one runs. A free-tier
     # image build plus a cold start is a few minutes; twenty-five means the
     # wait below can time out and SAY SO, rather than be killed mid-poll with
@@ -467,6 +471,10 @@ jobs:
           if [ -z "$landed" ]; then
             echo "::error::等了 15 分鐘，線上跑的還不是 $want。部署沒有送達，線上是舊版。"
             echo "去部署平台看這次 build 的紀錄。常見原因：build 失敗，或容器一啟動就死（例如 DATABASE_URL 打錯）。"
+            echo "還有一個：render.yaml 現在寫著 branch: stable（那是給使用者的副本用的）。"
+            echo "如果我們自己的服務被那份 blueprint 同步過去，它會一直部署 stable 的舊版，"
+            echo "而 stable 只在這個 job 成功之後才前進——就會卡在這裡。去 Render 後台把我們"
+            echo "那個服務的分支改回 main。"
             echo "最後一次拿到的回應："
             echo "$body"
             exit 1
@@ -495,3 +503,36 @@ jobs:
           echo "::error::新版上線了，但五分鐘內 /healthz 沒有恢復正常。警告可能是停擺的。"
           echo "$body"
           exit 1
+
+      # --- 使用者拿得到的那一版 -------------------------------------------
+      #
+      # `stable` 是使用者的副本追的分支，而它只在**這裡**前進：所有測試綠燈、
+      # 部署真的送達、而且送達的那一版在線上是健康的。
+      #
+      # 為什麼放在最後而不是測試綠燈之後就移：那樣 `stable` 只代表「測試過」。
+      # 放在這裡，它代表「**我們自己的實例已經跑起來而且活著**」——使用者拿到的
+      # 每一版，我們都先當過白老鼠。這個順序沒有多花任何成本，卻換掉了一整類
+      # 「在 CI 上綠、在真的機器上起不來」的失效。
+      #
+      # 不 force：非快轉會被 GitHub 擋下來並回 422，而那正是我們要的。stable 落
+      # 後於 main 是正常的（它只在部署成功時前進）；stable 跑到 main 前面則代表
+      # 有人手動動過它，那要有人看到，不可以被一個 --force 蓋掉。
+      #
+      # 回滾就是把 stable 移回去。那是這件事唯一的煞車，而它必須是人按的。
+      - name: Move `stable` to what is now live and healthy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          want="$GITHUB_SHA"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/stable" >/dev/null 2>&1; then
+            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/stable"                  -f sha="$want" -F force=false >/dev/null; then
+              echo "::notice::stable → ${want:0:7}（使用者的副本會拿到這一版）"
+            else
+              echo "::error::stable 移不動。非快轉的話 GitHub 會擋——去看 stable 現在指向哪裡，"
+              echo "有人手動動過它嗎？在弄清楚之前，使用者拿到的還是上一版。"
+              exit 1
+            fi
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs"               -f ref="refs/heads/stable" -f sha="$want" >/dev/null
+            echo "::notice::建立了 stable，指向 ${want:0:7}。"
+          fi

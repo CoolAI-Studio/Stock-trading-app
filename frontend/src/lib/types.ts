@@ -637,6 +637,17 @@ export interface SystemStatus {
   /** The one word the page leads with, so 「一切正常」 is readable without
    * decoding the four sections under it. */
   overall: 'ok' | 'warn' | 'fail'
+  /** 他這一份是不是舊的。
+   *
+   * `behind` 是 `null` 代表**不知道**（問不到 GitHub、或這個平台沒告訴 app 它是
+   * 哪一版），而畫面上不可以把它顯示成「已經是最新」——那會讓他錯過安全修補，
+   * 而那正是他打開這一頁想確認的事。 */
+  update?: {
+    running: string | null
+    latest: string | null
+    behind: boolean | null
+    why: string | null
+  }
   /** Whether asking the assistant would produce an answer rather than an
    * error. AI_API_KEY is one more blank in a deploy form and is optional by
    * design, so the box is left out entirely rather than offered and broken. */
