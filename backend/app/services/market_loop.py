@@ -18,6 +18,7 @@ from app.models.user import User
 from app.services import (
     alerts,
     backup_schedule,
+    build_info,
     market_calendar,
     risk,
     risk_resolver,
@@ -153,6 +154,74 @@ def _record_strategy_error(
         }
         events.append(Event(type="strategy.error", data=error_data))
     db.commit()
+
+
+_UPGRADE_MARK = "系統更新之後"
+
+
+def _mark_compiled(db: Session, strategy: Strategy) -> None:
+    """記下這支策略最後一次編譯成功時的版本，並收回更新造成的那句話。"""
+    changed = False
+    running = build_info.commit()
+    if running and strategy.last_compiled_version != running:
+        strategy.last_compiled_version = running
+        changed = True
+    # 那句話是這裡寫的，所以也在這裡收回——而且**只收回那一句**。
+    #
+    # 它裡面有「在修好之前它不會發出任何提醒」，留著就是一句主動誤導的話：策略明明
+    # 已經在跑了。其他來源的 last_error 不碰，那些有它們自己的清除時機。
+    if strategy.last_error and strategy.last_error.startswith(_UPGRADE_MARK):
+        strategy.last_error = None
+        changed = True
+    if changed:
+        db.commit()
+
+
+def _record_compile_failure(
+    db: Session, strategy: Strategy, exc: Exception, events: list[Event]
+) -> None:
+    """編不過。**是他的程式碼壞了，還是我們的更新弄壞的？**
+
+    這個分辨是整條路的重點。走錯邊的後果不對稱：
+
+      當成他的錯（而其實是我們的）→ 二十五秒後策略永久停用，沒有東西會打開它，
+                                    畫面上只寫「停用」。**提醒全面停擺。**
+      當成我們的錯（而其實是他的）→ 那一列一直留著一句錯誤訊息，他看得到。
+
+    所以分界是「它在**上一個版本**編得過嗎」：編得過，就是我們動了什麼；沒編過或
+    版本沒變，就照舊算它的錯——不然「連續五次就停用」這條保護整個消失，而它本來是
+    有理由存在的。
+
+    跟 #18 的 WorkerUnavailable 是同一條原則，只是來源換成我們自己的更新：基礎設施
+    的問題不可以走「停用使用者的東西」那條路。
+    """
+    running = build_info.commit()
+    was = strategy.last_compiled_version
+    upgraded = bool(was) and bool(running) and was != running
+
+    if not upgraded:
+        _record_strategy_error(db, strategy, exc, events)
+        return
+
+    message = (
+        f"{_UPGRADE_MARK}，這支策略編不過了（上一個編得過的版本是 {was}，"
+        f"現在是 {running}）。**這不是你的程式碼的問題**，而且它還開著——"
+        f"但在修好之前它不會發出任何提醒。原因：{exc}"
+    )
+    already_told = strategy.last_error == message
+    strategy.last_run_at = utcnow()
+    strategy.last_error = message
+    db.commit()
+
+    if not already_told:
+        # 一支不會發訊號的策略等於提醒停擺，所以他必須知道。但輪詢五秒一次，每一輪
+        # 都通知會讓他關掉通知——那比不通知更糟。所以只在訊息第一次出現時發。
+        events.append(
+            Event(
+                type="strategy.error",
+                data={"strategy_id": strategy.id, "error": message, "user_id": strategy.user_id},
+            )
+        )
 
 
 def _record_feed_problem(db: Session, strategy: Strategy, detail: str) -> None:
@@ -418,7 +487,11 @@ def tick_once(
                     strategy.id, strategy.source_code, params=strategy.params
                 )
             except Exception as exc:
-                _record_strategy_error(session, strategy, exc, events)
+                _record_compile_failure(session, strategy, exc, events)
+            else:
+                # 編得過就記下版本。這是下一次判斷「是不是我們的更新造成的」唯一的
+                # 依據，而它必須在**成功**的時候寫，不是在失敗的時候猜。
+                _mark_compiled(session, strategy)
 
         symbols_by_source: dict[DataSource, set[str]] = {}
         for strat in strategies:

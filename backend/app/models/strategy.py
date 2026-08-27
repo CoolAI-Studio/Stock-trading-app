@@ -74,6 +74,18 @@ class Strategy(TimestampMixin, Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     consecutive_errors: Mapped[int] = mapped_column(default=0)
+    # 這支策略最後一次**編譯成功**時，跑的是哪一個版本的這個 app。
+    #
+    # 存在的理由只有一個：分辨「這段程式碼一直都壞」和「我們的更新讓它壞掉」。
+    #
+    # 沒有這個分辨的話，一次收緊沙箱（`_ALLOWED_MODULES` 少一個名字、compile 多一
+    # 道檢查）會在部署後二十五秒內把使用者每一支用到那個名字的策略永久停用——輪詢
+    # 五秒一次，連續五次就 is_active = False，而沒有任何東西會把它打開。畫面上只
+    # 寫著「停用」，他不會知道那是我們造成的。
+    #
+    # None 代表它從來沒編過。那種情況照舊算它的錯：一支新策略打錯字就是打錯字，而
+    # 「連續五次就停用」這條保護本來是有理由存在的。
+    last_compiled_version: Mapped[str | None] = mapped_column(String(64), default=None)
 
 
 class StrategyAlert(Base):
