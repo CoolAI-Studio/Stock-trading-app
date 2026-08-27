@@ -11,6 +11,7 @@ from app.enums import DataSource
 from app.models.backtest import BacktestRun
 from app.models.position import Position
 from app.models.strategy import Strategy
+from app.models.strategy_version import StrategyVersion
 from app.models.user import User
 from app.schemas.strategy import (
     SampleStrategyInfo,
@@ -24,6 +25,7 @@ from app.schemas.strategy import (
     StrategyUpdate,
     StrategyValidateRequest,
     StrategyValidateResult,
+    StrategyVersionRead,
     TemplateFieldRead,
     TemplateRead,
 )
@@ -33,6 +35,7 @@ from app.services import (
     strategy_performance,
     strategy_pool,
     strategy_templates,
+    strategy_versions,
     symbol_search,
 )
 from app.services.ai_provider import get_ai_provider
@@ -414,6 +417,10 @@ def create_strategy(
             status_code=status.HTTP_409_CONFLICT, detail="A strategy with this name already exists"
         ) from exc
     db.refresh(strategy)
+    # **建立的時候就存第一版。** 只在「變更」時存的話，他第一次編輯就永久失去了原
+    # 始的那一份——而那通常正是他想回去的那一版。
+    strategy_versions.record(db, strategy)
+    db.commit()
     return strategy
 
 
@@ -471,6 +478,14 @@ def update_strategy(
         # makes the change take effect on the very next tick rather than
         # whenever something else happened to invalidate the entry.
         release_strategy(strategy.id)
+
+    # 只有**內容**變更才留一版。改名字、改代號不算——每一次無關的編輯都存一版的
+    # 話，他要找的那一版會被埋在幾十筆長得一模一樣的紀錄裡。
+    #
+    # 「內容真的變了嗎」由 record() 用比對內容決定，不是靠 `in data`：把同一份程式
+    # 碼再存一次不是一個新版本，而使用者按兩下儲存是很正常的事。
+    if "source_code" in data or "params" in data:
+        strategy_versions.record(db, strategy)
 
     try:
         db.commit()
@@ -556,3 +571,68 @@ def strategy_performance_report(
     """
     strategy = _get_owned_strategy(db, user, strategy_id)
     return strategy_performance.summarise(db, strategy)
+
+
+@router.get("/{strategy_id}/versions", response_model=list[StrategyVersionRead])
+def list_versions(
+    strategy_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> list:
+    """這支策略每一版。最新的在前面——他要找的通常是「剛剛那一版」。
+
+    先確認這支策略是他的（`_get_owned_strategy` 對別人的回 404）。版本裡是他的策略
+    程式碼，那是這個 app 裡最私人的東西之一。
+    """
+    strategy = _get_owned_strategy(db, user, strategy_id)
+    return strategy_versions.listing(db, strategy.id)
+
+
+@router.post("/{strategy_id}/versions/{version_id}/restore", response_model=StrategyDetail)
+def restore_version(
+    strategy_id: int,
+    version_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> Strategy:
+    """把某一版放回去。
+
+    ＊ 還原是**新增一版**，不是刪掉中間的。
+
+    否則「我還原錯了，我要回到剛剛那一版」就沒有路了——而那是使用這個功能的人最可
+    能做的第二件事。
+
+    ＊ 還原要走跟儲存一樣的驗證。
+
+    「這是舊的，以前能用」不是放行的理由：我們可能在這之間收緊了沙箱（#50 就是在處
+    理那件事的後果）。放行的話他會得到一支存得進去、但每一輪都在報錯的策略，而他以
+    為自己已經修好了。
+    """
+    strategy = _get_owned_strategy(db, user, strategy_id)
+    version = db.get(StrategyVersion, version_id)
+    if version is None or version.strategy_id != strategy.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+
+    validation = _validate(version.source_code)
+    if not validation.ok:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"這一版現在編不過了，所以不能還原：{validation.error}",
+        )
+
+    strategy.source_code = version.source_code
+    strategy.params = dict(version.params or {})
+    strategy.code_hash = code_hash(version.source_code)
+    _check_params(strategy.source_code, strategy.params)
+
+    # **放掉正在跑的那個實例。**
+    #
+    # 策略的實例活在子行程裡，由 id 快取（#18）。只改資料庫的話，畫面上會顯示還原
+    # 後的程式碼，而盯盤跑的還是還原前的那一份——兩者可以差好幾個月，而沒有任何東西
+    # 會說。
+    release_strategy(strategy.id)
+
+    strategy_versions.record(db, strategy, author="restore")
+    db.commit()
+    db.refresh(strategy)
+    return strategy

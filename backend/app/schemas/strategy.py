@@ -267,3 +267,22 @@ class StrategyPerformanceRead(BaseModel):
     bought_value: MoneyStr
     sold_value: MoneyStr
     notes: list[str]
+
+
+class StrategyVersionRead(BaseModel):
+    """一版。
+
+    帶著完整的 `source_code`：他要比較兩版差在哪裡，而畫面上做差異比對需要兩邊的全
+    文。策略程式碼是幾 KB 的東西，而這個清單有上限（STRATEGY_VERSION_LIMIT）。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    source_code: str
+    params: dict = Field(default_factory=dict)
+    code_hash: str
+    # manual / ai / restore。「restore」自己一類是刻意的：一個看起來跟三個月前一模
+    # 一樣的版本，如果沒有標明它是還原來的，他會以為自己的編輯不見了。
+    author: str
+    created_at: UtcDatetime

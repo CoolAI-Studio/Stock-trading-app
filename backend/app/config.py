@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     # 支——那是 CI 全綠、部署送達、而且線上健康之後才前進的那條線。
     UPDATE_CHECK_REPO: str = "CoolAI-Studio/Stock-trading-app"
 
+    # 每一支策略最多留幾個版本。
+    #
+    # 有上限是因為免費方案的資料庫塞得爆，而策略是文字：二十版 × 幾 KB × 幾支策
+    # 略，量很小，但沒有上限的東西遲早會變大。丟最舊的，而**現在在跑的那一版永遠
+    # 不丟**——那是他唯一真正需要的一版。
+    STRATEGY_VERSION_LIMIT: int = 20
+
     WS_TICKET_TTL_SECONDS: int = 30
 
     # Closed by default: with registration off, a publicly reachable backend only
