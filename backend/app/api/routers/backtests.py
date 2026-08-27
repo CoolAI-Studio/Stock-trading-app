@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,6 +16,10 @@ from app.schemas.backtest import (
     BacktestRunDetail,
     BacktestRunRead,
     BacktestRunRequest,
+    PortfolioLegRead,
+    PortfolioPointRead,
+    PortfolioResultRead,
+    PortfolioRunRequest,
     SweepResultRead,
     SweepRowRead,
     SweepRunRequest,
@@ -22,7 +27,7 @@ from app.schemas.backtest import (
     WalkForwardRequest,
     WalkForwardResultRead,
 )
-from app.services import param_sweep, strategy_pool, walk_forward
+from app.services import param_sweep, portfolio_backtest, strategy_pool, walk_forward
 from app.services.backtest import (
     MAX_BACKTEST_BARS,
     BacktestError,
@@ -32,11 +37,13 @@ from app.services.backtest import (
     run_backtest,
     truncation_note,
 )
-from app.services.market_data.base import DEFAULT_TIMEFRAME, Timeframe
+from app.services.market_data.base import DEFAULT_TIMEFRAME, Bar, Timeframe
 from app.services.market_data.service import MarketDataService, get_market_data_service
 from app.services.risk_resolver import get_or_create_global, resolve
 from app.services.strategy_runtime import code_hash
 from app.services.strategy_worker import StrategyWorkerError
+
+logger = logging.getLogger("app.backtests")
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 
@@ -508,5 +515,104 @@ def walk_forward_backtest(
             )
             for fold in report.folds
         ],
+        notes=report.notes,
+    )
+
+
+@router.post("/portfolio", response_model=PortfolioResultRead)
+def portfolio_run(
+    payload: PortfolioRunRequest,
+    db: Session = Depends(get_db),
+    service: MarketDataService = Depends(get_market_data_service),
+    user: User = Depends(get_current_active_user),
+) -> PortfolioResultRead:
+    """多支代號，共用一份資金與風險設定。
+
+    `symbols` 的**順序有意義**：同一天多支都要買而錢不夠的時候，按那個順序先到先
+    得。任何順序都是武斷的，所以這裡選一個並且在 notes 裡說出來——不說的話，使用者
+    換一次排列就得到不同的績效，而他會以為那是策略的差別。
+    """
+    strategy = (
+        None if payload.strategy_id is None else _resolve_strategy(db, user, payload.strategy_id)
+    )
+    source_code = payload.source_code if strategy is None else strategy.source_code
+
+    try:
+        described = strategy_pool.describe(source_code)
+    except StrategyWorkerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"這份策略程式碼無法通過驗證，因此不能做投組回測：{exc}",
+        ) from exc
+
+    data_source = payload.data_source or (strategy.data_source if strategy else DataSource.YFINANCE)
+    timeframe = _resolve_timeframe(
+        payload.timeframe,
+        described["entry_point"],
+        Timeframe(described["timeframe"]),
+        data_source,
+    )
+    stop_loss_pct, take_profit_pct = _resolve_exit_thresholds(db, user, payload, strategy)
+    _guard_range(payload, timeframe)
+
+    # 每一支各抓一次，但**都在這裡抓完**再進去跑。抓取和模擬分開，是為了讓「所有支
+    # 用的是同一段區間」這件事看得見。
+    bars_by_symbol: dict[str, list[Bar]] = {}
+    for symbol in payload.symbols:
+        if symbol in bars_by_symbol:
+            continue
+        try:
+            bars_by_symbol[symbol] = load_backtest_bars(
+                service,
+                symbol=symbol,
+                timeframe=timeframe,
+                data_source=data_source,
+                start=payload.start,
+                end=payload.end,
+            )
+        except Exception:  # noqa: BLE001 -- 一支抓不到不能拖垮整個投組
+            logger.exception("portfolio bar fetch failed for %s", symbol)
+            bars_by_symbol[symbol] = []
+
+    stored_warmup = payload.warmup_bars
+    if stored_warmup is None:
+        stored_warmup = strategy.warmup_bars if strategy else DEFAULT_WARMUP_BARS
+
+    try:
+        report = portfolio_backtest.run(
+            source_code=source_code,
+            bars_by_symbol=bars_by_symbol,
+            stored_warmup_bars=stored_warmup,
+            assumptions=payload.to_assumptions(
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct
+            ),
+        )
+    except portfolio_backtest.PortfolioError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return PortfolioResultRead(
+        timeframe=timeframe.value,
+        legs=[
+            PortfolioLegRead(
+                symbol=leg.symbol,
+                summary=leg.summary,
+                opened=leg.opened,
+                skipped_for_cash=leg.skipped_for_cash,
+                note=leg.note,
+            )
+            for leg in report.legs
+        ],
+        equity_curve=[
+            PortfolioPointRead(
+                timestamp=point.timestamp,
+                cash=point.cash,
+                equity=point.equity,
+                stale_symbols=point.stale_symbols,
+            )
+            for point in report.equity_curve
+        ],
+        summary=report.summary,
         notes=report.notes,
     )

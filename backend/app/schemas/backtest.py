@@ -299,3 +299,40 @@ class WalkForwardResultRead(BaseModel):
     bars_total: int
     folds: list[WalkForwardFoldRead]
     notes: list[str] = Field(default_factory=list)
+
+
+class PortfolioRunRequest(BacktestRunRequest):
+    """一次回測請求，但代號是**一串**。
+
+    繼承 BacktestRunRequest 的理由跟掃描一樣：投組裡的每一支都必須在跟單支回測相同
+    的假設下跑，不然使用者沒有辦法把兩邊的數字對起來。
+    """
+
+    # 順序有意義：同一天多支都要買而錢不夠的時候，按這個順序先到先得。
+    symbols: list[str] = Field(min_length=1, max_length=20)
+
+
+class PortfolioLegRead(BaseModel):
+    symbol: str
+    # 這一支**單獨用全額資金跑**的成績。跟投組裡實際發生的事不一樣，而那個差額正是
+    # 共用錢包的代價——所以兩個都給。
+    summary: BacktestSummaryRead | None = None
+    opened: int = 0
+    skipped_for_cash: int = 0
+    note: str | None = None
+
+
+class PortfolioPointRead(BaseModel):
+    timestamp: datetime
+    cash: MoneyStr
+    equity: MoneyStr
+    # 這一天有哪幾支是用上一次的收盤價入帳的。空的才代表這個點完全新鮮。
+    stale_symbols: list[str] = Field(default_factory=list)
+
+
+class PortfolioResultRead(BaseModel):
+    timeframe: str
+    legs: list[PortfolioLegRead]
+    equity_curve: list[PortfolioPointRead]
+    summary: BacktestSummaryRead | None = None
+    notes: list[str] = Field(default_factory=list)
