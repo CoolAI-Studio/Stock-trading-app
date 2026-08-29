@@ -647,6 +647,13 @@ export interface SystemStatus {
     latest: string | null
     behind: boolean | null
     why: string | null
+    /** 這一份前端的 commit 在上游存在嗎。
+     *
+     * `false` 代表**這一份被改過**——自動同步只快轉、絕不覆蓋，所以它已經停了。那
+     * 時候說「有新版可以更新」是錯的：他照著做拿到的還是自己那一版。
+     *
+     * `null` 是「問不到」。誤判成分岔比誤判成落後更糟，所以那時候照舊講落後。 */
+    frontend_from_upstream?: boolean | null
   }
   /** Whether asking the assistant would produce an answer rather than an
    * error. AI_API_KEY is one more blank in a deploy form and is optional by

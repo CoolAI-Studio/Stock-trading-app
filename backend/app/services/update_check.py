@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 import httpx
@@ -50,6 +51,7 @@ def forget() -> None:
     """丟掉快取。測試用；正式環境不需要呼叫。"""
     global _cache
     _cache = None
+    _known.clear()
 
 
 def _unknown(why: str, running: str | None = None) -> dict:
@@ -115,3 +117,121 @@ def status() -> dict:
 
     _cache = (now, answer)
     return dict(answer)
+
+
+# 一個 commit 在上游存不存在，問過就記住。
+#
+# 前端的 commit 每次建置才變一次，而這是每個訪客打開頁面都會觸發的查詢——沒有快取的
+# 話，一個開著的分頁就能把 GitHub 沒登入的額度（每小時 60 次）用完。
+_known: dict[str, bool] = {}
+
+# 七到四十碼十六進位，跟 build_info.commit() 同一個格式。
+_SHA_ONLY = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
+
+
+def is_from_upstream(sha: str) -> bool | None:
+    """這個 commit 在上游的 repo 裡存在嗎。`None` 代表問不到。
+
+    ＊ 為什麼要問這個。
+
+    這個更新模型有一個必然的分岔點：使用者（或他的 AI）動了骨架本身的原始碼。那一
+    刻 `sync-from-upstream.yml` 會停下來（它只快轉、絕不覆蓋），而從此他再也拿不到
+    任何更新——包括安全修補。
+
+    而畫面上如果說「有新版可以更新」，他照著做（重新部署）拿到的還是自己那一版，
+    因為同步根本沒跑。重試幾次之後他會放棄，而真正該告訴他的那件事從頭到尾沒有說
+    出口。
+
+    ＊ None 不是 False。
+
+    誤判成分岔比誤判成落後更糟：那句話會告訴他「自動更新對你沒用」，而如果那是假
+    的，他會從此不再期待更新。
+    """
+    if sha in _known:
+        return _known[sha]
+
+    # **這個值是輸入**（前端送上來的），而它會被拼進一個 URL。不驗格式的話，一個帶
+    # 著 `../` 或問號的字串就能改變那個請求問的是什麼——而這裡是這個 app 裡少數會主
+    # 動對外連線的地方。
+    if not _SHA_ONLY.match(sha or ""):
+        return None
+
+    repo = (settings.UPDATE_CHECK_REPO or "").strip()
+    if not repo:
+        return None
+
+    try:
+        response = httpx.get(
+            f"https://api.github.com/repos/{repo}/commits/{sha}",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=_TIMEOUT_SEC,
+            follow_redirects=True,
+        )
+    except Exception:  # noqa: BLE001 -- 問不到就是不知道
+        return None
+
+    if response.status_code == 404:
+        answer = False
+    elif response.is_success:
+        answer = True
+    else:
+        # 限流、暫時性錯誤——那些是「問不到」，不是「不存在」。
+        return None
+
+    _known[sha] = answer
+    return answer
+
+
+def changes_since(sha: str) -> list[dict]:
+    """從他跑的那一版到 `stable` 之間改了什麼。
+
+    ＊ 為什麼用 commit 訊息而不是另外維護一份 changelog。
+
+    這個 repo 的 commit 訊息第一行本來就是人話（「解藥要放在病灶旁邊」、「暖身也是
+    資料，也會洩漏」）。另外維護一份會有兩個事實來源，而沒同步的那一份會安靜地過
+    期——這正是 #47 拒絕開第二個 repo 的同一個理由。
+
+    ＊ 只取第一行。
+
+    這裡的 commit 訊息是長篇的。整段丟到畫面上，使用者看到的是一面牆而不是一份清
+    單，而那跟沒給一樣。
+
+    ＊ 空清單不代表「沒有更新」。
+
+    比不出來（分岔了、問不到）也是空的。**「為什麼是空的」由 is_from_upstream 回
+    答**，這裡只負責不要炸掉。
+    """
+    if not _SHA_ONLY.match(sha or ""):
+        return []
+    repo = (settings.UPDATE_CHECK_REPO or "").strip()
+    if not repo:
+        return []
+
+    try:
+        response = httpx.get(
+            f"https://api.github.com/repos/{repo}/compare/{sha}...stable",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=_TIMEOUT_SEC,
+            follow_redirects=True,
+        )
+        if not response.is_success:
+            # 404 代表那個 commit 不在上游——也就是這一份分岔了。那不是錯誤。
+            return []
+        commits = response.json().get("commits") or []
+    except Exception:  # noqa: BLE001 -- 問不到就是沒有清單，不是壞掉
+        return []
+
+    changes = []
+    for entry in commits:
+        message = (entry.get("commit") or {}).get("message") or ""
+        title = message.split("\n", 1)[0].strip()
+        if not title:
+            continue
+        changes.append(
+            {
+                "sha": str(entry.get("sha") or "")[:7],
+                "title": title,
+                "at": ((entry.get("commit") or {}).get("author") or {}).get("date"),
+            }
+        )
+    return changes

@@ -280,3 +280,41 @@ describe('前端自己是不是舊的', () => {
     expect(screen.queryByText(/畫面.*舊|前端.*舊/)).not.toBeInTheDocument()
   })
 })
+
+describe('這一版之後改了什麼', () => {
+  function withChanges(changes: unknown[]) {
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path === '/api/system/updates') return { running: 'aaaaaaa', changes } as never
+      return {
+        ...HEALTHY,
+        update: { running: 'aaaaaaa', latest: 'bbbbbbb', behind: true, why: null },
+      } as never
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <SystemStatusPage />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('落後的時候列出每一版做了什麼', async () => {
+    // 「有新版」不夠。他要決定的是「值不值得現在更新」，而那個決定只有看得到改了
+    // 什麼才做得出來——尤其是「這裡面有沒有安全修補」。
+    withChanges([
+      { sha: 'ccc1111', title: '修好圖表往前拉沒有資料', at: '2026-08-01T00:00:00Z' },
+      { sha: 'ddd2222', title: '策略搬進子行程', at: '2026-08-02T00:00:00Z' },
+    ])
+
+    expect(await screen.findByText('修好圖表往前拉沒有資料')).toBeInTheDocument()
+    expect(screen.getByText('策略搬進子行程')).toBeInTheDocument()
+  })
+
+  it('列不出來的時候不要假裝沒有更新', async () => {
+    // 空清單有兩個原因：真的沒有更新，或者比不出來（分岔了、問不到）。畫成「已經
+    // 是最新」會讓他錯過安全修補。
+    withChanges([])
+
+    expect(await screen.findByText(/列不出|查不到/)).toBeInTheDocument()
+  })
+})

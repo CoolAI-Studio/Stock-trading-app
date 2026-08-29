@@ -23,9 +23,9 @@ one is behind a login and can therefore say how long, how many, and which.
 """
 
 from datetime import timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -41,9 +41,10 @@ from app.models.strategy import Strategy
 from app.models.user import User
 from app.services import (
     ai_settings,
+    build_info,
     hosting,
     setup_state,
-    update_check,  # noqa: F401
+    update_check,
     worker_health,
 )
 from app.services.ai_provider import get_ai_provider
@@ -143,6 +144,19 @@ def _notification_counts(db: Session, user_id: int) -> dict[str, Any]:
 
 @router.get("/status")
 def system_status(
+    # Annotated 而不是 `= Query(...)`，是刻意的：這個函式**也被 system_assist 直接
+    # 呼叫**，而 FastAPI 的預設值只有走路由時才會被解析。寫成 `= Query(...)` 的
+    # 話，直接呼叫拿到的是那個哨兵物件本身，然後它會一路流到正規表達式裡炸掉——
+    # 而那正是這次改動一開始造成的七條紅。
+    #
+    # Annotated 讓純粹的預設值就是 None，所以兩條路都對。
+    frontend_commit: Annotated[
+        str | None,
+        Query(
+            max_length=40,
+            description="前端這一份的 commit。它是建置期常數，後端不知道，所以由前端帶上來。",
+        ),
+    ] = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_active_user),
 ) -> dict[str, Any]:
@@ -154,6 +168,14 @@ def system_status(
     # 刻意**不影響 overall**：落後不是故障。這一頁的紅燈是給「提醒現在停擺了」用
     # 的，而把「有新版」也算進去會讓那個紅燈失去意義——他會學會忽略它。
     update = update_check.status()
+    # 前端自己的 commit 只有前端知道（它是建置期常數），所以那個問題由它帶上來問。
+    #
+    # **落後和分岔是兩件事**：前者按一次重新部署就好，後者按幾次都沒有用，因為同步
+    # 根本沒跑。說錯的話他會重試幾次然後放棄，而真正該告訴他的那件事從頭到尾沒說出
+    # 口。
+    update["frontend_from_upstream"] = (
+        update_check.is_from_upstream(frontend_commit) if frontend_commit else None
+    )
 
     worker: dict[str, Any] = {
         "enabled": settings.WORKER_ENABLED,
@@ -379,3 +401,24 @@ def system_assist(
         question, system=_ASSISTANT_PROMPT
     )
     return AssistResult(ok=result.ok, reply=result.reply, error=result.error)
+
+
+@router.get("/updates")
+def system_updates(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> dict[str, Any]:
+    """從你這一版到最新之間，改了什麼。
+
+    **刻意不塞進 /status。** 那一頁會被輪詢，而這裡每次都是一次對 GitHub 的呼叫；
+    塞在一起的話，一個開著的分頁就能把沒登入的額度（每小時 60 次）用完，然後真的需
+    要知道有沒有新版的時候問不到。
+
+    空清單不代表「沒有更新」——分岔了、問不到，也都是空的。**為什麼是空的**由
+    /status 的 `update` 那一格回答（它分得出落後和分岔），這裡只負責列清單。
+    """
+    running = build_info.commit()
+    return {
+        "running": running,
+        "changes": update_check.changes_since(running) if running else [],
+    }

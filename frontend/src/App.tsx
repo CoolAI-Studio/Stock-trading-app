@@ -15,6 +15,8 @@ import { RiskSettingsPage } from './pages/RiskSettingsPage'
 import { BrokerSettingsPage } from './pages/BrokerSettingsPage'
 import { AccountPage } from './pages/AccountPage'
 import { WebhooksPage } from './pages/WebhooksPage'
+import { VersionBadge } from './components/VersionBadge'
+import { useAuth } from './context/useAuth'
 import { BacktestPage } from './pages/BacktestPage'
 import { TuningPage } from './pages/TuningPage'
 import { SetupPage } from './pages/SetupPage'
@@ -45,6 +47,15 @@ function App() {
   return (
     <>
       <SetupRedirect />
+      {/* 右下角、每一頁都在，**包括登入頁**。
+          
+          它是全域的角落元件，不屬於任何一頁——掛在 LoginPage 或 Layout 裡面，就會
+          讓那兩個元件為了一格版本號而依賴 react-query（LoginPage 的測試因此整組紅
+          過一次）。掛在這裡，provider 本來就在外面。
+          
+          登入頁那一份只問公開的 /healthz；登入之後才問上游有沒有新版——那條路會對
+          外連線，不可以開給沒登入的人。 */}
+      <VersionBadge signedIn={useAuth().isAuthenticated} />
       <Routes>
         {/* Outside ProtectedRoute on purpose: there is no account yet, and
             there cannot be one until the deployment is configured. Behind the

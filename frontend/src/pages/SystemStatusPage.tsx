@@ -113,6 +113,45 @@ function Assistant() {
   )
 }
 
+interface Change {
+  sha: string
+  title: string
+  at: string | null
+}
+
+/** 從他這一版到最新之間，每一個 commit 的第一行。 */
+function ChangeList() {
+  const updates = useQuery({
+    queryKey: ['system-updates'],
+    queryFn: () => api.get<{ changes: Change[] }>('/api/system/updates'),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  if (updates.isLoading) return <p className="text-xs">正在讀更新內容…</p>
+
+  const changes = updates.data?.changes ?? []
+  if (changes.length === 0) {
+    // 空清單有兩個原因：真的沒有更新，或者比不出來（這一份分岔了、問不到 GitHub）。
+    // 畫成「已經是最新」會讓他錯過安全修補。
+    return (
+      <p className="text-xs text-amber-300/80">
+        列不出改了什麼（可能是這一份被改過，或現在問不到 GitHub）。
+      </p>
+    )
+  }
+
+  return (
+    <ul className="space-y-1 text-xs">
+      {changes.map((change) => (
+        <li key={change.sha} className="flex gap-2">
+          <code className="shrink-0 text-amber-300/60">{change.sha}</code>
+          <span>{change.title}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function SystemStatusPage() {
   const query = useQuery({
     queryKey: ['system-status'],
@@ -157,11 +196,18 @@ export function SystemStatusPage() {
         錯過安全修補，而那正是他打開這一頁想確認的事。
       */}
       {update?.behind === true && (
-        <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-          <strong>有新版可以更新。</strong>
-          你這一份是 <code>{update.running}</code>，最新的是 <code>{update.latest}</code>。
-          更新裡可能包含安全修補——去你部署後端的平台按一次重新部署就會拿到。
-        </p>
+        <div className="space-y-2 rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+          <p>
+            <strong>有新版可以更新。</strong>
+            你這一份是 <code>{update.running}</code>，最新的是 <code>{update.latest}</code>。
+            更新裡可能包含安全修補——去你部署後端的平台按一次重新部署就會拿到。
+          </p>
+          {/*
+            「有新版」不夠。他要決定的是「值不值得現在更新」，而那個決定只有看得到
+            改了什麼才做得出來——尤其是「這裡面有沒有安全修補」。
+          */}
+          <ChangeList />
+        </div>
       )}
       {/*
         前端自己是不是舊的。
