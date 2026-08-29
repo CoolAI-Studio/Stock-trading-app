@@ -308,6 +308,35 @@ jobs:
       - name: Can a new user get past the first screen?
         run: python backend/scripts/deploy_smoke.py http://localhost:8000
 
+      - name: 他拿到的那一個網址，打開要看到 app
+        # #53 的整個承諾就是這一件事：只要部署一次，網址只有一個。而在這之前，唯一
+        # 驗它的是幾條把 FRONTEND_DIST 指到暫存目錄的單元測試——那證明得了 main.py
+        # 的判斷邏輯，證明不了「這個映像檔裡真的有那份 dist，而且就在 main.py 會去
+        # 找的那個路徑上」。
+        #
+        # 那個路徑是**算出來的**（app/main.py 從 __file__ 往上三層），而 Dockerfile
+        # 是寫死的（COPY --from=frontend /build/dist /frontend/dist）。兩者之間沒有
+        # 任何連結：搬一層目錄、改一次 WORKDIR，使用者打開他唯一拿到的網址會看到
+        # 404，而後端每一項健康檢查都還是綠的——跟部署送不送得達那件事一樣，是一種
+        # 「全綠但壞掉」。
+        run: |
+          code=$(curl -sS -o /tmp/root.html -w '%{http_code}' http://localhost:8000/)
+          echo "GET / -> $code"
+          [ "$code" = "200" ] || { echo "::error::打開網址第一頁回 $code，這一份部署沒有畫面。"; docker logs first-deploy; exit 1; }
+          grep -q 'id="root"' /tmp/root.html || { echo "::error::/ 回的不是這個 app 的頁面。"; head -20 /tmp/root.html; exit 1; }
+          # 拿得到它引用的東西，不然那一頁是白的——而白畫面跟 404 一樣沒得用，
+          # 差別只在它不會出現在任何一份日誌裡。
+          asset=$(grep -o '/assets/[^"]*\.js' /tmp/root.html | head -1)
+          [ -n "$asset" ] || { echo "::error::index.html 裡沒有 /assets 的 script。"; exit 1; }
+          curl -fsS "http://localhost:8000$asset" > /dev/null || { echo "::error::$asset 拿不到，畫面會是白的。"; exit 1; }
+          # 深層網址要回 index.html。他是從通知點進來的，落點不會是首頁。
+          deep=$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:8000/strategies)
+          [ "$deep" = "200" ] || { echo "::error::/strategies 回 $deep，從通知點進來會是 404。"; exit 1; }
+          # 但後端自己的路徑不可以被 fallback 吃掉——吃掉的話，一個打錯的 API 路徑
+          # 會拿到 200 和一份 HTML，而前端會拿它去 JSON.parse。
+          api=$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:8000/api/nope)
+          [ "$api" = "404" ] || { echo "::error::/api/nope 回 $api，SPA fallback 把後端的路徑吃掉了。"; exit 1; }
+
       - name: And when the one value they had to copy is wrong
         # DATABASE_URL is the only field on that form the app cannot generate --
         # it is copied out of somebody else's console -- so it is the single

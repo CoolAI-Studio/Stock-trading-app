@@ -1,17 +1,22 @@
-# 部署指南（以 Render ＋ Neon ＋ Vercel 的免費方案為例）
+# 部署指南（以 Render ＋ Neon 的免費方案為例）
 
 全部走免費方案，不需要信用卡。以下每一步需要你自己動手（帳號註冊、環境變數填寫），
 沒有人能幫你操作瀏覽器登入這些平台。
 
-**這是一條走得通的路，不是唯一的一條。** 這個 app 需要的是三樣東西，不是三個品牌：
+**只要部署一次。** 同一個服務同時供應 API 和畫面，所以沒有兩個網址要對起來、也沒有
+CORS 要設。
+
+**這是一條走得通的路，不是唯一的一條。** 這個 app 需要的是兩樣東西，不是三個品牌：
 
 | 要的東西 | 這份文件用的例子 | 換成別的可以嗎 |
 | --- | --- | --- |
 | 一個能跑 Docker 容器的地方（後端） | Render | 可以：Railway、Fly.io、Koyeb、Heroku、或你自己的機器。映像檔是 `backend/Dockerfile` |
 | 一個 Postgres | Neon | 可以：Supabase、任何付費方案、自架的都行 |
-| 一個放靜態網站的地方（前端） | Vercel | 可以：Cloudflare Pages、Netlify、任何 CDN |
 
-底下的步驟寫的是 Render／Neon／Vercel 的選單名稱，因為那是有截圖式指路的唯一辦法。
+想把畫面另外放在 Vercel／Netlify／Cloudflare 也可以，見文末〈想把畫面分開放〉——
+拿掉的是「必須部署兩次」這個**要求**，不是「可以分開放」這個**選擇**。
+
+底下的步驟寫的是 Render／Neon 的選單名稱，因為那是有截圖式指路的唯一辦法。
 換平台的話，每一步問的東西是一樣的（「把這個值放進環境變數」），只是那一頁在你的
 平台上可能叫 Variables、Config Vars 或 Secrets。**設定頁自己會照你實際用的平台講話**——
 它認得出 Render、Railway、Fly.io、Heroku、Koyeb，認不出來就講通用的說法。
@@ -22,10 +27,9 @@
 ## 順序
 
 1. 資料庫（本文用 Neon）
-2. 後端 API + 背景 worker（本文用 Render）
-3. 前端網頁（本文用 Vercel）
+2. 服務本身：API ＋ 畫面 ＋ 背景 worker，同一個容器（本文用 Render）
+3. 打開那個網址，在設定頁把剩下的值按按鈕產生
 4. 保活（本文用 UptimeRobot，讓免費方案的背景 worker 不休眠）
-5. 回頭把兩邊的網址互相填好
 
 ---
 
@@ -43,14 +47,17 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 
 ---
 
-## 2. 部署後端（本文用 Render）
+## 2. 部署服務：API ＋ 畫面 ＋ 背景 worker，同一個容器（本文用 Render）
 
 ### 2a. 把專案推上 GitHub（Render 需要接 GitHub repo）
 
 如果你還沒有這個專案的 GitHub repo，先建立一個（可以是 private）：
 
 1. 前往 <https://github.com/new> 建立一個新 repo（例如 `stock-trading-app`）。
-2. 依照 GitHub 顯示的指令，把本地這個資料夾推上去（我可以幫你執行 git 指令，但需要你先確認 repo 網址）。
+2. 依照 GitHub 顯示的指令，把本地這個資料夾推上去。
+
+（用 README 上那顆 **Deploy to Render** 按鈕的話，這一整段可以跳過——按鈕會直接指向
+上游的 repo，Render 自己去讀。）
 
 ### 2b. 用 Blueprint 一鍵部署
 
@@ -61,33 +68,28 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 3. Render 會讀取 `render.yaml` 並列出要建立的服務（`trading-app-backend`），確認後建立。
 4. 建立過程中，Render 會要求你手動填入標記 `sync: false` 的環境變數：
    - `DATABASE_URL`：貼上一開始從 Neon 拿到的連線字串
-   - `SECRET_ENCRYPTION_KEY`：需要先在本機產生一組真正的 Fernet 金鑰，執行：
-     ```
-     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-     ```
-     把印出來的字串貼進去。**貼上去之前，先把這串字存進你的密碼管理器**——這把鑰匙是唯一的，
-     弄丟了就再也解不開已經存起來的券商金鑰和通知帳密，連在網頁上刪掉重設都做不到。
-     詳見第 7 節〈備份〉。
-   - `CORS_ORIGINS`：先隨便填 `http://localhost:5173`，等第 3 步 Vercel 部署完拿到正式網址後回來改
-5. 部署完成後，Render 會給你一個網址，例如 `https://trading-app-backend-xxxx.onrender.com`。記下來，第 3 步會用到。
-6. 打開 `https://<你的網址>/healthz`，最外層看到 `"status": "ok"`（HTTP 200）就代表後端上線成功。剛部署完、背景 worker 還沒跑完第一輪時，`worker` 和 `market_data` 會顯示 `starting`，這是正常的。
+   - **其他全部留白。** 包括 `SECRET_ENCRYPTION_KEY`、`JWT_SECRET`、推播金鑰——
+     下一步在網頁上按一顆按鈕就會產生，**不需要在你自己的電腦上裝或跑任何東西**。
+     （`SECRET_ENCRYPTION_KEY` 產生之後，貼回 Render 之前先把它存進你的密碼管理器：
+     這把鑰匙是唯一的，弄丟了就再也解不開已經存起來的券商金鑰和通知帳密，連在網頁上
+     刪掉重設都做不到。詳見第 7 節〈備份〉。）
+   - `CORS_ORIGINS` 也留白。畫面跟 API 在同一個網址上，沒有跨來源這件事。
+5. 部署完成後，Render 會給你一個網址，例如 `https://trading-app-backend-xxxx.onrender.com`。
+   **這就是你的網址**，畫面和 API 都在上面。
+6. 打開 `https://<你的網址>/healthz`，最外層看到 `"status": "ok"`（HTTP 200）就代表服務上線成功。剛部署完、背景 worker 還沒跑完第一輪時，`worker` 和 `market_data` 會顯示 `starting`，這是正常的。
 
 ---
 
-## 3. 部署前端（本文用 Vercel）
+## 3. 打開那個網址
 
-1. 前往 <https://vercel.com/new> 註冊/登入（用 GitHub 帳號）。
-2. 選擇同一個 GitHub repo，Root Directory 設定為 `frontend`。
-3. Vercel 會自動偵測 Vite 專案，Build Command / Output Directory 用預設值就好。
-4. 在 **Environment Variables** 加入：
-   - `VITE_API_BASE_URL` = 你的 Render 後端網址（例如 `https://trading-app-backend-xxxx.onrender.com`）
-   - `VITE_WS_URL` = 同一個網址但開頭改成 `wss://`（例如 `wss://trading-app-backend-xxxx.onrender.com`）
-5. 部署完成後會拿到一個網址，例如 `https://your-app.vercel.app`。
+沒有「部署前端」這一步了——畫面就在同一個服務上。
 
-### 回頭更新後端的 CORS_ORIGINS
-
-1. 回到 Render 的服務設定，把 `CORS_ORIGINS` 改成你剛拿到的 Vercel 網址（例如 `https://your-app.vercel.app`）。
-2. 存檔後 Render 會自動重新部署一次。
+1. 用瀏覽器打開上一步那個網址。它會自動帶你到**設定頁**，而不是一個壞掉的登入畫面。
+2. 那一頁列出還缺什麼，分成兩區：**會擋住啟動的**（加密金鑰之類）和**不會擋住、但沒填
+   就有東西不能用的**（例如推播金鑰，不填收不到手機通知）。
+3. 每一項旁邊有一顆「產生」按鈕。按下去、複製、貼回 Render 的 Environment 頁、存檔。
+   Render 會自動重新部署一次。
+4. 重新部署完成後回到那一頁，缺的東西就消失了。
 
 ---
 
@@ -135,7 +137,13 @@ CI 的部署步驟自己會看這個欄位：呼叫部署 hook 之後，它會�
 `commit` 是從環境變數讀的，`APP_GIT_COMMIT` 是這個 app 自己的名字；
 Render（`RENDER_GIT_COMMIT`）、Heroku／Dokku（`SOURCE_VERSION`）、Railway、Koyeb 這些
 平台自己會塞的名字也都認得，所以多數情況下你什麼都不用設定。
-自己 build 映像檔的話：`docker build --build-arg APP_GIT_COMMIT=$(git rev-parse HEAD) ...`。
+自己 build 映像檔的話（**在專案根目錄跑，不是在 `backend/` 裡**——這個映像檔同時要建
+前端和後端，所以它需要看得到兩邊）：
+
+```
+docker build -f backend/Dockerfile --build-arg APP_GIT_COMMIT=$(git rev-parse HEAD) -t stock-alerts .
+```
+
 兩邊都沒有時，這一格是 `null`——**寧可說不知道，也不會編一個版本號給你看**。
 
 另外注意：`render.yaml` 的 `healthCheckPath` 也指向 `/healthz`，所以持續 503 時 Render 也會判定服務不健康。worker 卡死的情況下重啟本來就是正確處置，但如果之後不想要這個連動，把 `healthCheckPath` 改成別的路徑即可。
@@ -318,11 +326,31 @@ DATABASE_URL="postgresql://..." python -m alembic downgrade -1
 - [ ] Postgres 資料庫建立完成，拿到連線字串
 - [ ] GitHub repo 建立並推送完成
 - [ ] 後端部署完成，`/healthz` 回應正常，而且 `version.commit` 跟你推上去的那一個一樣
-- [ ] 前端部署完成，能打開登入頁
-- [ ] 後端 `CORS_ORIGINS` 已更新成前端網址
+- [ ] 打開那個網址看得到畫面（設定頁或登入頁，不是 404）
 - [ ] 保活監控已設定（免費方案才需要）
 - [ ] **已在網頁上建立自己的帳號**（部署完就做，不要放著過夜——第一個註冊的人就是擁有者）
 - [ ] （選用）已設定 `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`，瀏覽器推播通知可以用
 - [ ] **`SECRET_ENCRYPTION_KEY` 等金鑰已存進密碼管理器，而且存了兩份不同地方**（見第 7 節）
 - [ ] 已經成功跑過一次 `pg_dump`，手上有一份資料庫備份檔
 - [ ] 手機行事曆已設好每月備份提醒
+
+---
+
+## 想把畫面分開放
+
+不需要，但可以。有人已經有 Vercel／Cloudflare Pages 的習慣，或者想讓畫面走 CDN、離
+使用者近一點——那條路沒有被關掉，只是不再是必經之路。
+
+1. 把 `frontend/` 部署過去（Vercel 的話 Root Directory 設 `frontend`，其餘用預設值）。
+2. 在那邊設一個環境變數：`VITE_API_BASE_URL` = 你的後端網址。
+   （即時報價的 WebSocket 網址會從它推導出來，不用另外設。）
+3. **回到後端**把 `CORS_ORIGINS` 設成新的前端網址。分開放才需要這一格——這時候畫面和
+   API 真的在兩個來源上了。
+
+要知道的兩件事：
+
+- **更新要自己顧。** 後端跟著 `stable` 自動更新，另外放的那一份不會——它是另一個平台上
+  的另一個部署。系統狀態頁會把前端的 commit 印出來跟上游比，所以「有沒有跟上」看得
+  見，但按下更新的是你。
+- **`VITE_` 開頭的環境變數會被打進公開的 bundle 裡。** 那是 Vite 的設計，不是這個專案
+  的選擇。所以那邊只能放網址這種本來就公開的東西，**任何金鑰都不行**。

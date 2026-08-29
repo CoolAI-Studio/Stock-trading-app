@@ -184,3 +184,45 @@ def test_the_guide_teaches_the_command_that_actually_works():
     page = (_root() / "docs" / "install.html").read_text(encoding="utf-8")
 
     assert "docker build -f backend/Dockerfile" in page
+
+
+def test_the_image_puts_the_frontend_where_main_py_looks_for_it():
+    """一邊是寫死的，一邊是算出來的，而它們必須是同一個路徑。
+
+    Dockerfile：`COPY --from=frontend /build/dist /frontend/dist`
+    main.py：   `Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"`
+
+    兩者之間沒有任何連結。改一次 WORKDIR、把 app/ 往下搬一層，使用者打開他唯一拿到
+    的那個網址會看到 404——而 `/healthz` 每一項都還是綠的，因為後端本身完全沒事。
+
+    CI 的 first-deploy 會用真的容器問這件事，但那要等到推上去；這一條在本機就答得出
+    來，而且它說得出**哪一邊**動了。
+    """
+    import re
+    from pathlib import PurePosixPath
+
+    dockerfile = (_root() / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    main_py = (_root() / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+
+    # 最後一個 stage 的 WORKDIR，就是 `COPY backend/ .` 的落點。
+    workdir = re.findall(r"^WORKDIR\s+(\S+)", dockerfile, re.MULTILINE)[-1]
+    dest = re.search(r"^COPY --from=frontend\s+\S+\s+(\S+)", dockerfile, re.MULTILINE)
+    assert dest, "Dockerfile 不再從前端那個 stage 複製 dist 了"
+
+    # main.py 在容器裡的位置，以及它從那裡往上數幾層。
+    in_container = PurePosixPath(workdir) / "app" / "main.py"
+    hops = (
+        len(
+            re.search(r"Path\(__file__\)\.resolve\(\)((?:\.parent)+)", main_py)
+            .group(1)
+            .split(".parent")
+        )
+        - 1
+    )
+    root = in_container
+    for _ in range(hops):
+        root = root.parent
+
+    assert str(root / "frontend" / "dist") == dest.group(1), (
+        f"main.py 會去 {root / 'frontend' / 'dist'} 找，但映像檔把它放在 {dest.group(1)}"
+    )
