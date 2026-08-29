@@ -89,8 +89,8 @@
           <div class="detail-body">
             <ol>
               <li>那台機器要裝 Docker。</li>
-              <li>下載這個專案，在 <code>backend</code> 資料夾執行
-                  <code>docker build -t stock-alerts .</code></li>
+              <li>下載這個專案，在<strong>專案根目錄</strong>執行
+                  <code>docker build -f backend/Dockerfile -t stock-alerts .</code></li>
               <li><code>docker run -p 8000:8000 -e DATABASE_URL=… stock-alerts</code></li>
             </ol>
             <p class="gotcha">要從外面連得到的話，那台機器需要一個對外網址和 HTTPS。</p>

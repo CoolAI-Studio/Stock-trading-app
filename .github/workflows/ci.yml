@@ -274,7 +274,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the image that actually ships
-        run: docker build -t trading-app-backend:ci ./backend
+        # context 是 repo 根目錄，不是 ./backend：Dockerfile 現在也要建前端
+        # （這一個映像檔同時供應 API 和畫面，所以只要部署一次），所以它要同時
+        # 看得到 frontend/ 和 backend/。render.yaml 的 dockerContext 也是 `.`。
+        run: docker build -f backend/Dockerfile -t trading-app-backend:ci .
 
       - name: Start it the way a brand-new deploy starts it
         # Every optional value blank, exactly what the README tells somebody to

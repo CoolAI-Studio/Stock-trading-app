@@ -130,3 +130,57 @@ def test_the_backend_owns_these_prefixes_forever(client, tmp_path, monkeypatch, 
     resp = client.get(path)
 
     assert "text/html" not in resp.headers.get("content-type", "")
+
+
+# --- 建置這個映像檔的每一個地方，都要給對 context ---------------------------
+
+
+def _root():
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def test_the_dockerfile_needs_both_halves():
+    """基準線：Dockerfile 真的會去拿 frontend/。
+
+    沒有這一條，底下兩條會在「有人把 Dockerfile 改回只建後端」的時候還是綠的——它
+    們守的是「context 要給根目錄」，而那個要求的**理由**在這裡。
+    """
+    dockerfile = (_root() / "backend" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY frontend/" in dockerfile, "Dockerfile 不再需要前端了？那底下兩條就沒有意義了"
+    assert "COPY backend/" in dockerfile
+
+
+def test_every_build_uses_the_repo_root_as_context():
+    """**這一條是這次 CI 紅掉的原因。**
+
+    我改了 render.yaml 和 docker-compose.yml，漏了 CI——而 CI 是唯一一個真的把這個
+    映像檔建起來的地方，所以那是唯一會發現的地方。錯誤訊息是
+    `"/backend": not found`，一個要讀三層才對得起來的訊息。
+
+    這三個檔案之間沒有任何連結，而它們必須同意同一件事。
+    """
+    ci = (_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    render = (_root() / "render.yaml").read_text(encoding="utf-8")
+    compose = (_root() / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "docker build -f backend/Dockerfile" in ci, "CI 沒有用根目錄當 context"
+    assert "./backend" not in ci.split("docker build")[1].split("\n")[0], (
+        "CI 的 docker build 還指著 ./backend"
+    )
+    assert "dockerContext: ." in render, "render.yaml 的 context 不是根目錄"
+    assert "context: ." in compose, "compose 的 context 不是根目錄"
+
+
+def test_the_guide_teaches_the_command_that_actually_works():
+    """引導頁教的那一行，要真的建得起來。
+
+    這個 repo 已經被「驗文案不驗事實」咬過：頁面叫人跑 `docker compose up`，而
+    repo 裡根本沒有 compose 檔，測試卻是綠的。這裡守同一件事的另一半——頁面上那行
+    指令如果還寫著在 backend 資料夾裡建，照做的人會拿到跟這次 CI 一樣的錯。
+    """
+    page = (_root() / "docs" / "install.html").read_text(encoding="utf-8")
+
+    assert "docker build -f backend/Dockerfile" in page
