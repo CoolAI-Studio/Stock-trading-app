@@ -1,0 +1,44 @@
+# 建置 context 是**專案根目錄**（render.yaml 的 dockerContext、CI 的 docker build、
+# docker-compose 都是 `.`），因為那個映像檔同時要建前端和後端。
+#
+# Docker 只讀 context 根目錄的這一份。`backend/.dockerignore` 在 context 還是
+# `backend/` 的時候是有效的，搬過來之後就再也不會被讀到——沒有警告、沒有錯誤，映像檔
+# 照樣建得起來，只是突然多了一堆東西。所以它被移到這裡，那一份刪掉。
+
+# --- 秘密和本機資料：這幾行是這個檔案存在的主要理由 ---
+# DEPLOYMENT.md 教的是「在專案根目錄 docker build」，所以任何在本機建的人，會把自己
+# 那份 .env 烤進映像檔裡。映像檔會被推到 registry，而這個 repo 是公開的。
+**/.env
+**/.env.*
+!**/.env.example
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# --- 建置產物與快取：進去只會變大變慢，而且會蓋掉映像檔裡自己建的那一份 ---
+**/venv/
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+frontend/dist/
+frontend/coverage/
+# 測試不進映像檔（搬家前的那一份也是這樣）。線上跑的是已經在 CI 驗過的那一版，
+# 而映像檔裡多一份測試只是多一份要下載的東西。
+backend/tests/
+# 前端的測試檔**不排除**：tsconfig.node.json 的 include 寫著 src/test/*.test.ts，
+# 排掉的話 `tsc -b` 會因為「No inputs were found」（TS18003）直接讓映像檔建不起來。
+# 它們不會進 bundle（vite 只打包進入點走得到的東西），所以留著沒有成本。
+
+# --- 跟執行無關的 ---
+.git/
+.github/
+.gitignore
+**/.DS_Store
+docs/
+infra/
+*.md
+!backend/requirements.lock

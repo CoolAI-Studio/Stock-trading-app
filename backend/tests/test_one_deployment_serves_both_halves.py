@@ -132,6 +132,82 @@ def test_the_backend_owns_these_prefixes_forever(client, tmp_path, monkeypatch, 
     assert "text/html" not in resp.headers.get("content-type", "")
 
 
+# --- 還沒設定完的那一份，畫面也要出得來 -------------------------------------
+#
+# 這一組是實地跑出來的：first-deploy 那個 job 用全空的設定跑真的容器，然後
+# `GET / → 503`。以前前端在 Vercel，`/` 根本不會經過設定模式那個鎖；畫面搬進同一個
+# 服務之後，那個鎖**把設定頁自己鎖在外面了**——而它就是為了解釋「你還缺什麼」而存在
+# 的那一頁。
+#
+# 症狀對使用者是：按完 Deploy、拿到網址、打開，看到一行 JSON 寫著「這個部署還沒設定
+# 完成」。他不是工程師，那一行對他等於流程結束。
+
+
+@pytest.fixture
+def blank_deployment(monkeypatch, tmp_path):
+    """一份剛部署好、什麼都還沒填的實例，而且映像檔裡有建好的前端。"""
+    from app import main
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text('<!doctype html><div id="root"></div>', encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (dist / "manifest.webmanifest").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(main, "FRONTEND_DIST", dist)
+    monkeypatch.setattr("app.main.SETUP_MODE_REASON", "JWT_SECRET is unset or still a placeholder")
+    return dist
+
+
+def test_a_blank_deployment_still_serves_the_page(client, blank_deployment):
+    """**這一條是這次 first-deploy 紅掉的原因。**
+
+    他手上只有一個網址。打開它如果是 503，那個要告訴他「還缺 JWT_SECRET，按這顆按鈕
+    產生」的頁面就永遠到不了——而它是這個時間點上唯一有用的東西。
+    """
+    resp = client.get("/")
+
+    assert resp.status_code == 200, resp.text
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_the_setup_page_route_is_reachable_before_it_is_configured(client, blank_deployment):
+    """`/setup` 是前端的一條路由，不是伺服器上的檔案，所以它走 SPA fallback。
+
+    分開驗：`/` 通了不代表它通——擋人的如果是一份路徑白名單，很容易只放行了根目錄。
+    """
+    resp = client.get("/setup")
+
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_the_page_can_load_what_it_needs_to_run(client, blank_deployment):
+    """光是 index.html 出得來還不夠。
+
+    擋掉 /assets 的話他拿到的是一片白，而白畫面比 503 更難查——沒有訊息、沒有狀態
+    碼，只有一個看起來壞掉的網站。
+    """
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/manifest.webmanifest").status_code == 200
+
+
+def test_the_api_is_still_locked_while_it_is_unconfigured(client, blank_deployment):
+    """放行畫面**不可以**變成放行 API。
+
+    設定模式存在的理由是「沒有 JWT_SECRET 的時候，任何人都能簽出一張登入權杖」。
+    為了讓畫面出得來而把整個鎖拿掉，換到的是一個沒有門的 app。
+    """
+    resp = client.get("/api/strategies")
+
+    assert resp.status_code == 503
+    assert resp.json()["setup_required"] is True
+
+
+def test_the_setup_endpoints_still_answer(client, blank_deployment):
+    """而那一頁要問得到「我還缺什麼」。"""
+    assert client.get("/api/setup/status").status_code == 200
+
+
 # --- 建置這個映像檔的每一個地方，都要給對 context ---------------------------
 
 
@@ -226,3 +302,33 @@ def test_the_image_puts_the_frontend_where_main_py_looks_for_it():
     assert str(root / "frontend" / "dist") == dest.group(1), (
         f"main.py 會去 {root / 'frontend' / 'dist'} 找，但映像檔把它放在 {dest.group(1)}"
     )
+
+
+def test_the_ignore_file_is_where_the_context_root_is_now():
+    """**改 context 會讓 .dockerignore 安靜地失效。**
+
+    Docker 只讀**建置 context 根目錄**的那一份 `.dockerignore`。context 從 `backend/`
+    搬到專案根目錄之後，`backend/.dockerignore` 就再也不會被讀到了——沒有警告、沒有
+    錯誤，映像檔照樣建得起來，只是突然多了一堆東西。
+
+    多的東西裡有 `backend/.env`。DEPLOYMENT.md 現在教的正是「在專案根目錄 docker
+    build」，所以維護者自己或任何在本機建的人，會把一份含金鑰的 .env 烤進映像檔裡。
+    這個 repo 是公開的，而映像檔會被推到某個 registry。
+    """
+    root = _root()
+    ignore = root / ".dockerignore"
+
+    assert ignore.is_file(), (
+        "建置 context 是專案根目錄，但根目錄沒有 .dockerignore——"
+        "backend/.dockerignore 已經不會被讀到了"
+    )
+
+    patterns = [
+        line.strip()
+        for line in ignore.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+    # 會把秘密或本機資料帶進映像檔的，一個都不能少。
+    for must in ("**/.env", "**/venv/", "**/*.db", "**/node_modules/"):
+        assert must in patterns, f".dockerignore 少了 {must}"

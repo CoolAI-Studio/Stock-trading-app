@@ -12,9 +12,13 @@
 # 這不是拿掉 Vercel，是拿掉「必須再部署一次」：想把前端另外放的人照樣可以，設
 # VITE_API_BASE_URL 指向他的後端。少掉的是要求，不是選擇。
 #
-# 建置環境的 context 是 ./backend（見 render.yaml），所以前端要從 repo 根目錄複製
-# 進來——這一段假設 build context 是 repo 根目錄。docker-compose 和 CI 都是這樣叫
-# 的；render.yaml 的 dockerContext 也一併改成 `.`。
+# **build context 是 repo 根目錄**，不是 ./backend——這一段要 COPY frontend/，下一段
+# 要 COPY backend/。render.yaml 的 dockerContext、docker-compose 的 context、CI 的
+# `docker build -f backend/Dockerfile .` 三個都是 `.`，而它們之間沒有任何連結，所以
+# 由 tests/test_one_deployment_serves_both_halves.py 綁著。
+#
+# 排除清單也跟著搬了：Docker 只讀 context 根目錄的 .dockerignore，所以那個檔案在
+# repo 根目錄，不在 backend/。
 FROM node:22-slim AS frontend
 
 WORKDIR /build
@@ -27,8 +31,26 @@ COPY frontend/ ./
 # 前端要說得出自己是哪一版（#53）。這個值由建置環境給，沒給就是「不知道」——而
 # 「不知道」不可以被顯示成「已經是最新」。
 ARG APP_GIT_COMMIT=""
-ENV VITE_APP_COMMIT=${APP_GIT_COMMIT}
-RUN npm run build
+# 名字要跟 vite.config.ts 讀的那一個一樣（`process.env.APP_GIT_COMMIT`）。
+#
+# 這裡本來寫的是 VITE_APP_COMMIT，看起來很合理——Vite 的慣例就是 VITE_ 開頭——但
+# vite.config.ts 的 `define` 走的不是 import.meta.env 那條路，它直接讀 process.env。
+# 所以名字對不起來，映像檔裡的前端版本永遠是空的，徽章永遠顯示「不知道」。
+#
+# 而這件事不會讓任何東西變紅：建置成功、bundle 正常、畫面能用。它只是安靜地把整個
+# 徽章變成廢的——而那個徽章存在的理由，就是讓「沒跟上更新」看得見。
+ENV APP_GIT_COMMIT=${APP_GIT_COMMIT}
+
+# `npx vite build`，不是 `npm run build`（那是 `tsc -b && vite build`）。
+#
+# 這裡**只負責打包，不負責驗證**。型別檢查是 CI 那個 frontend job 的事，而 deploy job
+# 要三個 job 全綠才會跑——所以任何走到這一步的 commit，型別早就檢查過了。在這裡再跑一
+# 次 tsc 換不到任何安全性：它只可能在一個 CI 已經放行的 commit 上失敗。
+#
+# 換到的是記憶體和時間。tsc 是這一段裡最吃記憶體的一步（它要把整個專案連測試檔一起載
+# 進來），而免費方案的建置環境就是靠這種地方決定建不建得完。產物完全一樣：tsc 不產生
+# 任何 bundle 內容，vite 用 esbuild 自己剝掉型別。
+RUN npx vite build
 
 # --- 後端 ---------------------------------------------------------------------
 FROM python:3.13-slim

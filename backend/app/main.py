@@ -136,6 +136,11 @@ def setup_mode_active() -> bool:
 # the setup routes because they are the point.
 _SETUP_MODE_OPEN = ("/api/setup", "/healthz")
 
+# 後端永遠擁有的前綴。**兩個地方共用這一份**：底下的靜態檔 fallback 用它決定「這條
+# 路不是我的」，設定模式那個鎖用它的反面決定「這條路是畫面，要放行」。分成兩份的話，
+# 它們會各自漂移，而漂移的那一天沒有東西會變紅。
+_BACKEND_OWNS = ("/api", "/healthz", "/ws", "/docs", "/openapi.json", "/redoc")
+
 
 @app.middleware("http")
 async def _lock_until_configured(request, call_next):
@@ -180,6 +185,21 @@ async def _lock_until_configured(request, call_next):
             },
         )
     if path.startswith(_SETUP_MODE_OPEN[0]) or request.method == "OPTIONS":
+        return await call_next(request)
+
+    # **畫面要通。** 設定頁是前端的一頁，而前端現在跟 API 在同一個服務上（#53）——
+    # 擋掉它就等於擋掉那個唯一能告訴他「你還缺什麼、按這顆按鈕產生」的東西，而那正是
+    # 這個時間點上唯一有用的畫面。他手上只有一個網址，打開是一行 JSON 的話，對一個不
+    # 是工程師的人來說流程就到此為止。
+    #
+    # 這是實地量出來的，不是想出來的：first-deploy 那個 job 用全空的設定跑真的容器，
+    # `GET /` 回 503。前端還在 Vercel 的時候 `/` 根本不會經過這個中介層，所以搬進來
+    # 之前這個鎖是對的——它只是沒有跟著搬。
+    #
+    # 判準用 _BACKEND_OWNS 的反面，不是另外列一份「設定模式可以看的靜態檔」白名單：
+    # 那種白名單漏掉一個雜湊過的檔名就是一片白畫面，而白畫面沒有訊息也沒有狀態碼。
+    # 反過來寫的話，會被擋的永遠只有後端自己那幾個前綴。
+    if not any(path.startswith(prefix) for prefix in _BACKEND_OWNS):
         return await call_next(request)
 
     return JSONResponse(
@@ -268,7 +288,6 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "di
 #
 # 列出來而不是只靠「排在前面」：排序是一個沒有東西守著的約定，而它壞掉的方式是靜默
 # 的。
-_BACKEND_OWNS = ("/api", "/healthz", "/ws", "/docs", "/openapi.json", "/redoc")
 
 
 @app.get("/{full_path:path}", include_in_schema=False)

@@ -160,3 +160,43 @@ def test_the_setup_mode_probe_carries_the_version_too(client, monkeypatch):
 
     assert body["status"] == "setup"
     assert body["version"]["commit"] == SHA[:7]
+
+
+def test_the_image_hands_the_frontend_build_a_name_it_actually_reads():
+    """**兩邊的環境變數名字要一樣，而在這之前它們不一樣。**
+
+    Dockerfile 設的是 `ENV VITE_APP_COMMIT=...`，`vite.config.ts` 讀的是
+    `process.env.APP_GIT_COMMIT`。名字對不起來，所以映像檔裡建出來的前端，版本永遠是
+    空的——徽章永遠顯示「不知道」。
+
+    這不會讓任何東西變紅：建置成功、bundle 正常、畫面能用。`frontendCommit()` 也做了
+    正確的事（空的就是 null，不是「最新」）。只是那個值從來沒有到過。而這整個徽章存在
+    的理由，就是讓「沒跟上更新」這件事在 app 裡看得見。
+
+    量出來的方式很土：本機跑 `APP_GIT_COMMIT=x npx vite build`，然後 grep dist。
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent.parent
+    dockerfile = (root / "backend" / "Dockerfile").read_text(encoding="utf-8")
+    vite_config = (root / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+
+    # **只看前端那個 stage。** 整份檔案一起看的話這一條會是綠的而 bug 還在：後端那
+    # 一段設的是對的名字（ENV APP_GIT_COMMIT），前端那一段設的是 VITE_APP_COMMIT，
+    # 而兩段互相看不到對方的 ENV。第一版的我就是這樣寫的，它一次就綠了。
+    stages = re.split(r"^FROM\s+", dockerfile, flags=re.MULTILINE)
+    frontend_stage = next((st for st in stages if st.lower().startswith("node:")), None)
+    assert frontend_stage, "Dockerfile 不再有建前端的那個 stage 了"
+
+    injected = re.findall(r"^ENV\s+([A-Z_]+)=", frontend_stage, re.MULTILINE)
+    assert injected, "前端那個 stage 不再注入任何建置期變數了？"
+
+    # vite.config.ts 真的會去讀的名字。
+    read_by_vite = set(re.findall(r"process\.env\.([A-Z_]+)", vite_config))
+    assert read_by_vite, "vite.config.ts 不再從環境變數讀版本了"
+
+    assert read_by_vite & set(injected), (
+        f"Dockerfile 注入 {injected}，但 vite.config.ts 只讀 {sorted(read_by_vite)}——"
+        "名字對不起來，映像檔裡的前端版本會永遠是空的"
+    )
