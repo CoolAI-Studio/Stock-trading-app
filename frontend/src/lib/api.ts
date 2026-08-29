@@ -1,5 +1,12 @@
 const TOKEN_KEY = 'trading_app_token'
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+import { resolveApiBase } from './apiBase'
+
+// 後端在哪裡。預設是**同源**——後端直接供應這個頁面，所以只要部署一次。
+// 前端另外部署的人設 VITE_API_BASE_URL 指向他的後端；見 apiBase.ts。
+const API_BASE_URL = resolveApiBase({
+  base: import.meta.env.VITE_API_BASE_URL,
+  dev: import.meta.env.DEV,
+})
 
 /** Set when a request comes back 401, read once by the login page. Session
  * storage rather than a state variable, because the redirect it causes

@@ -24,7 +24,10 @@ services:
     branch: stable
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    # repo 根目錄，不是 ./backend：Dockerfile 現在也要建前端，所以它要同時
+    # 看得到 frontend/ 和 backend/。這個服務因此同時供應 API 和畫面——**只要
+    # 部署一次**。
+    dockerContext: .
     plan: free
     healthCheckPath: /healthz
     envVars:
@@ -55,7 +58,16 @@ services:
       - key: TV_WEBHOOK_SECRET
         generateValue: true
       - key: CORS_ORIGINS
-        sync: false # your Vercel frontend URL, set after the frontend is deployed
+        # **留空。** 這個服務同時供應 API 和畫面，所以瀏覽器發出的請求是同源的，
+        # 根本不會觸發 CORS——沒有東西要放行。
+        #
+        # 原本這裡寫著「你的 Vercel 前端網址，等前端部署好之後再填」。那句話在只
+        # 部署一次之後會**叫他去填一個他根本沒有的網址**，而填錯的後果是瀏覽器把
+        # 每一個回應都丟掉：畫面全空，而 F12 之外看不出任何線索。
+        #
+        # 只有把畫面另外放在 Vercel／Netlify／Cloudflare 的人才要填，值是那一份的
+        # 網址。
+        sync: false
       - key: LOG_LEVEL
         value: "INFO"
       - key: PUBLIC_BASE_URL

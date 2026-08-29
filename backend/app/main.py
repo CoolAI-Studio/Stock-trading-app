@@ -3,10 +3,11 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.router import api_router
 from app.api.routers.health import router as health_router
@@ -242,3 +243,65 @@ async def _setup_is_reachable_from_anywhere(request, call_next):
 app.include_router(health_router)
 app.include_router(ws_router)
 app.include_router(api_router, prefix="/api")
+
+
+# --- 前端 --------------------------------------------------------------------
+#
+# **後端直接供應前端，所以只要部署一次。**
+#
+# 原本要部署兩次：後端（Render／Railway／Fly.io／自己的機器都行）加前端（只給了
+# Vercel）。那個不對稱有兩個後果——引導頁對後端給三個選擇、對前端只給一個；而更新的
+# 路徑被綁在 Vercel 上（sync-from-upstream.yml 只在「前端是一份 GitHub 複製品而且
+# Actions 開著」的時候有用）。
+#
+# 後端供應前端之後，每一條**後端**的路都自動涵蓋前端，而那些路本來就是通用的。
+#
+# 這不是拿掉 Vercel，是拿掉「必須再部署一次」：想把前端另外放的人照樣可以，設
+# VITE_API_BASE_URL 指向他的後端就好。少掉的是要求，不是選擇。
+#
+# **掛在最後面。** 它會吃掉所有沒被上面接走的路徑，所以順序就是正確性：排在 API 前
+# 面的話，`/api/...` 會拿到 index.html，而前端在等 JSON——錯誤訊息會是「Unexpected
+# token '<'」，跟真正的原因差了十萬八千里。
+FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+# 這幾個前綴永遠是後端的，就算 dist 存在。
+#
+# 列出來而不是只靠「排在前面」：排序是一個沒有東西守著的約定，而它壞掉的方式是靜默
+# 的。
+_BACKEND_OWNS = ("/api", "/healthz", "/ws", "/docs", "/openapi.json", "/redoc")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str) -> Response:
+    """真的存在的檔案照原樣送；其他都回 index.html。
+
+    後者是單頁應用必須的：路由在瀏覽器裡，不在伺服器上。使用者按 F5 重新整理
+    `/strategies`，伺服器上沒有那個檔案——回 404 的話他看到的是一個壞掉的網站，而他
+    什麼都沒做錯。
+
+    **沒有 dist 也要能起來。** 開發環境沒建過前端，一個只建後端的映像檔也沒有。一個
+    因為找不到靜態檔而起不來的 API，是把「畫面沒了」升級成「提醒沒了」——而這個 app
+    的鐵律是警告不能停擺。
+    """
+    if any(("/" + full_path).startswith(prefix) for prefix in _BACKEND_OWNS):
+        # 走到這裡代表上面每一個路由都沒接——也就是那個 API 路徑不存在。回 JSON 的
+        # 404，不是 app 的外殼：回 HTML 的話，一個打錯的網址會讓前端以為請求成功
+        # 了，然後在解析的時候炸掉。
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not FRONTEND_DIST.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="這一份部署沒有內建前端。前端另外部署的話，把它指向這個後端的網址。",
+        )
+
+    # `resolve()` 之後確認它還在 dist 底下：`full_path` 是使用者給的，而 `..` 是一
+    # 個一路走到檔案系統根目錄的門。
+    candidate = (FRONTEND_DIST / full_path).resolve()
+    if candidate.is_file() and candidate.is_relative_to(FRONTEND_DIST.resolve()):
+        return FileResponse(candidate)
+
+    index = FRONTEND_DIST / "index.html"
+    if index.is_file():
+        return FileResponse(index)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")

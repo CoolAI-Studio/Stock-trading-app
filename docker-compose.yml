@@ -2,7 +2,11 @@
 #
 #     docker compose up
 #
-# 然後打開 http://localhost:5173。
+# 然後打開 http://localhost:8000。
+#
+# **一個服務、一個埠。** 後端直接供應前端（見 backend/Dockerfile 的前端建置階
+# 段），所以本機這條路跟正式部署跑的是同一個東西——本機能跑而線上不能，或反過
+# 來，那種差異是這個專案最不想要的。
 #
 # 引導頁（docs/install.html）上寫著這一行，而在這個檔案出現之前**那句話是假的**
 # ——repo 裡根本沒有 compose 檔。它是這個專案「本機」那條路唯一能給不寫程式的人
@@ -24,15 +28,15 @@
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # repo 根目錄：Dockerfile 要同時看得到 frontend/ 和 backend/。
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     volumes:
       - appdata:/data
     environment:
       DATABASE_URL: sqlite:////data/app.db
-      CORS_ORIGINS: http://localhost:5173
       PUBLIC_BASE_URL: http://localhost:8000
       LOG_LEVEL: INFO
       # 手機推播要一對 VAPID 金鑰，本機用不到就留空——Email 和 Telegram 不受影響。
@@ -60,21 +64,7 @@ services:
         export TV_WEBHOOK_SECRET="$$(cat /data/TV_WEBHOOK_SECRET)"
         exec python scripts/start.py
 
-  frontend:
-    image: node:24-alpine
-    working_dir: /app
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - nodemodules:/app/node_modules
-    environment:
-      # 瀏覽器是在你的電腦上跑，所以這裡要寫 localhost，不是 compose 裡的服務名。
-      VITE_API_BASE_URL: http://localhost:8000
-    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
-    depends_on:
-      - backend
+
 
 volumes:
   appdata:
-  nodemodules:

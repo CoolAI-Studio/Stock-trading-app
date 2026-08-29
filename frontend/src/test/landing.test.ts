@@ -209,7 +209,6 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     const page = read('install.html')
 
     expect(page).toContain('render.com/deploy')
-    expect(page).toContain('vercel.com/new')
     expect(strip(page)).toContain('VITE_API_BASE_URL')
     expect(strip(page)).toContain('DATABASE_URL')
     // GitHub 只能是「還是不行」時的最後一條路，不是主要動線。
@@ -234,8 +233,11 @@ describe('引導：預設看起來短，展開之後做得完', () => {
       true,
     )
     const yaml = readFileSync(compose, 'utf-8')
-    // 頁面說開 localhost:5173，compose 就必須真的把那個埠開出來。
-    expect(yaml).toContain('5173:5173')
+    // 頁面說開哪個埠，compose 就必須真的把那個埠開出來。
+    //
+    // 值從 5173 變成 8000，是因為後端現在直接供應前端——**一個服務、一個埠**，跟
+    // 正式部署跑的是同一個東西。不變量沒變：頁面和 compose 不可以各說各話。
+    expect(yaml).toContain('8000:8000')
   })
 
   it('三頁互相走得通，而且知道自己是第幾步', () => {
@@ -290,10 +292,24 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     const render = page.match(/href="(https:\/\/render\.com\/deploy[^"]*)"/)?.[1] ?? ''
     expect(render).toContain('repo=https://github.com/CoolAI-Studio/Stock-trading-app')
 
-    const vercel = page.match(/href="(https:\/\/vercel\.com\/new\/clone[^"]*)"/)?.[1] ?? ''
-    expect(vercel).toContain('repository-url=https://github.com/CoolAI-Studio/Stock-trading-app')
-    expect(vercel, 'Vercel 會去建置整個 repo 而不是 frontend').toContain('root-directory=frontend')
-    expect(vercel, '不問這一格，前端就不知道後端在哪').toContain('env=VITE_API_BASE_URL')
+    // **只有一顆按鈕。**
+    //
+    // 後端現在直接供應前端，所以只要部署一次。原本這裡還檢查 Vercel 那顆的
+    // root-directory 和 env 參數——那些不變量沒有被違反，是**那顆按鈕不該在這裡
+    // 了**：兩顆按鈕、兩個網址、要對起來的一格 VITE_API_BASE_URL，全都是那個多
+    // 出來的部署帶來的。
+    expect(page, '還留著第二顆部署按鈕').not.toContain('vercel.com/new/clone')
+  })
+
+  it('把畫面另外放這條路還在 —— 拿掉的是要求，不是選擇', () => {
+    // 通用化不等於只剩一種做法。想用 Vercel／Netlify／Cloudflare 的人照樣可以，
+    // 而他需要知道的兩件事是那一格環境變數、和後端那邊要放行他的網址。
+    const text = strip(read('install.html'))
+
+    expect(text).toMatch(/VITE_API_BASE_URL/)
+    expect(text, '分開放的話後端要放行那個網址，不然每一次請求都會被擋掉').toMatch(
+      /CORS_ORIGINS/,
+    )
   })
 
   it('要人去別人家點的步驟，都給得出找不到時的搜尋字', () => {

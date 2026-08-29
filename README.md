@@ -10,14 +10,20 @@ LINE/Telegram/Email 通知。後端 FastAPI + SQLAlchemy，前端 Vite + React +
 
 ## 想要自己的一份嗎？一鍵部署
 
-點下面兩個按鈕，用你自己的帳號部署一份完全獨立的系統——你自己的網址、自己的資料庫、
+點下面這顆按鈕，用你自己的帳號部署一份完全獨立的系統——你自己的網址、自己的資料庫、
 自己的運算資源，跟原作者完全無關，也不會用到原作者的任何額度。
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CoolAI-Studio/Stock-trading-app)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/CoolAI-Studio/Stock-trading-app&root-directory=frontend&env=VITE_API_BASE_URL&envDescription=VITE_API_BASE_URL%20%E8%AB%8B%E5%A1%AB%E4%BD%A0%E9%83%A8%E7%BD%B2%E5%A5%BD%E7%9A%84%E5%BE%8C%E7%AB%AF%E7%B6%B2%E5%9D%80)
 
-這是**最短的一條路**，不是唯一的一條：Render、Vercel、Neon 都有免費方案而且不用信用卡，
+**只要部署一次。** 同一個服務同時供應 API 和畫面，所以沒有「前端」「後端」兩份要管、
+也沒有兩個網址要對起來。
+
+這是**最短的一條路**，不是唯一的一條：Render 和 Neon 都有免費方案而且不用信用卡，
 所以按鈕指向它們。要用別家（或自己的機器）完全可以，往下看「不想用這三家？」。
+
+想把畫面另外放在 Vercel／Netlify／Cloudflare 也照樣可以——把 `frontend/` 部署過去，
+設 `VITE_API_BASE_URL` 指向你的後端網址就好。**拿掉的是「必須部署兩次」這個要求，
+不是「可以分開放」這個選擇。**
 
 **步驟：**
 

@@ -110,29 +110,29 @@
       </li>
 
       <li>
-        <h3>建立前端</h3>
-        <p>按這顆，同樣用 GitHub 登入。</p>
-        <p class="step-action">
-          <a class="btn" href="https://vercel.com/new/clone?repository-url=https://github.com/CoolAI-Studio/Stock-trading-app&amp;root-directory=frontend&amp;env=VITE_API_BASE_URL" target="_blank" rel="noreferrer noopener">在 Vercel 建立前端</a>
-        </p>
-        <details>
-          <summary>畫面上會問我什麼？</summary>
-          <div class="detail-body">
-            <ol>
-              <li>只有一格：<span class="field">VITE_API_BASE_URL</span></li>
-              <li>貼上一步抄下來的後端網址，<strong>結尾不要有斜線</strong></li>
-              <li>按 Deploy，等一分鐘</li>
-            </ol>
-          </div>
-        </details>
-      </li>
-
-      <li>
         <h3>打開你的網址</h3>
         <p>
-          Vercel 給你的 <code>https://xxx.vercel.app</code>。
+          就是上一步那個網址——<strong>畫面和 API 是同一個</strong>，不用再部署一次。
           畫面會自己帶你到<strong>設定頁</strong>，上面列著還缺什麼。
         </p>
+        <details>
+          <summary>我想把畫面放在別家（Vercel、Netlify、Cloudflare…）</summary>
+          <div class="detail-body">
+            <p>
+              可以，這條路沒有被拿掉——拿掉的只是「<strong>必須</strong>再部署一次」。
+            </p>
+            <ol>
+              <li>把 <code>frontend/</code> 部署到你想用的那一家</li>
+              <li>設一個環境變數 <span class="field">VITE_API_BASE_URL</span>，
+                值是上一步的後端網址，<strong>結尾不要有斜線</strong></li>
+              <li>回後端的平台，把 <span class="field">CORS_ORIGINS</span> 設成你新的前端網址</li>
+            </ol>
+            <p class="gotcha">
+              分開放的話，<strong>更新要各更新一次</strong>：後端會自己更新，
+              而畫面那一份由你自己的平台決定。系統狀態頁會告訴你兩邊各是哪一版。
+            </p>
+          </div>
+        </details>
       </li>
 
       <li>
@@ -152,8 +152,8 @@
               <li>回到設定頁按重新整理，那一項就消失了。</li>
             </ol>
             <p class="gotcha">
-              還有一格叫 <span class="field">CORS_ORIGINS</span>：設定頁會<strong>直接把該填的網址印出來</strong>給你複製，
-              不用自己找。
+              還有一格叫 <span class="field">CORS_ORIGINS</span>：<strong>留空就好</strong>。
+              畫面和 API 是同一個網址，所以沒有跨來源的問題。只有把畫面另外放在別家的人才要填。
             </p>
           </div>
         </details>
@@ -183,7 +183,7 @@
           <li>裝 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer noopener">Docker Desktop</a>。</li>
           <li>下載這個專案（GitHub 頁面上綠色的 <strong>Code</strong> → <strong>Download ZIP</strong>），解壓縮。</li>
           <li>在那個資料夾裡開終端機，輸入 <code>docker compose up</code>。</li>
-          <li>瀏覽器開 <code>http://localhost:5173</code>，從上面第 4 步繼續。</li>
+          <li>瀏覽器開 <code>http://localhost:8000</code>，從上面第 4 步繼續。</li>
         </ol>
         <p class="gotcha">
           資料會存在你電腦上的一個檔案裡。<strong>電腦關機或睡著，盯盤就停了。</strong>
@@ -197,7 +197,7 @@
   <div class="wrap">
     <h2>卡住了</h2>
     <details class="assist" id="ai-ask" hidden
-      data-context="使用者正在安裝一套自架的股票提醒系統。流程是：在 Render 或別家建一個 Docker 後端（要填 DATABASE_URL）、在 Vercel 建前端（要填 VITE_API_BASE_URL 指向後端網址）、打開前端網址讓設定頁列出還缺什麼、按產生按鈕把值貼回平台的環境變數、然後建立第一個帳號。">
+      data-context="使用者正在安裝一套自架的股票提醒系統。流程是：在 Render 或別家建一個 Docker 服務（要填 DATABASE_URL），那一個服務同時供應 API 和畫面，所以只要部署一次；打開那個網址讓設定頁列出還缺什麼、按產生按鈕把值貼回平台的環境變數、然後建立第一個帳號。想把畫面另外放在 Vercel/Netlify 也可以，那時候要設 VITE_API_BASE_URL 和 CORS_ORIGINS。">
       <summary>問 AI（用你第 1 步存的金鑰）</summary>
       <div class="detail-body" id="ai-ask-body"></div>
     </details>
