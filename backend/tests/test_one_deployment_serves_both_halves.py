@@ -266,6 +266,31 @@ def test_every_build_uses_the_repo_root_as_context():
     )
 
 
+def test_no_path_in_the_guide_builds_from_the_backend_folder():
+    """引導頁上**每一條**部署的路都要用專案根目錄當 build context。
+
+    Render 那條修好之後，另外三條還留著舊的說法：Railway 的「Root Directory 填
+    backend」、Fly 的「在 backend 資料夾裡執行 fly launch」。兩個都是把 context 設成
+    backend/——跟花了六輪才找到的那一顆是同一顆地雷，而照做的人會拿到
+    `"/backend/requirements.lock": not found`，一個他無法翻譯的訊息。
+
+    這個 repo 有一整條「部署不是一家公司的事」的規則（CLAUDE.md、
+    test_hosting_is_not_one_company.py）。那條規則要成立，替代路徑就得**真的走得
+    通**，不是只是被列出來。
+    """
+    page = (_root() / "docs" / "install.html").read_text(encoding="utf-8")
+
+    # 「把 backend 當成根目錄／工作目錄」的各種說法。指令本身帶 `backend/` 是對的
+    # （例如 -f backend/Dockerfile），所以比對的是「進到那個資料夾」這個動作。
+    forbidden = [
+        "Root Directory</strong> 填 <code>backend</code>",
+        "在 <code>backend</code> 資料夾",
+        "cd backend",
+    ]
+    for phrase in forbidden:
+        assert phrase not in page, f"引導頁還在叫人從 backend/ 建：{phrase}"
+
+
 def test_the_guide_teaches_the_command_that_actually_works():
     """引導頁教的那一行，要真的建得起來。
 

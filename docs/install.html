@@ -62,13 +62,19 @@
               <li>開 <a href="https://railway.app" target="_blank" rel="noreferrer noopener">railway.app</a>，用 GitHub 登入。</li>
               <li><strong>New Project</strong> → <strong>Deploy from GitHub repo</strong>，
                   選這個專案（先在 GitHub 上按 Fork 複製一份到你的帳號）。</li>
-              <li><strong>Settings</strong> → <strong>Root Directory</strong> 填 <code>backend</code>。</li>
-              <li><strong>Variables</strong> 加上 <span class="field">DATABASE_URL</span>
+              <li><strong>Settings</strong> → <strong>Root Directory</strong> <strong>留空</strong>
+                  （就是專案根目錄）。</li>
+              <li><strong>Variables</strong> 加上 <span class="field">RAILWAY_DOCKERFILE_PATH</span>
+                  = <code>backend/Dockerfile</code>，還有 <span class="field">DATABASE_URL</span>
                   （和選填的 <span class="field">AI_API_KEY</span>）。</li>
               <li><strong>Settings</strong> → <strong>Generate Domain</strong>，拿到你的後端網址。</li>
             </ol>
             <p class="gotcha">畫面偶爾會改版，<strong>找不到就找「Root Directory」和
               「Variables」這兩個字</strong>。</p>
+            <p class="gotcha">Root Directory <strong>不可以</strong>填 <code>backend</code>：
+              這一個映像檔同時要建畫面和 API，所以它得同時看得到 <code>frontend/</code> 和
+              <code>backend/</code> 兩個資料夾。填了的話 build 會失敗在
+              <code>requirements.lock 找不到</code>。</p>
           </div>
         </details>
         <details>
@@ -76,7 +82,10 @@
           <div class="detail-body">
             <ol>
               <li>裝 <a href="https://fly.io/docs/flyctl/install/" target="_blank" rel="noreferrer noopener">flyctl</a>，然後 <code>fly auth signup</code>。</li>
-              <li>下載這個專案，在 <code>backend</code> 資料夾裡執行 <code>fly launch</code>。</li>
+              <li>下載這個專案，在<strong>專案根目錄</strong>執行
+                  <code>fly launch --dockerfile backend/Dockerfile</code>。
+                  （<strong>不要</strong>進 <code>backend</code> 資料夾：這一個映像檔
+                  同時要建畫面和 API，兩個資料夾都要看得到。）</li>
               <li>它問要不要建資料庫時選 <strong>Yes</strong>，Fly 會自己設好
                   <span class="field">DATABASE_URL</span>。</li>
               <li><code>fly deploy</code>。</li>
