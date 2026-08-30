@@ -173,8 +173,23 @@ def system_status(
     # **落後和分岔是兩件事**：前者按一次重新部署就好，後者按幾次都沒有用，因為同步
     # 根本沒跑。說錯的話他會重試幾次然後放棄，而真正該告訴他的那件事從頭到尾沒說出
     # 口。
+    #
+    # 沒帶的時候還有一個地方問得到：**這一份自己供應畫面的話，前端就是這個映像檔裡
+    # 的那一份**，跟後端同一個 commit，依建構為真（#53）。那條路不需要平台把
+    # APP_GIT_COMMIT 當 build arg 傳進來——而那是一個平台不見得會做、我們也保證不了
+    # 的動作，少了它這個偵測會整個安靜地消失。
+    #
+    # 前端有帶就以它為準：分開部署的那一份可能比後端舊好幾個月，而那正是要抓的情
+    # 況；拿後端的去回答會把它蓋掉，方向還是「看起來沒問題」的那一邊。
+    # 函式內匯入：app.main 匯入這個 router，模組層再匯回去就是循環。到這一行的時候
+    # main 已經載完了，而且這樣測試 monkeypatch main.FRONTEND_DIST 也看得到。
+    from app import main
+
+    asked_about = frontend_commit
+    if not asked_about and main.FRONTEND_DIST.is_dir():
+        asked_about = build_info.commit()
     update["frontend_from_upstream"] = (
-        update_check.is_from_upstream(frontend_commit) if frontend_commit else None
+        update_check.is_from_upstream(asked_about) if asked_about else None
     )
 
     worker: dict[str, Any] = {

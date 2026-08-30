@@ -200,3 +200,88 @@ def test_the_image_hands_the_frontend_build_a_name_it_actually_reads():
         f"Dockerfile 注入 {injected}，但 vite.config.ts 只讀 {sorted(read_by_vite)}——"
         "名字對不起來，映像檔裡的前端版本會永遠是空的"
     )
+
+
+# --- 畫面跟 API 出自同一個映像檔的時候，前端的版本不必另外問 -------------------
+#
+# 「這一份被改過嗎」需要**前端自己的** commit，而那是建置期常數：前端帶上來，後端不
+# 知道。分開部署的時候（Vercel 會給 VERCEL_GIT_COMMIT_SHA）這是唯一的辦法。
+#
+# 但畫面現在可以跟 API 出自同一個映像檔（#53）。那時候兩者是同一個 commit **依建構
+# 為真**——前端的 dist 就是這個容器裡的那一份。而建置期的那個值需要平台把
+# APP_GIT_COMMIT 當 build arg 傳進來，那是一個平台不見得會做、而且我們無法保證的
+# 動作。少了它，「這一份被改過」這個偵測就完全不會動——安靜地，沒有東西會變紅。
+#
+# 所以那個問題在這種部署上由後端自己回答。這不是猜：dist 在這個映像檔裡，而映像檔是
+# 從某一個 commit 建出來的。
+
+
+def test_a_bundled_frontend_gets_its_version_from_the_image_it_shipped_in(
+    auth_client, monkeypatch, tmp_path
+):
+    """沒有帶 frontend_commit，但這一份自己供應畫面——那就是同一個 commit。
+
+    這一條守的是「偵測不會因為平台沒傳 build arg 就整個消失」。
+    """
+    from app import main
+    from app.services import update_check
+
+    update_check.forget()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    monkeypatch.setattr(main, "FRONTEND_DIST", dist)
+    monkeypatch.setenv("APP_GIT_COMMIT", "abc1234")
+
+    asked: list[str] = []
+    monkeypatch.setattr(update_check, "is_from_upstream", lambda sha: asked.append(sha) or True)
+
+    resp = auth_client.get("/api/system/status")
+
+    assert resp.status_code == 200, resp.text
+    assert asked == ["abc1234"], "沒有拿這個映像檔自己的 commit 去問"
+    assert resp.json()["update"]["frontend_from_upstream"] is True
+
+
+def test_a_separately_hosted_frontend_still_speaks_for_itself(auth_client, monkeypatch, tmp_path):
+    """前端有帶自己的 commit 的時候，**以它為準**。
+
+    分開部署的那一份可能比後端舊好幾個月，那正是這個偵測要抓的情況。拿後端的
+    commit 去回答會把它蓋掉，而蓋掉的方向是「看起來沒問題」——最糟的那一種。
+    """
+    from app import main
+    from app.services import update_check
+
+    update_check.forget()
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    monkeypatch.setattr(main, "FRONTEND_DIST", dist)
+    monkeypatch.setenv("APP_GIT_COMMIT", "abc1234")
+
+    asked: list[str] = []
+    monkeypatch.setattr(update_check, "is_from_upstream", lambda sha: asked.append(sha) or True)
+
+    auth_client.get("/api/system/status?frontend_commit=9999999")
+
+    assert asked == ["9999999"], "前端帶了自己的版本，卻拿後端的去問"
+
+
+def test_without_a_bundled_frontend_it_still_says_it_does_not_know(
+    auth_client, monkeypatch, tmp_path
+):
+    """沒有內建前端、前端也沒帶版本——那就是不知道。
+
+    **不知道不可以變成「沒有被改過」。** 那句話會讓他以為自動更新對他有效，而如果
+    他其實分岔了，他會一直等一個永遠不會到的更新。
+    """
+    from app import main
+    from app.services import update_check
+
+    update_check.forget()
+    monkeypatch.setattr(main, "FRONTEND_DIST", tmp_path / "there-is-no-dist-here")
+    monkeypatch.setenv("APP_GIT_COMMIT", "abc1234")
+
+    resp = auth_client.get("/api/system/status")
+
+    assert resp.json()["update"]["frontend_from_upstream"] is None
