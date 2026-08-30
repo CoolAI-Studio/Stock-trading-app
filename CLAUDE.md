@@ -88,9 +88,15 @@ Windows。跟上限有關的測試分兩層——「每個平台都要活著」�
   在我們這邊只看得到「部署沒送達」。#53 就是這樣紅的一次——CI 綠、映像檔建得起來、
   Render 收下請求回 200，然後什麼都沒發生。改這兩格要一併去後台把已經存在的服務改掉。
 
-  更糟的是它會**死結**：Blueprint 同步讀的是服務追的那個分支。我們自己的服務追 `main`
-  所以逃掉了；如果它追 `stable`，那就是新設定在 main 上、`stable` 只在部署成功後才前
-  進、而部署正是因為設定是舊的才失敗——三者互相等，只能用手打破。
+  更糟的是它會**死結**，而 #53 真的踩進去了。改 `render.yaml` 會觸發 Blueprint 同步，
+  而同步是整份套用的——它把 `dockerContext: .` 推上去的同時，也把 `branch: stable` 推
+  上去了。於是我們自己的服務從追 `main` 變成追 `stable`，而 `stable` 那一版的
+  Dockerfile 寫的是 `COPY requirements.lock .`（只在 context 是 `./backend` 時成立），
+  用新的 context 建必然失敗。而 `stable` 只在部署成功之後才前進——三者互相等。
+
+  **所以不要讓部署去挑要建哪一個 commit。** CI 的 deploy hook 現在帶
+  `?ref=$GITHUB_SHA`，指名剛剛通過全部測試的那一個，跟後台追哪個分支無關。這一條比
+  「記得去後台把分支改回 main」可靠：後者會被下一次 Blueprint 同步再蓋掉一次。
 - **前端**是 Vercel 的 `new/clone`，會在他的帳號下複製一份 repo，來源是斷的。
   `.github/workflows/sync-from-upstream.yml` 每天從上游 `stable` 快轉；那個工作流程
   **只快轉、絕不覆蓋**（他改過程式碼是他的權利），而且用 `github.repository` 擋住不

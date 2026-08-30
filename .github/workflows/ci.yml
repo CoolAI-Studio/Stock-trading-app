@@ -455,8 +455,25 @@ jobs:
             echo "名稱 RENDER_DEPLOY_HOOK_URL，值貼上那個網址。之後每次 CI 綠燈都會自動部署。"
             exit 0
           fi
-          code=$(curl -sS -o /tmp/deploy.json -w '%{http_code}' -X POST "$HOOK")
-          echo "Render 回應 HTTP $code"
+          # **指名要部署哪一個 commit，不要讓平台自己挑。**
+          #
+          # 沒有 ref 的話，平台部署的是「那個服務追的分支的最新一筆」，而那個欄位不
+          # 在這個 repo 裡——它在後台，而且 Blueprint 同步會拿 render.yaml 覆蓋它。
+          # render.yaml 寫的是 `branch: stable`（那對使用者的副本是對的），所以任何
+          # 一次 render.yaml 的改動，都可能把我們自己的服務也切到 stable。
+          #
+          # 切過去就是死結：stable 只在這個 job 成功之後才前進，而 job 要成功就得先
+          # 部署成功，而部署的是 stable 的舊版——三者互相等，只能用手打破。#53 就這
+          # 樣卡了整整一輪：CI 五個 job 全綠，deploy 每次都在這裡逾時。
+          #
+          # 指名之後，這一步部署的永遠是剛剛通過全部測試的那一個 commit，跟後台那個
+          # 欄位無關。平台如果不認得這個參數，行為就跟以前一樣，不會更糟。
+          case "$HOOK" in
+            *\?*) HOOK_WITH_REF="$HOOK&ref=$GITHUB_SHA" ;;
+            *)    HOOK_WITH_REF="$HOOK?ref=$GITHUB_SHA" ;;
+          esac
+          code=$(curl -sS -o /tmp/deploy.json -w '%{http_code}' -X POST "$HOOK_WITH_REF")
+          echo "Render 回應 HTTP $code（要求部署 ${GITHUB_SHA:0:7}）"
           cat /tmp/deploy.json || true
           case "$code" in
             2*) echo "::notice::已要求 Render 部署 ${GITHUB_SHA:0:7}。" ;;
