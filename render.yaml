@@ -36,11 +36,18 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: SECRET_ENCRYPTION_KEY
-        # Leave it blank on the first deploy. The backend then comes up in
-        # SETUP MODE -- the API is locked, but the frontend's /setup page
-        # lists what is missing and has a button that generates this value
-        # for you. No Python on your own machine required.
-        sync: false
+        # 平台自己產生，使用者一格都不用填。
+        #
+        # 以前這裡是 sync: false，因為 Fernet 只吃一種形狀（base64 的 32 bytes）而
+        # generateValue 給的是普通隨機字串。於是流程變成：部署 → 打開網址 → 設定頁按
+        # 產生 → 複製 → 回後台找到環境變數那頁 → 貼上 → 存檔 → 等重新部署。七個動
+        # 作、跨兩個網站，而任何一步中斷就前功盡棄。真的拿去給目標使用者測試，回來的
+        # 是「我不會用」。
+        #
+        # 那是格式需求不是安全需求，所以由 config.fernet_key 在這一邊解決：任何夠長
+        # 的隨機值都收，已經是 Fernet 金鑰的原封不動（舊的部署不能被弄壞）。金鑰仍然
+        # 只活在環境變數裡——資料庫整份被倒出去也拿不到它。
+        generateValue: true
       - key: VAPID_PUBLIC_KEY
         # Also blank-able on the first deploy: /setup generates the pair.
         # Only needed for phone push notifications -- leaving both halves

@@ -3,6 +3,8 @@ import logging
 import sys
 from functools import lru_cache
 
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The PUBLIC_BASE_URL default, named so the 「still unset」 check in
@@ -276,6 +278,62 @@ _PLACEHOLDER_SECRETS = frozenset(
 # bandit reads any string literal beside a key it considers secret-ish as a
 # hardcoded password (B105); here the key is the setting's NAME and the value
 # is the sentence printed at boot when it is unset.
+# 一個隨機值要多長，才值得拿去推導一把金鑰。
+#
+# 推導不會憑空生出亂度：猜得到的字串推出來的金鑰也是猜得到的。部署平台的「自動產生」
+# 給的值遠比這個長，所以這個門檻擋的是手打的東西，不是平台給的東西。
+_MIN_DERIVABLE = 24
+
+# 固定的鹽。它在這裡的作用是**領域分隔**（同一個環境變數不會推出跟別處一樣的金鑰），
+# 不是每個使用者不同——它必須是固定的，因為同一個值每次都要推出同一把金鑰。不穩定的
+# 話症狀是最壞的一種：存得進去、重啟之後解不開，中間沒有任何錯誤。
+_KDF_SALT = b"stock-alerts/secret-encryption-key/v1"
+
+
+@lru_cache(maxsize=8)
+def fernet_key(raw: str) -> bytes | None:
+    """把 SECRET_ENCRYPTION_KEY 變成一把 Fernet 用得了的金鑰，或 None（值不能用）。
+
+    ＊ 為什麼要有這個。
+
+    Fernet 只吃一種形狀（base64 的 32 bytes），而部署平台的「自動產生一個隨機值」給
+    的是普通隨機字串。形狀不合，所以這一格以前只能由使用者自己在設定頁按「產生」、複
+    製、回到平台後台貼上、存檔、等重新部署——七個動作，跨兩個網站，任何一步中斷就前功
+    盡棄。而真的把這份東西交給目標使用者測試之後，回來的是「我不會用」。
+
+    那個限制不是安全需求，是**格式需求**，而格式需求可以在這一邊解決。金鑰仍然只活在
+    環境變數裡（資料庫整份被倒出去也拿不到它），使用者一次都不用碰。
+
+    ＊ 已經是一把 Fernet 金鑰的話，原封不動地回傳。
+
+    這一條不可以退。已經在跑的實例環境變數裡就是那種值，而資料庫裡有用它加密過的東
+    西。這裡如果「順手也推導一次」，他所有的通知設定和券商金鑰會在下一次更新之後全部
+    解不開——沒有錯誤訊息、沒有退路，而那是「更新不可以停掉已經在跑的那一份」最嚴重的
+    一種違反。
+
+    ＊ 用 scrypt 而不是雜湊一次。
+
+    平台給的值亂度夠，雜湊一次就夠了；但這一格也可能是人手打的，而 scrypt 讓那種值
+    不至於一推就穿。成本用 lru_cache 攤掉——一個行程裡只會算一次。
+    """
+    value = (raw or "").strip()
+    if not value:
+        return None
+
+    try:
+        Fernet(value.encode())
+    except (ValueError, TypeError):
+        pass
+    else:
+        return value.encode()
+
+    if len(value) < _MIN_DERIVABLE:
+        return None
+
+    derived = Scrypt(salt=_KDF_SALT, length=32, n=2**14, r=8, p=1).derive(value.encode("utf-8"))
+    return base64.urlsafe_b64encode(derived)
+
+
 _REQUIRED_SECRETS = {
     "JWT_SECRET": "anyone could mint a login token for your account",  # nosec B105
     "TV_WEBHOOK_SECRET": "anyone could post fake TradingView signals",  # nosec B105
@@ -307,7 +365,6 @@ def _verify_encryption_key(s: Settings) -> None:
     malformed key does the same: present enough for a truthiness check, wrong
     enough to fail at the moment of use.
     """
-    from cryptography.fernet import Fernet
 
     key = (s.SECRET_ENCRYPTION_KEY or "").strip()
     hint = (
@@ -320,14 +377,13 @@ def _verify_encryption_key(s: Settings) -> None:
             "SECRET_ENCRYPTION_KEY is unset -- refusing to start, because broker "
             f"credentials and notification tokens cannot be stored without it. {hint}"
         )
-    try:
-        Fernet(key.encode())
-    except (ValueError, TypeError) as exc:
+    if fernet_key(key) is None:
         raise RuntimeError(
-            "SECRET_ENCRYPTION_KEY is not a valid Fernet key -- refusing to start, "
+            "SECRET_ENCRYPTION_KEY is too short to be usable -- refusing to start, "
             "because it would fail the first time a secret is saved rather than now. "
-            f"{hint}"
-        ) from exc
+            f"It may be any random string of at least {_MIN_DERIVABLE} characters; "
+            f"a hosting platform's 「generate a value」 button produces one. {hint}"
+        )
 
 
 def enforce_required_secrets(s: Settings) -> None:

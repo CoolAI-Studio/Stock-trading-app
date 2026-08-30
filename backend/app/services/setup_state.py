@@ -93,13 +93,15 @@ class MissingSetting:
 
 
 def _fernet_ok(key: str) -> bool:
-    from cryptography.fernet import Fernet
+    """跟 config.py 用同一個判準，不要在這裡自己判一次。
 
-    try:
-        Fernet(key.strip().encode())
-    except (ValueError, TypeError):
-        return False
-    return True
+    兩套判準不同調的話，畫面會說「你還缺這個」而其實已經好了——他會照著去產生一把新
+    的貼上去，然後**所有已經存起來的秘密都解不開**。這個模組的檔頭本來就寫著「每一項
+    檢查都委派給 config.py」，這裡是那條規則的其中一項。
+    """
+    from app.config import fernet_key
+
+    return fernet_key(key) is not None
 
 
 def _vapid_ok(s: Settings) -> tuple[bool, str | None]:
@@ -268,11 +270,12 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "你的 Telegram 權杖、LINE 權杖、Email 密碼都是用這把金鑰加密後才存進"
                     "資料庫的。沒有它，這些東西一個都存不了。"
                     if not key
-                    else "這個值的格式不對，會在你第一次要存通知設定的時候才出錯 —— "
+                    else "這個值太短了，會在你第一次要存通知設定的時候才出錯 —— "
                     "那時候你不會知道原因出在這裡。"
                 ),
                 how=(
-                    f"按下面的「產生」，把產生出來的值貼回{hosting.paste_target()}。"
+                    f"通常你不用管這一格：{hosting.paste_target()}會自己產生它。"
+                    "如果它沒有（或你把它清空了），按下面的「產生」再貼回去就好，"
                     "不需要在自己電腦上裝任何東西。"
                 ),
                 generator="fernet",

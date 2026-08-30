@@ -4,7 +4,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import String
 from sqlalchemy.types import TypeDecorator
 
-from app.config import settings
+from app.config import fernet_key, settings
 
 
 class EncryptedJSON(TypeDecorator):
@@ -20,14 +20,18 @@ class EncryptedJSON(TypeDecorator):
     cache_ok = True
 
     def _fernet(self) -> Fernet:
+        # 走 config.fernet_key，不要自己 Fernet(key)：那個值可以是部署平台自動產生的
+        # 普通隨機字串（形狀不是 Fernet 的），而**這裡是唯一真的拿它去加解密的地方**。
+        # 判準跟開機檢查、設定頁分開寫的話，會出現「開機說沒問題、存的時候才爆」。
         key = settings.SECRET_ENCRYPTION_KEY
-        if not key:
+        usable = fernet_key(key) if key else None
+        if usable is None:
             raise RuntimeError(
-                "SECRET_ENCRYPTION_KEY is not set -- cannot encrypt/decrypt stored "
-                'secrets. Generate one with: python -c "from cryptography.fernet '
-                'import Fernet; print(Fernet.generate_key().decode())"'
+                "SECRET_ENCRYPTION_KEY is not set or is too short -- cannot "
+                "encrypt/decrypt stored secrets. Any random string of 24+ characters "
+                "works; a hosting platform's 「generate a value」 button produces one."
             )
-        return Fernet(key.encode() if isinstance(key, str) else key)
+        return Fernet(usable)
 
     def process_bind_param(self, value, dialect):
         if value is None:
