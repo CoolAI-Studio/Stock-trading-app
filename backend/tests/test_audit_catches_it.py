@@ -231,3 +231,73 @@ def test_a_real_secret_is_not_excused_by_the_placeholder_list():
     found = "postgresql://trader:hunter2secret@"
 
     assert not any(word in found.lower() for word in audit_module.PLACEHOLDER_WORDS)
+
+
+# --- 真正送到瀏覽器的那份檔案 -------------------------------------------------
+#
+# `AUDIT.md` 的深掃清單第 6 項是「前端：build 出來的檔案裡有沒有帶到不該帶的東西」，
+# 而它一直只能靠人工——CLAUDE.md 寫著「後端的 scripts/audit.py 看的是 HTTP 回應和資料
+# 表，看不到前端的建置產物」。
+#
+# #53 之後那句話對內建前端的部署不再成立：bundle 就掛在同一個網址上，一個 GET 就拿得
+# 到。而同一份文件的最後一句說的正是這件事該怎麼辦——「規則寫得出來的，順手加進
+# scripts/audit.py，深掃找到的東西應該讓第一層變強」。
+#
+# 用的是**同一組 REPO_FORBIDDEN**，不是另外一份清單：兩份會各自漂移，而漂移的那一天
+# 沒有東西會變紅。
+
+
+def _fake_site(pages: dict[str, str]):
+    def fetch(path: str, data: bytes | None = None) -> tuple[int, str]:
+        if path in pages:
+            return 200, pages[path]
+        return 404, ""
+
+    return fetch
+
+
+INDEX = '<!doctype html><div id="root"></div><script src="/assets/app-abc123.js"></script>'
+
+
+def test_a_key_baked_into_the_served_bundle_is_a_finding(auditor):
+    """這是這個檢查存在的理由。
+
+    Vite 會把每一個 VITE_ 開頭的環境變數打進 bundle，而那個 bundle 是公開的。前端那
+    條測試（noSecretsInTheBundle）守的是**原始碼**；這一條守的是**線上真的送出去的那
+    一份**——平台上有人多設了一個環境變數，只有這裡看得見。
+    """
+    bundle = 'const k="sk-" + "";const real="sk-abcdefghijklmnopqrstuvwxyz0123";'
+    auditor.served_bundle(_fake_site({"/": INDEX, "/assets/app-abc123.js": bundle}))
+
+    assert any("金鑰" in f.what or "金鑰" in f.detail for f in auditor.findings), auditor.findings
+
+
+def test_a_clean_bundle_is_not(auditor):
+    auditor.served_bundle(_fake_site({"/": INDEX, "/assets/app-abc123.js": "console.log(1)"}))
+
+    assert auditor.findings == []
+    assert auditor.counts["bundle_files_scanned"] == 1
+
+
+def test_a_documentation_example_in_the_bundle_is_excused(auditor):
+    """設定說明頁會把連線字串的長相印給使用者看，而那段字會進 bundle。
+
+    這裡跟倉庫掃描共用同一份 PLACEHOLDER_WORDS。少了它，這個稽查每一次都會紅，而
+    「久了我不會相信那個警報器」是這個 repo 已經寫下來的結論。
+    """
+    bundle = 'const example="postgresql://user:password@host/db";'
+    auditor.served_bundle(_fake_site({"/": INDEX, "/assets/app-abc123.js": bundle}))
+
+    assert auditor.findings == []
+
+
+def test_a_deployment_that_does_not_serve_a_frontend_is_not_a_finding(auditor):
+    """畫面另外放是一條**合法**的路（#53 拿掉的是要求，不是選擇）。
+
+    那時候這個檢查沒有東西可看，而「沒東西可看」不可以被當成「有問題」——一個會對正
+    確設定報警的稽查，跟壞掉的稽查一樣沒有用。
+    """
+    auditor.served_bundle(_fake_site({}))
+
+    assert auditor.findings == []
+    assert auditor.counts["bundle_files_scanned"] == 0

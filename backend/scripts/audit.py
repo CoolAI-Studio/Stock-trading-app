@@ -565,6 +565,59 @@ class Audit:
 
     # -- 線上那一份（唯讀）------------------------------------------------
 
+    def served_bundle(self, fetch: Any) -> None:
+        """真正送到瀏覽器的那份檔案裡有沒有秘密。
+
+        `AUDIT.md` 的深掃清單第 6 項一直只能靠人工，因為這個稽查看的是 HTTP 回應和資
+        料表，看不到前端的建置產物。#53 之後那句話對內建前端的部署不再成立：bundle 就
+        掛在同一個網址上，一個 GET 就拿得到。
+
+        為什麼值得多這一趟：`noSecretsInTheBundle.test.ts` 守的是**原始碼**（沒有
+        `VITE_` 變數、`define` 裡沒有多的東西），而 Vite 會把環境變數的**值**在建置時
+        直接替換進去——名字消失，值留下。所以真正要問的問題只有在成品上問得到，而成品
+        只有在線上才是「真的那一份」：平台上有人多設了一個環境變數，只有這裡看得見。
+
+        用的是**同一組 REPO_FORBIDDEN 和 PLACEHOLDER_WORDS**，不是另外一份清單。兩份
+        會各自漂移，而漂移的那一天沒有東西會變紅。
+
+        **沒有內建前端不是發現。** 畫面另外放是一條合法的路（#53 拿掉的是要求，不是選
+        擇），而一個會對正確設定報警的稽查跟壞掉的稽查一樣沒有用。
+        """
+        self.counts["bundle_files_scanned"] = 0
+
+        code, html = fetch("/")
+        if code != 200 or "<" not in html:
+            self.note("這一份沒有從自己的網址供應畫面（畫面可能另外放），略過 bundle 掃描")
+            return
+
+        refs = sorted(set(re.findall(r"/assets/[A-Za-z0-9._-]+\.(?:js|css)", html)))
+        if not refs:
+            self.note("首頁上找不到 /assets 的檔案，略過 bundle 掃描")
+            return
+
+        patterns = [(re.compile(pattern), why) for pattern, why in REPO_FORBIDDEN]
+        scanned = 0
+        # 上限是防呆，不是省事：一份正常的 bundle 只有兩三個檔案，而一個會讓稽查跑不
+        # 完的首頁應該當成異常處理，不是慢慢掃完。
+        for ref in refs[:20]:
+            asset_code, body = fetch(ref)
+            if asset_code != 200:
+                self.note(f"{ref} 拿不到（HTTP {asset_code}）——畫面可能是白的")
+                continue
+            scanned += 1
+            for pattern, why in patterns:
+                for match in pattern.finditer(body):
+                    found = match.group()
+                    if any(word in found.lower() for word in PLACEHOLDER_WORDS):
+                        continue
+                    self.fail(
+                        "七、線上",
+                        f"線上送出去的 {ref} 裡有{why}",
+                        "這份檔案是公開的，每一個訪客的瀏覽器都拿得到它。"
+                        f"比對到的片段：{found[:60]}",
+                    )
+        self.counts["bundle_files_scanned"] = scanned
+
     def live(self, base: str) -> None:
         """The same questions, asked of the deployment that actually exists.
 
@@ -721,6 +774,9 @@ class Audit:
                 )
         self.counts["live_gets_probed"] = checked
         self.counts["live_gated_but_open"] = gated_open
+
+        # 端點問完了，再問那份真的送到瀏覽器的檔案。
+        self.served_bundle(fetch)
 
     def run(self) -> int:
         with tempfile.TemporaryDirectory(prefix="audit-", ignore_cleanup_errors=True) as tmpdir:
