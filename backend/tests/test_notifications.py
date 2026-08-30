@@ -165,7 +165,15 @@ def test_webpush_sender_missing_config():
 
 
 def test_webpush_sender_missing_vapid_key(monkeypatch):
+    """沒有金鑰就要說出口，不要默默地不送。
+
+    「沒有金鑰」的定義變了：兩格都空的時候，那一對是從 SECRET_ENCRYPTION_KEY 推導出來
+    的，所以推播是通的。要真的沒有東西可用，得連推導的來源也拿掉——這一條守的用意（不
+    可以靜默失敗）沒變，只是前提要寫全。
+    """
     monkeypatch.setattr("app.config.settings.VAPID_PRIVATE_KEY", "")
+    monkeypatch.setattr("app.config.settings.VAPID_PUBLIC_KEY", "")
+    monkeypatch.setattr("app.config.settings.SECRET_ENCRYPTION_KEY", "")
     result = WebPushSender().send(
         {"endpoint": "https://push.example.com/x", "p256dh": "p", "auth": "a"}, "hello"
     )

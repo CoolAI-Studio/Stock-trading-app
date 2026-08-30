@@ -422,6 +422,80 @@ def _b64url(value: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
+# 推導推播金鑰用的鹽。跟加密金鑰那一把分開，是**領域分隔**：同一個環境變數推出來的兩
+# 把金鑰不可以互相推得出來。
+_VAPID_SALT = b"stock-alerts/vapid/v1"
+
+
+@lru_cache(maxsize=8)
+def _derive_vapid(seed: str) -> tuple[str, str] | None:
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    material = Scrypt(salt=_VAPID_SALT, length=32, n=2**14, r=8, p=1).derive(seed.encode("utf-8"))
+    try:
+        private = ec.derive_private_key(int.from_bytes(material, "big"), ec.SECP256R1())
+    except ValueError:
+        # 推出來的純量落在曲線的階之外。機率小到這輩子看不到一次，但「小到看不到」不
+        # 是「不會發生」，而它發生時的症狀是開機直接炸掉。
+        return None
+    point = private.public_key().public_bytes(
+        encoding=Encoding.X962, format=PublicFormat.UncompressedPoint
+    )
+    scalar = material
+    return (
+        base64.urlsafe_b64encode(point).rstrip(b"=").decode(),
+        base64.urlsafe_b64encode(scalar).rstrip(b"=").decode(),
+    )
+
+
+def vapid_keys(s: Settings) -> tuple[str | None, str | None]:
+    """這一份部署要用哪一對推播金鑰。
+
+    ＊ 為什麼要推導。
+
+    這個產品的一句話是「想在手機上收到股票提醒」，而 iOS 的 Web Push 只在加到主畫面
+    的網站上能用。所以推播不是加分項。但它要一對 P-256 金鑰，而部署平台生不出那種形
+    狀，於是那三格只能是空白——「兩個都留空是合法設定」技術上對，實際上的意思是**照最
+    短路徑走完的人永遠收不到手機通知，而且沒有任何東西會說**。
+
+    私鑰就是 32 bytes 的純量，而這一份部署已經有一個高亂度、只活在環境變數裡、**本來
+    就必須固定不變**的秘密（換掉 SECRET_ENCRYPTION_KEY 等於丟掉所有加密過的資料）。
+    用不同的鹽推導，就有了一對穩定的金鑰——不用開新資料表、不用遷移、不用多存一個秘
+    密，也沒有多一個會被倒出去的地方。
+
+    ＊ 只在兩個都沒設的時候才推導。
+
+    這一條讓這個改動對已經在跑的部署**零風險**：有設的照用自己那一對；沒設的本來就沒
+    有推播，也就沒有任何訂閱會被弄壞。反過來做的話，那些人手機上依舊公鑰建立的訂閱會
+    全部失效，而症狀是靜默的——推播照送、對方回 403、沒有人看得到。
+    """
+    public = (s.VAPID_PUBLIC_KEY or "").strip()
+    private = (s.VAPID_PRIVATE_KEY or "").strip()
+    if public or private:
+        # 半對是設定錯誤，由 _verify_vapid 擋開機。這裡原樣回傳，讓那個檢查去說話。
+        return (public or None, private or None)
+
+    seed = (s.SECRET_ENCRYPTION_KEY or "").strip()
+    if fernet_key(seed) is None:
+        return (None, None)
+    derived = _derive_vapid(seed)
+    return derived or (None, None)
+
+
+def vapid_subject(s: Settings) -> str:
+    """推播服務要找誰。RFC 8292 允許 mailto: 或 https:。
+
+    預設值 `mailto:admin@example.com` 是**別人的信箱**。而這個 app 知道自己的網址，那
+    是一個真的、不需要跟使用者要的答案——順帶也不用把他的信箱送給 Apple 和 Google。
+    """
+    subject = (s.VAPID_SUBJECT or "").strip()
+    if subject and subject not in _VAPID_SUBJECT_PLACEHOLDERS:
+        return subject
+    base = s.public_base_url.rstrip("/")
+    return base if base.startswith("https://") else subject
+
+
 def _verify_vapid(s: Settings) -> None:
     """Refuse to start on a VAPID configuration that cannot deliver.
 
@@ -447,7 +521,10 @@ def _verify_vapid(s: Settings) -> None:
     private = (s.VAPID_PRIVATE_KEY or "").strip()
 
     if not public and not private:
-        return  # web push switched off; nothing to check, including the subject
+        # 兩邊都沒設現在代表**由 SECRET_ENCRYPTION_KEY 推導**（見 vapid_keys），不是
+        # 關掉。推出來的一定成對，所以這裡沒有東西要驗；推不出來（沒有加密金鑰）就是
+        # 真的沒有推播，而那由設定頁去說。
+        return
 
     if not public or not private:
         missing = "VAPID_PUBLIC_KEY" if not public else "VAPID_PRIVATE_KEY"

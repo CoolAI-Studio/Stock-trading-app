@@ -216,7 +216,10 @@ def test_but_the_owner_can_still_reach_the_generator_after_setup(
 
     listed = auth_client.get("/api/setup/status", headers=headers)
     assert listed.status_code == 200
-    assert any(row["name"] == "VAPID_PUBLIC_KEY" for row in listed.json()["missing"])
+    # **這一列現在不會出現，而那是對的**：兩格都空的時候那一對是推導出來的，推播本來
+    # 就是通的，沒有東西要跟他要。這條測試守的是另一半——想用自己那一對的人，那顆產生
+    # 按鈕不可以因為「陌生人不能按」就連他也按不到。
+    assert not any(row["name"] == "VAPID_PUBLIC_KEY" for row in listed.json()["missing"])
 
     made = auth_client.post("/api/setup/generate", json={"kind": "vapid"}, headers=headers)
     assert made.status_code == 200

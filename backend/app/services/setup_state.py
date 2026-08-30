@@ -31,7 +31,7 @@ import os
 import secrets
 from dataclasses import dataclass
 
-from app.config import _PLACEHOLDER_SECRETS, LOCAL_BASE_URL, Settings
+from app.config import _PLACEHOLDER_SECRETS, LOCAL_BASE_URL, Settings, vapid_keys
 from app.services import hosting
 
 # Long enough that guessing is not a strategy, and the same shape the existing
@@ -309,7 +309,13 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
             )
 
     ok, half = _vapid_ok(s)
-    if ok and not (s.VAPID_PUBLIC_KEY or "").strip():
+
+    # 兩格都空的時候，那一對金鑰是從 SECRET_ENCRYPTION_KEY 推導出來的
+    # （config.vapid_keys），所以推播本來就是通的，沒有東西要跟他要。
+    derived_public, derived_private = vapid_keys(s)
+    push_works = bool(derived_public and derived_private)
+
+    if ok and not (s.VAPID_PUBLIC_KEY or "").strip() and not push_works:
         # LISTED EVEN THOUGH IT IS NOT A FAULT. _vapid_ok calls a pair of empty
         # boxes a valid deployment, and it is right -- web push is one channel
         # of four, and somebody using only Telegram must not be told their
@@ -320,6 +326,10 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
         # README tells the reader to leave both blank and press a button on the
         # next page. There was no button. This app is for somebody who wants
         # alerts on their phone; that button is the feature.
+        #
+        # 現在推導頂上了那個位置，所以這一列只剩下一種情況會出現：**連
+        # SECRET_ENCRYPTION_KEY 都沒有**，因此推不出來。那時候手機是真的收不到推播，
+        # 而這個 app 就是為了手機通知存在的，所以那一列還是要在。
         #
         # Non-blocking, and the wording says so, so nothing calls the
         # deployment broken over it.

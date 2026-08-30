@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
-from app.config import settings
+from app.config import settings, vapid_keys
 from app.db.session import get_db
 from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
@@ -292,7 +292,10 @@ def get_vapid_public_key(user: User = Depends(get_current_active_user)) -> dict:
     applicationServerKey -- public by design, safe to hand to any logged-in
     user (auth is only required here to avoid an unauthenticated GET, not
     because the key itself is sensitive)."""
-    return {"public_key": settings.VAPID_PUBLIC_KEY}
+    # 同一個來源：瀏覽器把這把公鑰烤進它建立的每一個訂閱，而簽名用的是同一對的私
+    # 鑰。這裡如果讀 settings 而簽名讀推導的，每一次推播都會被回 403，而 app 全綠。
+    public_key, _ = vapid_keys(settings)
+    return {"public_key": public_key or ""}
 
 
 @router.delete("/logs/{log_id}", status_code=status.HTTP_204_NO_CONTENT)

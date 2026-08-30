@@ -130,3 +130,148 @@ def test_the_setup_page_does_not_report_a_generated_value_as_missing():
     )
 
     assert "SECRET_ENCRYPTION_KEY" not in [i.name for i in setup_state.missing_settings(s)]
+
+
+# --- 推播那三格 ---------------------------------------------------------------
+#
+# 這個產品的一句話是「想在手機上收到股票提醒」，而 iOS 的 Web Push 只在「加到主畫面
+# 再從那裡打開」的網站上能用（見 frontend/src/lib/platform.ts）。所以推播不是加分項，
+# 它幾乎就是這個產品本身。
+#
+# 但它要一對 P-256 金鑰，而部署平台生不出那種形狀。以前的說法是「兩個都留空也是合法
+# 設定」——技術上對，實際上那句話的意思是：**照著最短路徑走完的人，永遠收不到手機通
+# 知，而且沒有任何東西會說。**
+#
+# 那對金鑰其實不需要另外存：私鑰就是 32 bytes 的純量，而這一份部署已經有一個高亂度、
+# 只活在環境變數裡、而且**本來就必須固定不變**的秘密（換掉 SECRET_ENCRYPTION_KEY 等
+# 於丟掉所有加密過的資料）。用不同的 salt 推導出來，就有了一對穩定的金鑰，不用開新
+# 資料表、不用遷移、不用多存一個秘密。
+#
+# **只在兩個都沒設的時候才推導。** 這一條讓這個改動對已經在跑的部署零風險：有設的照
+# 用自己那一對；沒設的本來就沒有推播，也就沒有任何訂閱會被弄壞。
+
+
+def _settings_with(**kw):
+    from app.config import Settings
+
+    base = dict(
+        DATABASE_URL="sqlite://",
+        JWT_SECRET="a-real-secret-value-not-a-placeholder",
+        TV_WEBHOOK_SECRET="another-real-secret-value-here",
+        SECRET_ENCRYPTION_KEY=PLATFORM_GENERATED,
+    )
+    base.update(kw)
+    return Settings(**base)
+
+
+def test_a_deployment_that_set_nothing_still_gets_a_usable_pair():
+    """**這一條就是「照最短路徑走完也收得到手機通知」。**"""
+    from app.config import vapid_keys
+
+    public, private = vapid_keys(_settings_with())
+
+    assert public and private
+
+
+def test_the_derived_pair_really_is_a_pair():
+    """公鑰要真的是那把私鑰算出來的。
+
+    不成對的後果是這個 repo 已經寫下來的那一種：Apple 對每一次推播回 403
+    VapidPkHashMismatch，而 app 開機全綠、健康檢查全綠、頻道建得起來還回報成功——
+    一個提醒都不會到。
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from app.config import _b64url, vapid_keys
+
+    public, private = vapid_keys(_settings_with())
+    scalar = int.from_bytes(_b64url(private), "big")
+    expected = (
+        ec.derive_private_key(scalar, ec.SECP256R1())
+        .public_key()
+        .public_bytes(encoding=Encoding.X962, format=PublicFormat.UncompressedPoint)
+    )
+
+    assert _b64url(public) == expected
+
+
+def test_the_pair_is_the_same_after_a_restart():
+    """換一對金鑰會讓每一台已經訂閱的裝置失效，而使用者不會知道要重新設定。"""
+    from app.config import vapid_keys
+
+    assert vapid_keys(_settings_with()) == vapid_keys(_settings_with())
+
+
+def test_a_configured_pair_wins():
+    """**這一條讓這個改動對已經在跑的部署零風險。**
+
+    他們環境變數裡有一對能用的金鑰，而手機上有依那把公鑰建立的訂閱。這裡如果改成用推
+    導的，那些訂閱全部失效——而症狀是靜默的：推播照送、回 403、沒有人看得到。
+    """
+    from app.config import vapid_keys
+
+    mine = _settings_with(VAPID_PUBLIC_KEY="BPublicHalf", VAPID_PRIVATE_KEY="cHJpdmF0ZQ")
+
+    assert vapid_keys(mine) == ("BPublicHalf", "cHJpdmF0ZQ")
+
+
+def test_without_an_encryption_key_there_is_nothing_to_derive_from():
+    """推導不會憑空生出亂度。沒有來源就是沒有推播，而那要說得出口，不是假裝有。"""
+    from app.config import vapid_keys
+
+    assert vapid_keys(_settings_with(SECRET_ENCRYPTION_KEY="")) == (None, None)
+
+
+def test_the_subject_falls_back_to_this_deployment_itself():
+    """VAPID_SUBJECT 是「推播服務要找誰」，RFC 8292 允許 mailto: 或 https:。
+
+    預設值 mailto:admin@example.com 是**別人的信箱**，而這個 app 知道自己的網址——那
+    是一個真的、而且不需要跟使用者要的答案。順帶也不用把他的信箱送給 Apple 和 Google。
+    """
+    from app.config import vapid_subject
+
+    s = _settings_with(PUBLIC_BASE_URL="https://his-own-deployment.onrender.com")
+
+    assert vapid_subject(s) == "https://his-own-deployment.onrender.com"
+
+
+def test_a_subject_he_actually_set_is_kept():
+    from app.config import vapid_subject
+
+    assert vapid_subject(_settings_with(VAPID_SUBJECT="mailto:him@his-domain.com")) == (
+        "mailto:him@his-domain.com"
+    )
+
+
+def test_the_deploy_form_no_longer_asks_for_the_push_keys():
+    from pathlib import Path
+
+    render = (Path(__file__).resolve().parent.parent.parent / "render.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    for key in ("VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"):
+        assert f"- key: {key}" not in render, f"部署表單還在問他 {key}"
+
+
+def test_the_setup_page_does_not_list_push_keys_it_can_derive():
+    from app.services import setup_state
+
+    names = [i.name for i in setup_state.missing_settings(_settings_with())]
+
+    assert "VAPID_PUBLIC_KEY" not in names
+    assert "VAPID_PRIVATE_KEY" not in names
+
+
+def test_when_there_is_nothing_to_derive_from_it_is_still_listed():
+    """推不出來的時候，那一列要回來。
+
+    這是上一條（推得出來就不列）的另一半。少了它，一個連加密金鑰都沒有的部署會**安靜
+    地**沒有手機推播——而這個 app 就是為了手機通知存在的。
+    """
+    from app.services import setup_state
+
+    names = [i.name for i in setup_state.missing_settings(_settings_with(SECRET_ENCRYPTION_KEY=""))]
+
+    assert "VAPID_PUBLIC_KEY" in names

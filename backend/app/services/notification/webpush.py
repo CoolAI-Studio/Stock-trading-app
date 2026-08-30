@@ -3,7 +3,7 @@ import json
 import requests
 from pywebpush import WebPushException, webpush
 
-from app.config import settings
+from app.config import settings, vapid_keys, vapid_subject
 from app.services.notification.base import SendResult
 
 # The alert's own title on a lock screen. Every push used to arrive titled
@@ -74,7 +74,11 @@ class WebPushSender:
         if not endpoint or not p256dh or not auth:
             return SendResult(ok=False, error="missing endpoint/p256dh/auth")
 
-        if not settings.VAPID_PRIVATE_KEY:
+        # 走 config.vapid_keys，不要直接讀 settings：兩個都沒設的時候那一對是從
+        # SECRET_ENCRYPTION_KEY 推導出來的（見那個函式的說明）。直接讀的話，一份完全
+        # 沒填推播金鑰的部署會在這裡默默地不送——而那正是這個產品最不能有的那種失效。
+        _, private_key = vapid_keys(settings)
+        if not private_key:
             return SendResult(ok=False, error="VAPID_PRIVATE_KEY is not configured")
 
         subscription_info = {"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}}
@@ -86,7 +90,7 @@ class WebPushSender:
             webpush(
                 subscription_info=subscription_info,
                 data=payload,
-                vapid_private_key=settings.VAPID_PRIVATE_KEY,
+                vapid_private_key=private_key,
                 # Built inline on EVERY send, and it has to stay that way.
                 # pywebpush mutates this dict in place, writing `aud` (derived
                 # from this endpoint's origin) and `exp` into it. Hoisting it
@@ -95,7 +99,7 @@ class WebPushSender:
                 # to every other one -- 401 from all of them, forever, while
                 # the first carried on working. Pinned by
                 # tests/test_push_urgency_and_vapid_freshness.py.
-                vapid_claims={"sub": settings.VAPID_SUBJECT},
+                vapid_claims={"sub": vapid_subject(settings)},
                 ttl=self.TTL_SECONDS,
                 timeout=TIMEOUT_SECONDS,
                 # pywebpush copies this dict before adding the VAPID and TTL

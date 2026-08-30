@@ -48,20 +48,15 @@ services:
         # 的隨機值都收，已經是 Fernet 金鑰的原封不動（舊的部署不能被弄壞）。金鑰仍然
         # 只活在環境變數裡——資料庫整份被倒出去也拿不到它。
         generateValue: true
-      - key: VAPID_PUBLIC_KEY
-        # Also blank-able on the first deploy: /setup generates the pair.
-        # Only needed for phone push notifications -- leaving both halves
-        # empty is a valid configuration if you only use Telegram or email.
-        sync: false
-      - key: VAPID_PRIVATE_KEY
-        sync: false
-      - key: VAPID_SUBJECT
-        # Your own contact address, as a mailto: URI. It travels in the signed
-        # VAPID header on every push and exists so a push service can reach
-        # whoever operates the server. Deliberately NOT given a value here:
-        # shipping mailto:you@example.com meant every deployment sent a
-        # fictitious contact, and the app now warns about it on every start.
-        sync: false
+      # 推播金鑰（VAPID）刻意**不在這裡問**。
+      #
+      # 它是一對 P-256 金鑰，平台生不出那種形狀，所以以前這三格只能是空白——而「兩個
+      # 都留空是合法設定」實際上的意思是：照最短路徑走完的人永遠收不到手機通知，而且
+      # 沒有任何東西會說。這個產品的一句話就是「想在手機上收到股票提醒」。
+      #
+      # 現在由 config.vapid_keys 從 SECRET_ENCRYPTION_KEY 推導（不同的鹽），所以它自己
+      # 就會有。想用自己那一對的人，在平台後台加上 VAPID_PUBLIC_KEY／VAPID_PRIVATE_KEY
+      # 就會蓋過推導——已經設好的部署因此完全不受影響。
       - key: TV_WEBHOOK_SECRET
         generateValue: true
       - key: CORS_ORIGINS
