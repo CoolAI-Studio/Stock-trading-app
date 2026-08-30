@@ -62,3 +62,30 @@ repo 是公開的。
 `backend/tests/test_the_infra_declaration_cannot_destroy_the_database.py` 守得住的只
 有安全性質：**放資料的東西不能被刪掉、token 不在檔案裡、state 不進版控**。那幾條是
 在沒有 token 的情況下唯一驗得到、也是最值得驗的東西。
+
+## 線上那一份現在真正的設定（2026-08-30 讀出來的）
+
+底下是用 Render API 直接讀到的值，不是推測。**第一次 `terraform plan` 的時候拿這張表
+去核**：任何一格 plan 想要改掉，都要先問清楚為什麼，而不是按下去。
+
+| 欄位 | 現在的值 | 錯了會怎樣 |
+| --- | --- | --- |
+| `dockerContext` | `.` | 這一格剛剛咬過一次。設成 `./backend` 的話 build 直接失敗（`"/backend/requirements.lock": not found`），而在 CI 那邊只看得到「部署沒送達」 |
+| `dockerfilePath` | `./backend/Dockerfile` | — |
+| `branch` | `main` | 追 `stable` 的話會部署上一版；而 `stable` 只在部署成功之後才前進，所以會**死結** |
+| `autoDeploy` | **`no`** | 開著的話 Render 會在 push 當下就部署，送出測試還沒跑完的 commit。CI 的 deploy job 是唯一該部署的路（見 `ci.yml` 的註解） |
+| `numInstances` | **`1`** | 大於 1 的話盯盤迴圈會有兩份，**每一個提醒都會送兩次**。這個後端只能跑一個行程 |
+| `healthCheckPath` | `/healthz` | 沒設的話 Render 不會知道容器死了 |
+| `plan` / `region` | `free` / `oregon` | 換 region 會換網址，而那個網址在使用者手機上、也在 GitHub 的 `HEALTH_URL` 裡 |
+
+`main.tf` 目前只宣告了前三格加 `plan`／`region`。後三格（`autoDeploy`、`numInstances`、
+`healthCheckPath`）**刻意沒寫進去**：欄位名稱沒辦法在沒有 token 的情況下驗證，而猜錯一
+個名字比留白更糟——留白的話 `terraform plan` 會把差異印出來給人看，猜錯則會安靜地套用
+一個不存在的設定。第一次 plan 之後，照 plan 的實際輸出把它們補上。
+
+**怎麼讀這些值**（不需要進後台，也就不會像這次一樣「對到一格就以為兩格都對」）：
+
+```
+curl -H "Authorization: Bearer $RENDER_API_KEY" \
+  https://api.render.com/v1/services/<srv-id> | jq '.serviceDetails.envSpecificDetails'
+```

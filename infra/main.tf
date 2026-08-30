@@ -37,7 +37,14 @@ resource "render_web_service" "backend" {
       repo_url    = var.repo_url
       branch      = var.release_branch
       dockerfile_path = "./backend/Dockerfile"
-      context     = "./backend"
+      # **根目錄，不是 ./backend。** 這個映像檔同時建前端和後端（#53），所以它要看得
+      # 到 frontend/ 和 backend/ 兩邊。
+      #
+      # 這一格的實測代價：Render 上那個已經存在的服務沒有跟著 render.yaml 更新（建置
+      # 設定是建立當下抄過去的一份），build 失敗成
+      # `"/backend/requirements.lock": not found`，而在 CI 那邊只看得到「部署沒送
+      # 達」。花了六輪才找到，因為 dockerfile_path 是對的，只有 context 不是。
+      context = "."
     }
   }
 

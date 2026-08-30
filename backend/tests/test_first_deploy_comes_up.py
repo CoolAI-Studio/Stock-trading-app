@@ -236,3 +236,52 @@ def test_and_during_setup_it_is_open_to_everyone(client, monkeypatch):
     monkeypatch.setattr("app.config.settings.JWT_SECRET", "")
 
     assert client.get("/api/setup/status").status_code == 200
+
+
+# --- 畫面就在同一個服務上的時候，不要再叫他去部署第二個東西 -------------------
+#
+# 這一條是實地讀出來的，不是想出來的：#53 讓後端直接供應前端之後，設定頁還在說
+#
+#     「等前端部署完（Vercel、Cloudflare Pages、Netlify 都可以），把它給你的網址貼進
+#       來。這一格一定是最後填的，因為在前端存在之前沒有人知道那個網址。」
+#
+# 而現在沒有「前端部署完」這件事了。那句話會做兩件壞事：把一格**正確地空著**的設定
+# 顯示成「你還缺這個」，然後把一個不是工程師的人推去部署第二個東西——正是 #53 拿掉
+# 的那個要求。CLAUDE.md 的第一條使用者規則：永遠不要叫他去別的地方拿一個值。
+
+
+def _names(monkeypatch, dist):
+    from app import main
+    from app.config import Settings
+    from app.services import setup_state
+
+    monkeypatch.setattr(main, "FRONTEND_DIST", dist)
+    s = Settings(
+        DATABASE_URL="sqlite://",
+        JWT_SECRET="a-real-secret-value-not-a-placeholder",
+        TV_WEBHOOK_SECRET="another-real-secret-value-here",
+        CORS_ORIGINS="",
+    )
+    return [item.name for item in setup_state.missing_settings(s)]
+
+
+def test_a_bundled_frontend_does_not_ask_for_cors_origins(monkeypatch, tmp_path):
+    """同一個來源，就沒有跨來源這件事。
+
+    這一格空著是**正確的設定**，不是缺的設定。列出來的話他會照著去找一個不存在的
+    前端網址。
+    """
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+
+    assert "CORS_ORIGINS" not in _names(monkeypatch, dist)
+
+
+def test_a_separately_hosted_frontend_still_needs_it(monkeypatch, tmp_path):
+    """分開放的人還是要填，而且沒填的症狀是一片白畫面。
+
+    拿掉整格的話，走那條路的人會遇到一個沒有任何訊息的失敗——瀏覽器把每一個回應都
+    丟掉，而錯誤藏在開發者工具裡。
+    """
+    assert "CORS_ORIGINS" in _names(monkeypatch, tmp_path / "no-dist-here")

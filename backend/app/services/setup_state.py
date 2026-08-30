@@ -385,7 +385,20 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
             )
         )
 
-    if not [origin for origin in s.cors_origins_list if not origin.startswith("http://localhost")]:
+    # **這一份自己供應畫面的話，這一格空著是正確的，不是缺的。**（#53）
+    #
+    # 同一個來源就沒有跨來源這件事。而列出來的代價不是多一行字：這個使用者不是工程
+    # 師，他會照著那句「等前端部署完」去找一個不存在的前端網址，然後卡在那裡——而
+    # CLAUDE.md 的第一條使用者規則就是永遠不要叫他去別的地方拿一個值。
+    #
+    # 函式內匯入：app.main 會匯入這個模組所在的那一層，模組層匯回去就是循環。
+    from app import main
+
+    serves_its_own_frontend = main.FRONTEND_DIST.is_dir()
+
+    if not serves_its_own_frontend and not [
+        origin for origin in s.cors_origins_list if not origin.startswith("http://localhost")
+    ]:
         missing.append(
             MissingSetting(
                 name="CORS_ORIGINS",
@@ -395,9 +408,10 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "而錯誤訊息藏在開發者工具裡，不會有人去看。"
                 ),
                 how=(
-                    "等前端部署完（Vercel、Cloudflare Pages、Netlify 都可以），"
-                    f"把它給你的網址（https:// 開頭）貼進{hosting.paste_target()}的這一格。"
-                    "這一格一定是最後填的，因為在前端存在之前沒有人知道那個網址。"
+                    "只有把畫面另外放在別的地方（Vercel、Cloudflare Pages、Netlify）"
+                    "才需要這一格——那時候把它給你的網址（https:// 開頭）貼進"
+                    f"{hosting.paste_target()}的這一格。"
+                    "畫面跟 API 在同一個網址上的話，這一格留空就對了。"
                 ),
                 generator=None,
                 blocking=False,

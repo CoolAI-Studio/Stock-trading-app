@@ -105,11 +105,25 @@ def test_a_deployment_still_on_the_localhost_default_is_told(monkeypatch):
     assert "PUBLIC_BASE_URL" in _advisory(_settings(PUBLIC_BASE_URL="http://localhost:8000"))
 
 
-def test_cors_still_pointing_at_localhost_is_told(monkeypatch):
+# CORS_ORIGINS 只有在**畫面另外放**的時候才是一個缺的設定（#53）：後端自己供應前端
+# 的話，同一個來源，沒有跨來源這件事。
+#
+# 底下兩條測的正是分開放那條路，所以那個前提要寫出來。不寫的話它們會取決於這台機器
+# 上有沒有 frontend/dist——開發者跑過一次 `vite build` 就紅，CI 上沒建過就綠。這個
+# repo 已經被反方向的同一種東西咬過三次（backend/.env 和 trading_app_dev.db 讓本機綠
+# CI 紅）。
+def _hosted_somewhere_else(monkeypatch, tmp_path):
+    from app import main
+
+    monkeypatch.setattr(main, "FRONTEND_DIST", tmp_path / "this-deployment-serves-no-frontend")
+
+
+def test_cors_still_pointing_at_localhost_is_told(monkeypatch, tmp_path):
     """The single most likely mistake: the frontend is deployed, its URL was
     never copied back, and every page loads blank with a console error the
     owner will not open."""
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    _hosted_somewhere_else(monkeypatch, tmp_path)
 
     assert "CORS_ORIGINS" in _advisory(_settings(CORS_ORIGINS="http://localhost:5173"))
 
@@ -156,9 +170,10 @@ def test_every_entry_says_which_step_of_the_flow_it_belongs_to():
         assert item.step >= 1, item
 
 
-def test_the_database_comes_before_the_urls():
+def test_the_database_comes_before_the_urls(monkeypatch, tmp_path):
     """Nothing works without it, and the URLs cannot even be known until the
     services exist."""
+    _hosted_somewhere_else(monkeypatch, tmp_path)
     items = {i.name: i.step for i in setup_state.missing_settings(_settings(DATABASE_URL=""))}
 
     assert items["DATABASE_URL"] < items["CORS_ORIGINS"]

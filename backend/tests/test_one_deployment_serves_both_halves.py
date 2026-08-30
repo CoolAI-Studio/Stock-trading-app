@@ -249,6 +249,22 @@ def test_every_build_uses_the_repo_root_as_context():
     assert "dockerContext: ." in render, "render.yaml 的 context 不是根目錄"
     assert "context: ." in compose, "compose 的 context 不是根目錄"
 
+    # **第四個地方，而它是最安靜的一個。** infra/main.tf 宣告的是維護者自己那一份
+    # Render 服務。它沒有被跑過（見 CLAUDE.md 的工程標準表），所以錯了不會有任何東
+    # 西變紅——直到有人第一次 `terraform apply`，然後把已經修好的那一格種回去。
+    #
+    # 那一格種回去的後果剛剛量過：build 失敗、線上留在舊版、而我們這邊只看得到「部
+    # 署沒送達」。它花了六輪才找到，因為後台的 dockerfilePath 是對的，只有 context
+    # 不是——一個看起來已經排除掉的假設。
+    terraform = (_root() / "infra" / "main.tf").read_text(encoding="utf-8")
+    docker_block = terraform.split("docker = {", 1)[1].split("}", 1)[0]
+    assert '"./backend"' not in docker_block, (
+        "infra/main.tf 還把 build context 宣告成 ./backend——apply 下去會把 #53 種回來"
+    )
+    assert 'context     = "."' in docker_block or 'context = "."' in docker_block, (
+        "infra/main.tf 的 build context 不是根目錄"
+    )
+
 
 def test_the_guide_teaches_the_command_that_actually_works():
     """引導頁教的那一行，要真的建得起來。

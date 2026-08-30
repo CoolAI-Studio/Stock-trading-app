@@ -23,6 +23,25 @@ def _secret_encryption_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_built_frontend_unless_a_test_says_so(monkeypatch, tmp_path):
+    """`frontend/dist` 在不在，不可以決定測試的結果。
+
+    #53 之後有幾條路會問「這一份部署自己供應畫面嗎」（`main.FRONTEND_DIST.is_dir()`）
+    ——例如設定頁要不要把 CORS_ORIGINS 列成缺的設定。而那個目錄在開發者的機器上可能
+    存在（跑過一次 `npm run build` 就有了），在 CI 的後端 job 上永遠不存在。
+
+    不釘死的話，同一份程式碼會**本機紅、CI 綠**，而且看不出原因。這個 repo 已經被反
+    方向的同一種東西咬過三次（`backend/.env` 和 `trading_app_dev.db` 讓本機綠 CI 紅）。
+
+    預設對齊 CI：沒有建好的前端。需要有的測試自己 monkeypatch 一個 tmp 目錄上去——
+    那時候它是測試明講的前提，不是這台機器碰巧的狀態。
+    """
+    from app import main
+
+    monkeypatch.setattr(main, "FRONTEND_DIST", tmp_path / "no-frontend-was-built")
+
+
+@pytest.fixture(autouse=True)
 def _no_outbound_http(monkeypatch):
     """沒有一條測試可以打真的網路。
 
