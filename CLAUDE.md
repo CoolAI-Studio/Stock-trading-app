@@ -88,15 +88,24 @@ Windows。跟上限有關的測試分兩層——「每個平台都要活著」�
   在我們這邊只看得到「部署沒送達」。#53 就是這樣紅的一次——CI 綠、映像檔建得起來、
   Render 收下請求回 200，然後什麼都沒發生。改這兩格要一併去後台把已經存在的服務改掉。
 
-  更糟的是它會**死結**，而 #53 真的踩進去了。改 `render.yaml` 會觸發 Blueprint 同步，
-  而同步是整份套用的——它把 `dockerContext: .` 推上去的同時，也把 `branch: stable` 推
-  上去了。於是我們自己的服務從追 `main` 變成追 `stable`，而 `stable` 那一版的
-  Dockerfile 寫的是 `COPY requirements.lock .`（只在 context 是 `./backend` 時成立），
-  用新的 context 建必然失敗。而 `stable` 只在部署成功之後才前進——三者互相等。
+  #53 花了整整一輪才找到，而卡住的原因是**它只錯一半**：後台的 `dockerfilePath` 是對
+  的（`./backend/Dockerfile`），`dockerContext` 還是舊的 `./backend`。看的人對到一格就
+  以為兩格都對了，於是這個假設被錯誤地排除掉，接下來六輪都在猜別的。build log 說的是
+  `"/backend/requirements.lock": not found`——context 是 `./backend`，所以
+  `COPY backend/requirements.lock` 去找的是 `backend/backend/…`。
 
-  **所以不要讓部署去挑要建哪一個 commit。** CI 的 deploy hook 現在帶
-  `?ref=$GITHUB_SHA`，指名剛剛通過全部測試的那一個，跟後台追哪個分支無關。這一條比
-  「記得去後台把分支改回 main」可靠：後者會被下一次 Blueprint 同步再蓋掉一次。
+  **教訓不是「記得去改」，是「不要用問的，用讀的」。** 平台 API 讀得到真正存著的值
+  （`GET /v1/services/{id}` 的 `serviceDetails.envSpecificDetails`），而那一次讀取直接
+  結束了六輪猜測。順帶否證掉的還有兩個當時很合理的假設：分支從來沒有被同步改掉（一直
+  是 `main`），`autoDeploy` 也一直是 `no`。每一個都花了一輪去否證。
+
+  CI 的 deploy hook 另外帶 `?ref=$GITHUB_SHA` 指名 commit。那不是這次的解法（問題在
+  context 不在分支），但它便宜，而且拿掉了一整類「讓部署平台自己挑要建什麼」的風險。
+
+  另外一條實測出來的：**Render 不會把服務的環境變數當 docker build arg 傳進去**，所以
+  `APP_GIT_COMMIT` 在建置期是空的，前端 bundle 裡沒有版本。這就是為什麼「這一份被改
+  過」要由後端回答（見 `system.py`）——線上 bundle grep 過，0 個命中。
+
 - **前端**是 Vercel 的 `new/clone`，會在他的帳號下複製一份 repo，來源是斷的。
   `.github/workflows/sync-from-upstream.yml` 每天從上游 `stable` 快轉；那個工作流程
   **只快轉、絕不覆蓋**（他改過程式碼是他的權利），而且用 `github.repository` 擋住不
