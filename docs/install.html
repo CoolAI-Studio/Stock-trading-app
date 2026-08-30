@@ -33,7 +33,7 @@
   <div class="wrap">
     <ol class="steps">
       <li>
-        <h3>建立後端</h3>
+        <h3>建立服務</h3>
         <p>
           按這顆按鈕，用 GitHub 帳號登入 Render，它會照著設定檔幫你建好。
         </p>
@@ -108,7 +108,7 @@
       </li>
 
       <li>
-        <h3>抄下後端網址</h3>
+        <h3>抄下你的網址</h3>
         <p>
           建好之後 Render 會給你一個
           <code>https://xxx.onrender.com</code>，在頁面最上面。複製它。
@@ -122,8 +122,30 @@
         <h3>打開你的網址</h3>
         <p>
           就是上一步那個網址——<strong>畫面和 API 是同一個</strong>，不用再部署一次。
-          畫面會自己帶你到<strong>設定頁</strong>，上面列著還缺什麼。
+          你會直接看到<strong>建立帳號</strong>的畫面：加密金鑰、登入密鑰、推播金鑰
+          都是自動的，<strong>沒有東西要你複製貼上</strong>。
         </p>
+        <details>
+          <summary>它把我帶到「設定頁」而不是建立帳號</summary>
+          <div class="detail-body">
+            <p>
+              代表真的還缺一格——最常見的是
+              <span class="field">DATABASE_URL</span> 打錯或沒填，因為那是唯一一個
+              這個 app 生不出來的值（資料庫在別人家）。
+            </p>
+            <p>
+              那一頁會列出缺什麼、不補會怎樣。能自己產生的旁邊有一顆
+              <strong>「產生」</strong>按鈕：按一下、複製、回 Render 後台點你的服務、
+              左邊選單 <strong>Environment</strong>、找到<strong>同名</strong>的那一格
+              貼進去、按 <strong>Save</strong>。Render 會自動重新部署，約兩分鐘，
+              然後回設定頁重新整理。
+            </p>
+            <p class="gotcha">
+              還有一格叫 <span class="field">CORS_ORIGINS</span>：<strong>留空就好</strong>。
+              畫面和 API 是同一個網址，所以沒有跨來源的問題。只有把畫面另外放在別家的人才要填。
+            </p>
+          </div>
+        </details>
         <details>
           <summary>我想把畫面放在別家（Vercel、Netlify、Cloudflare…）</summary>
           <div class="detail-body">
@@ -139,30 +161,6 @@
             <p class="gotcha">
               分開放的話，<strong>更新要各更新一次</strong>：後端會自己更新，
               而畫面那一份由你自己的平台決定。系統狀態頁會告訴你兩邊各是哪一版。
-            </p>
-          </div>
-        </details>
-      </li>
-
-      <li>
-        <h3>按產生、貼回去</h3>
-        <p>
-          設定頁上每一項能自己產生的都有一顆<strong>「產生」</strong>按鈕。
-          按一下、複製、貼回 Render。
-        </p>
-        <details>
-          <summary>貼回 Render 的哪裡？</summary>
-          <div class="detail-body">
-            <ol>
-              <li>回 Render 後台，點你的服務。</li>
-              <li>左邊選單 <strong>Environment</strong>。</li>
-              <li>找到<strong>同名</strong>的那一格（例如 <span class="field">SECRET_ENCRYPTION_KEY</span>），把值貼進去。</li>
-              <li>按 <strong>Save</strong>。Render 會自動重新部署，約兩分鐘。</li>
-              <li>回到設定頁按重新整理，那一項就消失了。</li>
-            </ol>
-            <p class="gotcha">
-              還有一格叫 <span class="field">CORS_ORIGINS</span>：<strong>留空就好</strong>。
-              畫面和 API 是同一個網址，所以沒有跨來源的問題。只有把畫面另外放在別家的人才要填。
             </p>
           </div>
         </details>
