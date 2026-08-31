@@ -214,8 +214,80 @@
   }
 
   /** 第二、三頁：有金鑰**也有模型**才出現。按了會失敗的東西不要給。 */
+  /**
+   * 沒有金鑰時的退路：把問題整理好，複製走。
+   *
+   * 使用者：「移到最後，中間有疑問要問誰?」——AI 排在第一步不是因為它是功能，是
+   * 因為卡住的時候要有人問。而原本這裡開頭就 `if (!get(KEY)) return`，於是**最需
+   * 要幫忙的那個人看到的是一片空白**：還沒申請金鑰的、或者把分頁關過的（金鑰只
+   * 存在 sessionStorage）。
+   *
+   * 這幾頁每一個 ai-ask 都帶著 data-context——他正在做什麼的完整描述。把它跟他的
+   * 問題拼成一段話複製到剪貼簿，他貼到任何免費的 AI 網頁版就有答案。零註冊、零金
+   * 鑰，而且對「決定不用 AI」的人一樣成立。
+   *
+   * 講得出貼到哪裡去，不只說「找一個 AI」——對這個使用者那等於沒說。
+   */
+  function mountCopyFallback(root, body, context) {
+    root.hidden = false
+    body.innerHTML =
+      '<p class="gotcha">還沒填金鑰也沒關係。把問題複製走，貼到你平常用的 AI ' +
+      '（<a href="https://chatgpt.com" target="_blank" rel="noreferrer noopener">ChatGPT</a>、' +
+      '<a href="https://claude.ai" target="_blank" rel="noreferrer noopener">Claude</a>、' +
+      '<a href="https://gemini.google.com" target="_blank" rel="noreferrer noopener">Gemini</a> ' +
+      '的免費網頁版都可以）——它會連你現在在做什麼一起帶過去。</p>' +
+      '<p><input id="ai-q-copy" class="assist-input" type="text" ' +
+      'placeholder="例如：Neon 的連線字串在哪裡複製？"></p>' +
+      '<p><button id="ai-copy" class="btn">複製問題</button> ' +
+      '<span id="ai-copied" class="assist-answer"></span></p>'
+
+    var said = body.querySelector('#ai-copied')
+    body.querySelector('#ai-copy').addEventListener('click', function () {
+      var question = body.querySelector('#ai-q-copy').value.trim()
+      var text =
+        '我正在照一份安裝說明架一套自架的股票提醒系統，卡住了。\n\n' +
+        '我現在在做的事：' +
+        context +
+        '\n\n我的問題：' +
+        (question || '（請看上面的情況，告訴我下一步該做什麼）')
+
+      function done(ok) {
+        said.textContent = ok ? '複製好了，貼到 AI 那邊問吧。' : '複製不了，請手動選取上面那一行。'
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function () {
+            done(true)
+          },
+          function () {
+            done(false)
+          },
+        )
+        return
+      }
+      // 舊瀏覽器、或非 https 的來源：clipboard API 不在。
+      var area = document.createElement('textarea')
+      area.value = text
+      document.body.appendChild(area)
+      area.select()
+      var ok = false
+      try {
+        ok = document.execCommand('copy')
+      } catch (e) {
+        ok = false
+      }
+      document.body.removeChild(area)
+      done(ok)
+    })
+  }
+
   function mountAsk(root, body, context) {
-    if (!get(KEY) || !get(MODEL)) return
+    // 金鑰＋模型都有才給「直接問」：少了模型就送出，換來的是一個一定會失敗的請求
+    // 和一句他看不懂的錯誤。沒有的話走複製那條路——**不可以什麼都不給**。
+    if (!get(KEY) || !get(MODEL)) {
+      mountCopyFallback(root, body, context)
+      return
+    }
     root.hidden = false
     body.innerHTML =
       '<p><input id="ai-q" class="assist-input" type="text" placeholder="例如：Neon 的連線字串在哪裡複製？"></p>' +

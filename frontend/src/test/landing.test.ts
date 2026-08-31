@@ -193,10 +193,42 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     }
   })
 
-  it('沒有選到模型就不給問 —— 有金鑰不等於能用', () => {
+  it('沒有選到模型就不給「直接問」 —— 有金鑰不等於能用', () => {
+    // 原本這一條斷言的是 `if (!get(KEY) || !get(MODEL)) return`，也就是**整個框
+    // 藏起來**。用意（沒選模型就不要送出一個一定會失敗的請求）是對的，但那個做法
+    // 連帶把下面那一條擋掉了，所以改成驗用意：沒有金鑰或沒有模型的時候，不出現
+    // 那個會直接送出請求的表單。
     const script = read('assist.js')
 
-    expect(script).toMatch(/if \(!get\(KEY\) \|\| !get\(MODEL\)\) return/)
+    expect(script).toMatch(/get\(KEY\).*get\(MODEL\)/s)
+    expect(script, '沒有模型時仍然會掛上直接送出的表單').toMatch(/ai-go/)
+  })
+
+  it('沒有金鑰也要問得到 —— 卡住的人正是還沒有金鑰的那一個', () => {
+    // 使用者：「移到最後，中間有疑問要問誰?」——AI 排在第一步不是因為它是功能，
+    // 是因為**卡住的時候要有人問**。這一點我一開始判斷錯了。
+    //
+    // 但原本的做法有一個雞生蛋：mountAsk 開頭就 `if (!get(KEY)) return`，所以沒有
+    // 金鑰的人**連「這裡可以問」都看不到**。而金鑰只存在 sessionStorage——關掉分頁
+    // 就沒了。也就是說最需要幫忙的那個人（還沒申請金鑰、或分頁關過的人）看到的是
+    // 一片空白。
+    //
+    // 解法不需要金鑰：這幾頁每一個 ai-ask 都帶著 data-context（他正在做什麼的描
+    // 述）。把 context 加上他的問題整理成一段話、複製到剪貼簿，他貼到任何免費的
+    // AI 網頁版就有答案。零註冊、零金鑰，而且對還沒決定要不要用 AI 的人也成立。
+    const script = read('assist.js')
+
+    expect(script, '沒有複製到剪貼簿的退路').toMatch(/clipboard|execCommand/)
+    // 而且要講得出貼到哪裡去——「自己找一個 AI」對這個使用者等於沒說。
+    expect(script).toMatch(/ChatGPT|Claude|Gemini/)
+
+    for (const page of PAGES.filter((p) => p !== 'index.html')) {
+      const source = read(page)
+      if (!source.includes('id="ai-ask"')) continue
+      expect(source, `${page} 的問 AI 區塊寫成要有金鑰才有用`).not.toMatch(
+        /<summary>問 AI（用你第 1 步存的金鑰）<\/summary>/,
+      )
+    }
   })
 
   it('每一個抽屜都有自己的標題 —— 不然瀏覽器會畫出「詳細資料」', () => {

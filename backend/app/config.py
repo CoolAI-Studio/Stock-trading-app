@@ -367,10 +367,16 @@ def _verify_encryption_key(s: Settings) -> None:
     """
 
     key = (s.SECRET_ENCRYPTION_KEY or "").strip()
+    # NOT 「run this Python one-liner」 any more, on two counts. It is wrong --
+    # any random string of 24+ characters works now, because fernet_key derives
+    # a key from whatever it is given -- and it was always the wrong thing to
+    # say to somebody who wants stock alerts on their phone and does not have
+    # Python. That instruction is where the setup used to end.
     hint = (
-        "Generate one with: "
-        'python -c "from cryptography.fernet import Fernet; '
-        'print(Fernet.generate_key().decode())"'
+        "It may be ANY random string of 24 or more characters. On a hosting "
+        "platform, use its 「generate a value」 button for this variable "
+        "(render.yaml already asks for that); anywhere else, any password "
+        "manager's random-password generator will do."
     )
     if not key:
         raise RuntimeError(

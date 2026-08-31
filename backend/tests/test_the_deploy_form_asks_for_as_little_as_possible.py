@@ -275,3 +275,33 @@ def test_when_there_is_nothing_to_derive_from_it_is_still_listed():
     names = [i.name for i in setup_state.missing_settings(_settings_with(SECRET_ENCRYPTION_KEY=""))]
 
     assert "VAPID_PUBLIC_KEY" in names
+
+
+def test_it_says_not_to_build_anything_until_the_database_is_real(monkeypatch):
+    """**先部署、之後再弄資料庫**這條路能走，但它有一個陷阱。
+
+    `DATABASE_URL` 有預設值，所以留空也部署得起來——畫面會起來，設定頁會帶他去弄資料
+    庫。那對一個不確定要不要再註冊一家服務的人是好事：他可以先看到東西動起來。
+
+    但那時候用的是容器裡的一個檔案，而它每次重新部署就消失。他如果先建了帳號、寫了
+    策略、設好通知，等到把 DATABASE_URL 填進去，**那些全部不見**——換成一個全新的空資
+    料庫。而他不會預期這件事，因為畫面從頭到尾看起來都正常。
+
+    設定頁已經說了「那個檔案會被清空」，但沒有說**因此現在先不要建東西**。差別在於前
+    者描述狀態，後者告訴他此刻該做什麼——而他需要的是後者。
+    """
+    from app.config import Settings
+    from app.services import setup_state
+
+    # 平台的判斷看的是 RENDER 這個標記（hosting._KNOWN），不是那個網址。
+    monkeypatch.setenv("RENDER", "true")
+    s = Settings(
+        JWT_SECRET="a-real-secret-value-not-a-placeholder",
+        TV_WEBHOOK_SECRET="another-real-secret-value-here",
+        SECRET_ENCRYPTION_KEY=PLATFORM_GENERATED,
+        DATABASE_URL="sqlite:///./trading_app_dev.db",
+    )
+
+    entry = next(i for i in setup_state.missing_settings(s) if i.name == "DATABASE_URL")
+
+    assert "建立帳號" in entry.how or "先不要" in entry.how

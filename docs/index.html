@@ -142,6 +142,15 @@
       </div>
     </details>
 
+    <!-- 這一頁也要能問。它是他在弄金鑰的地方，也就是最可能卡住、而且**保證還沒有
+         金鑰**的地方——少了這個，那個雞生蛋就從第一頁開始。沒有金鑰時 assist.js 會
+         給複製那條路，貼到免費的 AI 網頁版就好。 -->
+    <details class="assist" id="ai-ask" hidden
+      data-context="使用者正在申請一把 AI 金鑰，準備給一套自架的股票提醒系統用。那個金鑰是選用的：不用 AI 的話整套系統照常運作，只是少了「幫我看看這段策略」這類輔助。他可以用 OpenRouter（免費模型結尾是 :free）、Groq、Google AI Studio 等等，拿到之後填在部署表單的 AI_API_KEY，或裝好之後在 app 的「AI 輔助」頁填。">
+      <summary>卡住了？問 AI（有金鑰就直接問，沒有也能問）</summary>
+      <div class="detail-body" id="ai-ask-body"></div>
+    </details>
+
   </div>
 </section>
 
