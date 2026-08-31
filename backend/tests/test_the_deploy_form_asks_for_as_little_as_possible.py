@@ -334,3 +334,28 @@ def test_no_setting_text_contains_markdown(monkeypatch, marker):
         for item in setup_state.missing_settings(s):
             for field, text in (("why", item.why), ("how", item.how)):
                 assert marker not in text, f"{item.name} 的 {field} 裡有 markdown：{marker}"
+
+
+def test_it_no_longer_asks_him_for_the_push_contact_address(monkeypatch):
+    """VAPID_SUBJECT 現在是自動的，所以不可以再跟他要。
+
+    那一格是「推播服務要找誰」，RFC 8292 允許 https:，而 config.vapid_subject 會用這份
+    部署自己的網址。跟他要一個 app 已經有的值，是這個 repo 的使用者規則第一條在講的那
+    件事——而且他照著填一個信箱，換來的是把自己的信箱送給 Apple 和 Google。
+
+    這一條是**我自己改動留下的尾巴**：我把 subject 改成自動的，卻沒有回頭改那句叫他填
+    信箱的說明。
+    """
+    from app.config import Settings
+    from app.services import setup_state
+
+    monkeypatch.setenv("RENDER", "true")
+    s = Settings(
+        JWT_SECRET="a-real-secret-value-not-a-placeholder",
+        TV_WEBHOOK_SECRET="another-real-secret-value-here",
+        SECRET_ENCRYPTION_KEY="",  # 推不出來，所以那一列會出現
+        DATABASE_URL="postgresql://u:p@example.com/db",
+    )
+
+    for item in setup_state.missing_settings(s):
+        assert "VAPID_SUBJECT" not in item.how, f"{item.name} 還在叫他填 VAPID_SUBJECT"

@@ -417,7 +417,14 @@ _VAPID_SUBJECT_PLACEHOLDERS = frozenset(
     {"mailto:you@example.com", "mailto:admin@example.com", "mailto:me@example.com"}
 )
 
-_VAPID_HINT = "Regenerate a matching pair with: python scripts/generate_vapid_keys.py"
+# 先講那顆按鈕，不是那支腳本。會看到這句話的人是手動設過 VAPID 的人，所以腳本仍然
+# 有用——但這個 repo 的使用者規則是「app 生得出來的就在設定頁給按鈕」，而它給了。
+_VAPID_HINT = (
+    "Press 「產生」 on this deployment's /setup page for a matching pair, or run "
+    "python scripts/generate_vapid_keys.py if you are already at a command line. "
+    "Leaving BOTH empty is also valid: the pair is then derived from "
+    "SECRET_ENCRYPTION_KEY."
+)
 
 
 def _b64url(value: str) -> bytes:

@@ -355,7 +355,11 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "按下面的「產生」會一次給你完整的一對，兩個值都要貼回"
                     f"{hosting.paste_target()}："
                     "VAPID_PUBLIC_KEY 和 VAPID_PRIVATE_KEY。"
-                    "另外 VAPID_SUBJECT 填你自己的信箱，格式是 mailto:you@example.com。"
+                    # VAPID_SUBJECT 刻意不提：config.vapid_subject 會用這份部署自己的
+                    # 網址（RFC 8292 允許 https:）。跟他要一個 app 已經有的值，是這個
+                    # repo 的使用者規則第一條在講的那件事——而且他照著填一個信箱，換來
+                    # 的是把自己的信箱送給 Apple 和 Google。
+                    "剩下的這個 app 會自己處理。"
                 ),
                 generator="vapid",
                 blocking=False,
