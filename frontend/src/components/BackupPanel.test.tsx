@@ -46,6 +46,24 @@ describe('BackupPanel', () => {
     vi.mocked(api.put).mockResolvedValue(SCHEDULE as never)
   })
 
+  it('說得出這個備份救不回什麼，以及那把金鑰現在要去哪裡拿', () => {
+    // 通知管道的設定（Telegram token、LINE token、Email 密碼）在備份檔裡是**原樣帶
+    // 走**的——仍然用部署那把 SECRET_ENCRYPTION_KEY 加密。所以還原需要那把金鑰，而
+    // 這個備份檔裡沒有它。
+    //
+    // 這件事以前也成立，但使用者當時是自己產生那把金鑰、自己貼進平台的，文件叫他順
+    // 手存進密碼管理器。**現在它由平台自動產生，他從頭到尾沒看過它**——那個「順手」
+    // 消失了，而後果沒有跟著消失：服務被刪掉的話，連他自己下載的這個備份都解不開。
+    //
+    // 所以要在他正在想「壞掉了怎麼救」的這一頁說出口，而不是只寫在一份他不會打開的
+    // 文件裡。
+    renderPanel()
+
+    const panel = screen.getByLabelText('下載備份')
+    expect(panel).toHaveTextContent(/SECRET_ENCRYPTION_KEY/)
+    expect(panel).toHaveTextContent(/不在這個檔案裡|沒有包含|不包含/)
+  })
+
   it('warns that the passphrase is not recoverable before asking for one', () => {
     renderPanel()
     expect(screen.getByText(/不會存在系統裡/)).toBeInTheDocument()

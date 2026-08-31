@@ -68,12 +68,14 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 3. Render 會讀取 `render.yaml` 並列出要建立的服務（`trading-app-backend`），確認後建立。
 4. 建立過程中，Render 會要求你手動填入標記 `sync: false` 的環境變數：
    - `DATABASE_URL`：貼上一開始從 Neon 拿到的連線字串
-   - **其他全部留白。** 包括 `SECRET_ENCRYPTION_KEY`、`JWT_SECRET`、推播金鑰——
-     下一步在網頁上按一顆按鈕就會產生，**不需要在你自己的電腦上裝或跑任何東西**。
-     （`SECRET_ENCRYPTION_KEY` 產生之後，貼回 Render 之前先把它存進你的密碼管理器：
-     這把鑰匙是唯一的，弄丟了就再也解不開已經存起來的券商金鑰和通知帳密，連在網頁上
-     刪掉重設都做不到。詳見第 7 節〈備份〉。）
+   - **其他每一格都不用管。** `SECRET_ENCRYPTION_KEY`、`JWT_SECRET`、`TV_WEBHOOK_SECRET`
+     由 Render 自己產生；推播金鑰由 app 自己算出來。你不會被要求去任何地方拿一個值，
+     也不用在自己電腦上裝或跑任何東西。
    - `CORS_ORIGINS` 也留白。畫面跟 API 在同一個網址上，沒有跨來源這件事。
+
+   > **部署完成之後，馬上做第 7 節的第一件事。** `SECRET_ENCRYPTION_KEY` 現在是自動
+   > 產生的，所以**你不會看到它**——而它弄丟等於已經存起來的券商金鑰和通知帳密永久解
+   > 不開，連你自己下載的備份檔也救不回來。要去 Render 後台把它複製出來存好。
 5. 部署完成後，Render 會給你一個網址，例如 `https://trading-app-backend-xxxx.onrender.com`。
    **這就是你的網址**，畫面和 API 都在上面。
 6. 打開 `https://<你的網址>/healthz`，最外層看到 `"status": "ok"`（HTTP 200）就代表服務上線成功。剛部署完、背景 worker 還沒跑完第一輪時，`worker` 和 `market_data` 會顯示 `starting`，這是正常的。
@@ -215,11 +217,19 @@ docker build -f backend/Dockerfile --build-arg APP_GIT_COMMIT=$(git rev-parse HE
 
 **要存在哪裡**
 
-1. 用密碼管理器（Bitwarden、1Password、Apple 密碼、Google 密碼管理工具都可以）開一筆安全筆記，命名成類似「Stock trading app 正式環境金鑰」，把上表所有的值貼進去，並註明是哪一天存的。
-2. **至少要兩份，而且不能在同一個地方。** 例如：密碼管理器一份 ＋ 印出來放家裡抽屜一份。
-3. **不要放的地方**：GitHub（就算是 private repo 也不行）、用 LINE/Messenger 傳給自己、桌面上的 `.txt`、沒有加密的雲端硬碟。
+1. **先去把值抄出來。** 上表那些金鑰現在多數是 Render 自己產生的，所以它們只存在
+   於平台後台——你從來沒看過。到 Render → 你的服務 → 左邊 **Environment**，那一頁列著
+   每一格的名字，點眼睛圖示可以看到值。
+2. 用密碼管理器（Bitwarden、1Password、Apple 密碼、Google 密碼管理工具都可以）開一筆安全筆記，命名成類似「Stock trading app 正式環境金鑰」，把上表所有的值貼進去，並註明是哪一天存的。
+3. **至少要兩份，而且不能在同一個地方。** 例如：密碼管理器一份 ＋ 印出來放家裡抽屜一份。
+4. **不要放的地方**：GitHub（就算是 private repo 也不行）、用 LINE/Messenger 傳給自己、桌面上的 `.txt`、沒有加密的雲端硬碟。
 
-> **不要把 Render 當成你的備份。** 服務被刪掉、或帳號出狀況的時候，上面的環境變數會跟著一起消失。正確的順序是**先存進密碼管理器，再貼到 Render**，不要等貼完才想到要備份。
+> **不要把 Render 當成你的備份。** 服務被刪掉、或帳號出狀況的時候，上面的環境變數會
+> 跟著一起消失，而那些值沒有別的地方有。
+>
+> 以前這一節寫的是「先存進密碼管理器，再貼到 Render」。**現在做不到了**：那些值是
+> Render 產生的，你手上從來沒有過。少掉一個手動步驟換來的是這個代價——備份這件事從
+> 「順手」變成「要專程去做」，所以它被移到部署那一節的最後，趁你還在後台的時候。
 
 ### 7b. 資料庫備份（Neon）
 
