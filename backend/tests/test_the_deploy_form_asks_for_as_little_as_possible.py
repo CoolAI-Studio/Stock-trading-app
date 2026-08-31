@@ -305,3 +305,32 @@ def test_it_says_not_to_build_anything_until_the_database_is_real(monkeypatch):
     entry = next(i for i in setup_state.missing_settings(s) if i.name == "DATABASE_URL")
 
     assert "建立帳號" in entry.how or "先不要" in entry.how
+
+
+@pytest.mark.parametrize("marker", ["**", "__", "`"])
+def test_no_setting_text_contains_markdown(monkeypatch, marker):
+    """設定頁的文案是**純文字**渲染的（SetupPage 的 `{item.how}`），所以 markdown 的
+    記號會原樣出現在畫面上。
+
+    這一條是補的：我在 DATABASE_URL 的說明裡寫了 `**…**`，而 first-run 那一關（真的
+    開瀏覽器走一遍全新部署）抓到了它——`畫面上沒有沒被渲染的 markdown`。那一關很有價
+    值，但它要跑一個真的容器加一個真的瀏覽器，而這件事一個字串比對就問得出來。
+
+    涵蓋所有欄位，不只我改到的那一個：下一個人寫的時候不會記得這條規則。
+    """
+    from app.config import Settings
+    from app.services import setup_state
+
+    monkeypatch.setenv("RENDER", "true")
+    for s in (
+        Settings(JWT_SECRET="", TV_WEBHOOK_SECRET="", SECRET_ENCRYPTION_KEY="", DATABASE_URL=""),
+        Settings(
+            JWT_SECRET="a-real-secret-value-not-a-placeholder",
+            TV_WEBHOOK_SECRET="another-real-secret-value-here",
+            SECRET_ENCRYPTION_KEY=PLATFORM_GENERATED,
+            DATABASE_URL="sqlite:///./trading_app_dev.db",
+        ),
+    ):
+        for item in setup_state.missing_settings(s):
+            for field, text in (("why", item.why), ("how", item.how)):
+                assert marker not in text, f"{item.name} 的 {field} 裡有 markdown：{marker}"
