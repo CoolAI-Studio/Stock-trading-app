@@ -46,22 +46,23 @@ describe('BackupPanel', () => {
     vi.mocked(api.put).mockResolvedValue(SCHEDULE as never)
   })
 
-  it('說得出這個備份救不回什麼，以及那把金鑰現在要去哪裡拿', () => {
-    // 通知管道的設定（Telegram token、LINE token、Email 密碼）在備份檔裡是**原樣帶
-    // 走**的——仍然用部署那把 SECRET_ENCRYPTION_KEY 加密。所以還原需要那把金鑰，而
-    // 這個備份檔裡沒有它。
+  it('說得出這個檔案自己就夠，以及那把金鑰為什麼還是要存', () => {
+    // 這一條原本斷言的是相反的事：「通知管道救不回來，還原需要部署那把金鑰」。
+    // 那是錯的，而錯的來源是 backup.py 裡一句過期的註解——實測（見
+    // tests/test_backup.py）只用 passphrase 就讀得回那個 token。
     //
-    // 這件事以前也成立，但使用者當時是自己產生那把金鑰、自己貼進平台的，文件叫他順
-    // 手存進密碼管理器。**現在它由平台自動產生，他從頭到尾沒看過它**——那個「順手」
-    // 消失了，而後果沒有跟著消失：服務被刪掉的話，連他自己下載的這個備份都解不開。
+    // 錯在這一頁比錯在註解裡嚴重：它會讓一個備份做對了的人以為自己白做了。
     //
-    // 所以要在他正在想「壞掉了怎麼救」的這一頁說出口，而不是只寫在一份他不會打開的
-    // 文件裡。
+    // 兩件事都要說，而且不可以混在一起：這個**檔案**自給自足；那把金鑰要備份是為了
+    // **線上那個資料庫**——金鑰沒了，資料還在卻永遠打不開，而它現在是平台自動產生
+    // 的，所以他沒看過。
     renderPanel()
 
     const panel = screen.getByLabelText('下載備份')
+    expect(panel).toHaveTextContent(/自給自足/)
+    expect(panel).toHaveTextContent(/不需要/)
     expect(panel).toHaveTextContent(/SECRET_ENCRYPTION_KEY/)
-    expect(panel).toHaveTextContent(/不在這個檔案裡|沒有包含|不包含/)
+    expect(panel).toHaveTextContent(/線上資料庫/)
   })
 
   it('warns that the passphrase is not recoverable before asking for one', () => {

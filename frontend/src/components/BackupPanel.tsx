@@ -202,27 +202,29 @@ function ManualBackup() {
         這個密碼<strong>不會存在系統裡</strong>。忘記了就再也打不開那個檔案，我們也救不回來——
         請跟備份檔分開保存。
       </p>
-      {/* 通知管道的設定（Telegram token、LINE token、Email 密碼）在備份檔裡是原樣帶
-          走的——仍然用部署那把 SECRET_ENCRYPTION_KEY 加密。所以還原需要那把金鑰，而
-          這個檔案裡沒有它。
+      {/* 這裡本來寫著「通知管道要另一把金鑰，這個檔案救不回來」。**那是錯的**，而
+          它的來源是 backup.py 裡一句過期的註解（說 config_encrypted 是原樣帶走、仍以
+          部署金鑰加密）。實際跑一次就知道：那一欄的型別是 EncryptedJSON，SQLAlchemy
+          讀取時就解密了，所以進到封套裡的是明文。
 
-          這件事以前也成立，但那時候使用者是自己產生金鑰、自己貼進平台的，文件叫他順
-          手存進密碼管理器。現在它由平台自動產生（部署表單上少一格，那是刻意的），他
-          從頭到尾沒看過它——那個「順手」消失了，而後果沒有跟著消失：服務被刪掉的話，
-          連他自己下載的這個備份都解不開。
+          錯在這一頁比錯在註解裡嚴重得多——它會讓一個備份做對了的人以為自己白做了，
+          然後放棄備份。所以改成說真的那件事：這個檔案自己就夠，而那把金鑰要備份是為
+          了**線上那個資料庫**，不是為了這個檔案。
 
-          所以要在他正在想「壞掉了怎麼救」的這一頁說出口，不是只寫在一份他不會打開的
-          文件裡。 */}
-      <p className="rounded border border-red-800 bg-red-950/40 px-3 py-2 text-xs text-red-300">
-        <strong>還有一把金鑰不在這個檔案裡。</strong>
-        通知管道和券商金鑰是用你這份部署的{' '}
-        <code className="font-mono">SECRET_ENCRYPTION_KEY</code> 加密之後才存進去的，
-        備份檔原樣帶走它們——所以要還原那些東西，除了上面這個密碼，還要同一把
-        <code className="font-mono">SECRET_ENCRYPTION_KEY</code>。
-        <br />
-        它現在由你的部署平台自動產生，<strong>所以你大概沒看過它</strong>。
-        去平台後台的環境變數那一頁把它複製出來，跟這個備份檔<strong>分開</strong>存進
-        密碼管理器。服務哪天被刪掉，這一步就是那些設定救不救得回來的分界。
+          由 tests/test_backup.py 的兩條釘著：passphrase 打得開、沒有 passphrase 的人
+          連一個位元組都讀不到。 */}
+      <p className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+        <strong className="text-slate-300">這個檔案是自給自足的。</strong>
+        還原只需要上面這個密碼，<strong>不需要</strong>你這份部署的
+        <code className="font-mono"> SECRET_ENCRYPTION_KEY</code>——通知管道的設定在
+        檔案裡是解開的，由這個密碼保護。
+      </p>
+      <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+        <strong>但那把金鑰還是要另外存一份。</strong>
+        它保護的是<strong>線上資料庫</strong>裡那些設定：金鑰沒了，那些資料還在，卻永
+        遠打不開。而它現在由你的部署平台自動產生，
+        <strong>所以你大概沒看過它</strong>——去平台後台的環境變數那一頁複製出來，
+        跟這個備份檔分開存進密碼管理器。
       </p>
 
       <div className="flex flex-wrap gap-3">

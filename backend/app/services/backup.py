@@ -9,10 +9,12 @@ easily be months old.
 **Encrypted with the owner's own passphrase, not the deployment's key.** Two
 separate reasons, and both matter:
 
-- The archive carries broker API keys and notification tokens. Those are
-  encrypted at rest precisely so they are never lying around in the clear, and
-  a backup that undoes that is a liability wherever it ends up -- a downloads
-  folder, an email, someone's cloud drive.
+- The archive carries notification tokens (broker credentials are not in it at
+  all). Those are encrypted at rest precisely so they are never lying around in
+  the clear, and a backup that undoes that is a liability wherever it ends up --
+  a downloads folder, an email, someone's cloud drive. The passphrase envelope
+  is what keeps that true here: inside it the values are plain, outside it not
+  one byte of them is readable.
 - A backup that can only be opened with a secret stored on the server it is
   backing up is not a backup of anything. If that server is what was lost, so
   is the key.
@@ -152,10 +154,22 @@ def _snapshot(db: Session, user: User) -> dict:
                 "alert_interval_sec",
             ),
         ),
-        # config_encrypted is carried as stored -- still encrypted with the
-        # deployment's SECRET_ENCRYPTION_KEY. Restoring these therefore needs
-        # that key as well as this passphrase, which is said out loud in the
-        # restore script rather than discovered.
+        # config_encrypted arrives here ALREADY DECRYPTED: the column type is
+        # EncryptedJSON, so SQLAlchemy decrypts on load and this sees the dict.
+        # What lands in the archive is the plaintext, inside the passphrase
+        # envelope like every other field -- which is exactly what the module
+        # docstring's second bullet requires, and it holds.
+        #
+        # This comment used to say the opposite ("carried as stored, still
+        # encrypted, so a restore needs that key too"). It was wrong, and being
+        # wrong in a comment cost more than being wrong in code would have: it
+        # was copied into inspect_backup.py's closing note, into DEPLOYMENT.md's
+        # restore section, and finally onto the backup panel itself, where it
+        # told somebody who HAD backed up correctly that their archive could not
+        # restore their notification settings. Pinned now by
+        # tests/test_backup.py::test_the_archive_opens_with_the_passphrase_alone,
+        # which builds a real channel and reads it back with the passphrase and
+        # nothing else.
         "notification_channels": _rows(
             db.query(NotificationChannel)
             .filter(NotificationChannel.user_id == user.id)

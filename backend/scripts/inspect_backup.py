@@ -65,8 +65,8 @@ def main() -> int:
     print(
         "\n要看完整內容，加上 --json 導出：\n"
         f"  python {Path(__file__).name} {path} --json > backup.json\n"
-        "\n注意：通知管道與券商憑證的設定仍以部署當時的 SECRET_ENCRYPTION_KEY 加密，\n"
-        "還原到新環境時那把金鑰要一起帶過去，否則那幾筆解不開。"
+        "\n這個檔案是自給自足的：打開它只需要上面那個備份密碼，不需要當初那份部署的\n"
+        "SECRET_ENCRYPTION_KEY。（券商憑證不在備份裡。）"
     )
     if "--json" in sys.argv:
         print(json.dumps(data, ensure_ascii=False, indent=2))

@@ -186,3 +186,63 @@ def test_the_download_returns_a_file(auth_client, db_session):
 
 def test_the_backup_endpoint_needs_a_login(client):
     assert client.post("/api/backup", json={"passphrase": PASSPHRASE}).status_code == 401
+
+
+def test_the_archive_opens_with_the_passphrase_alone(db_session):
+    """**這個備份不需要部署那把金鑰就打得開。**
+
+    這個模組的檔頭本來就寫著判準：「一份只能用它所備份的那台伺服器上的秘密才打得開的
+    備份，不是任何東西的備份——如果失去的正是那台伺服器，那把金鑰也一起沒了。」
+
+    而 _snapshot 裡有一句註解說 config_encrypted 是「原樣帶走、仍然用部署的
+    SECRET_ENCRYPTION_KEY 加密」。**那句話是錯的**：那一欄的型別是 EncryptedJSON，
+    SQLAlchemy 在讀取時就已經解密，所以進到備份裡的是明文——而它被整份 passphrase 封
+    套保護著，跟其他每一欄一樣。
+
+    那句錯的註解已經騙過三個地方：inspect_backup.py 的結尾說明、DEPLOYMENT.md 的還原
+    章節，以及備份面板上一段我剛加上去、告訴使用者「這個檔案救不回通知設定」的紅字。
+    最後那一個最糟——它會讓一個備份做對了的人以為自己白做了。
+
+    所以這一條**驗行為不驗註解**：真的建一個帶秘密的通知管道、真的備份、真的只用
+    passphrase 讀回來，然後看那個 token 在不在。
+    """
+    user = _seed(db_session)
+    db_session.add(
+        NotificationChannel(
+            user_id=user.id,
+            channel_type=ChannelType.TELEGRAM,
+            label="mine",
+            config_encrypted={"bot_token": "a-token-that-must-survive"},
+        )
+    )
+    db_session.commit()
+
+    blob = backup.create(db_session, user, "a-long-enough-passphrase")
+    # 只給 passphrase。部署那把金鑰完全沒有參與。
+    restored = backup.read(blob, "a-long-enough-passphrase")
+
+    channel = next(c for c in restored["notification_channels"] if c["label"] == "mine")
+    assert channel["config_encrypted"] == {"bot_token": "a-token-that-must-survive"}
+
+
+def test_the_archive_still_hides_that_token_from_anyone_without_the_passphrase(db_session):
+    """上一條的另一半，而少了它上一條會變成一個危險的目標。
+
+    「明文放進封套」跟「明文躺在檔案裡」只差一個封套，而那個差別就是這個檔案能不能放
+    進雲端硬碟。所以要同時驗：passphrase 打得開，而**沒有 passphrase 的人看不到那個
+    token 的任何一個位元組**。
+    """
+    user = _seed(db_session)
+    db_session.add(
+        NotificationChannel(
+            user_id=user.id,
+            channel_type=ChannelType.TELEGRAM,
+            label="mine",
+            config_encrypted={"bot_token": "a-token-that-must-survive"},
+        )
+    )
+    db_session.commit()
+
+    blob = backup.create(db_session, user, "a-long-enough-passphrase")
+
+    assert b"a-token-that-must-survive" not in blob
