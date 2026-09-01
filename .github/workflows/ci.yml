@@ -179,7 +179,7 @@ jobs:
       # Keyed on the lockfile: Playwright pins a browser build, so a new
       # Playwright means a new download and an old cache must not be reused.
       - name: Cache the browser
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -242,7 +242,7 @@ jobs:
         working-directory: frontend
 
       - name: Cache the browser
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
