@@ -332,7 +332,14 @@ def test_no_setting_text_contains_markdown(monkeypatch, marker):
         ),
     ):
         for item in setup_state.missing_settings(s):
-            for field, text in (("why", item.why), ("how", item.how)):
+            fields = [("why", item.why), ("how", item.how)]
+            # **選項也要掃。** 第一版只掃 why 和 how，於是我隔一輪就在一個 option 的
+            # detail 裡又寫了 `**有期限**`，而 first-run 那一關（真瀏覽器）又抓一次。
+            # 一份漏掉一半的清單，比沒有清單更糟：它會讓人以為已經檢查過了。
+            for option in item.options or ():
+                fields.append((f"option[{option.label}].label", option.label))
+                fields.append((f"option[{option.label}].detail", option.detail))
+            for field, text in fields:
                 assert marker not in text, f"{item.name} 的 {field} 裡有 markdown：{marker}"
 
 
@@ -359,3 +366,27 @@ def test_it_no_longer_asks_him_for_the_push_contact_address(monkeypatch):
 
     for item in setup_state.missing_settings(s):
         assert "VAPID_SUBJECT" not in item.how, f"{item.name} 還在叫他填 VAPID_SUBJECT"
+
+
+def test_the_platform_own_database_is_offered_as_a_choice_with_its_cost():
+    """**選項要列出來，代價也要，然後由他決定。**
+
+    `DATABASE_URL` 是部署流程裡唯一還要他動手的一格，而它其實拿得掉：部署平台多半有自
+    己的 Postgres，`render.yaml` 宣告一下就會自動接上，一格都不用填。
+
+    我一直建議不要那樣做，因為那些免費資料庫有期限，而到期是**刪除**——某一天他的策
+    略、通知設定、帳號全部消失，事前不會知道。但「我建議不要」跟「他看不到這個選項」
+    是兩件事，而這個 app 的做法一向是後者不可以：`_database_options` 的檔頭本來就寫著
+    「看不到的選項等於不存在，而這個決定是使用者的，不是這個 app 的」。
+
+    所以列出來，並且把代價寫在同一行——跟「跑在自己機器上」那一條的處理方式一樣。
+    """
+    from app.services import setup_state
+
+    options = setup_state._database_options(on_a_platform=True)
+    platform = [o for o in options if "平台" in o.label or "Render" in o.label]
+
+    assert platform, "沒有列出「用部署平台自己的資料庫」這個選項"
+    detail = platform[0].detail
+    assert "到期" in detail or "期限" in detail, "列了選項卻沒說它會到期"
+    assert "刪" in detail, "沒說到期之後資料是被刪掉，不是停用"

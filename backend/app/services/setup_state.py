@@ -162,6 +162,19 @@ def _database_options(on_a_platform: bool) -> tuple[SetupOption, ...]:
         ),
         SetupOption(
             kind="cloud",
+            label="用這個部署平台自己的資料庫（最省事，但會到期）",
+            detail=(
+                "多數平台都有自己的 Postgres，開下去就自動接上，這一格完全不用填。"
+                # 純文字，不要 markdown：SetupPage 直接渲染這幾個字串。
+                "但免費的那一種有期限，而到期是把資料庫連同裡面的東西一起刪掉，"
+                "不是停用——你的帳號、策略、通知設定會在某一天全部消失，而且事前不會"
+                "有人提醒你。期限多長各家不同也調整過，以你在那個平台上看到的為準。"
+                "想省事又不想哪天歸零的話，先用它、之後再把資料倒到別家也可以，"
+                "但那件事要你自己記得做。"
+            ),
+        ),
+        SetupOption(
+            kind="cloud",
             label="Neon（免費方案夠用，不用信用卡）",
             detail="註冊之後開一個 project，它會給你一串 postgresql:// 開頭的連線字串。",
             url="https://neon.tech",

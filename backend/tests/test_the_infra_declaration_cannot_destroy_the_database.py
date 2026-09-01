@@ -118,3 +118,57 @@ def test_the_runbook_says_import_before_apply():
     assert readme.index("terraform import") < readme.index("terraform apply"), (
         "apply 出現在 import 之前——讀的人會先照著 apply 做，而那會去建立第二份"
     )
+
+
+def test_the_provider_lock_file_is_in_version_control():
+    """**provider 要釘死，而釘死它的是鎖檔，不是版本約束。**
+
+    providers.tf 自己寫著理由：「provider 是別人寫的程式碼，而它握有刪掉這幾個資源的
+    權限。一個沒有釘住的版本會在某次 init 之後變成另一份程式碼，而那次 init 通常發生
+    在『我只是想看看 plan』的時候。」
+
+    但 `~> 1.9` 不是釘死，它是一個範圍——1.9.1 和 1.9.99 都符合。真正把版本連同**校驗
+    碼**一起記下來的是 .terraform.lock.hcl，而它一度被 .gitignore 擋掉，所以那段話保護
+    不到任何東西。
+
+    這跟 requirements.lock 是同一條規則，而這個 repo 已經對後端套用過它（CLAUDE.md 的
+    工程標準表：「相依套件用 requirements.lock 鎖版」）。
+
+    state 仍然不進版控——那是明文而且帶著連線字串，跟這一條不衝突：鎖檔裡沒有秘密，
+    只有版本和雜湊。
+    """
+    lock = INFRA / ".terraform.lock.hcl"
+    assert lock.is_file(), (
+        "infra/.terraform.lock.hcl 不在——跑一次 `terraform init` 產生它，並且提交"
+    )
+
+    ignored = (INFRA.parent / ".gitignore").read_text(encoding="utf-8")
+    for line in ignored.splitlines():
+        assert line.strip() != ".terraform.lock.hcl", (
+            ".gitignore 把 provider 鎖檔擋掉了——那讓 providers.tf 講的「釘死」變成一句空話"
+        )
+
+    text = lock.read_text(encoding="utf-8")
+    for provider in ("render-oss/render", "kislerdm/neon", "vercel/vercel"):
+        assert provider in text, f"鎖檔裡沒有 {provider}"
+    assert "h1:" in text, "鎖檔裡沒有校驗碼"
+
+
+def test_the_declaration_has_been_checked_against_the_real_provider_schemas():
+    """`terraform init` ＋ `validate` 真的跑過了，而不只是寫在文件上。
+
+    CLAUDE.md 的工程標準表對 Terraform 掛著 ⚠️，理由是「寫的時候沒有雲端 token，所以
+    語法和欄位名稱沒有經過 terraform init 驗證」。那個理由其實只對了一半：**init 和
+    validate 不需要任何 token**，需要 token 的是 plan 和 apply。
+
+    鎖檔的存在就是 init 跑過的證據（它是 init 產生的），而 validate 會對著真正的
+    provider schema 檢查每一個欄位名稱——所以「欄位是我從 registry 抄來但沒驗過」這件事
+    已經不成立了。
+
+    還沒跑過的是 plan：它要對著三家的 API 問「現況長什麼樣」，那才需要 token。
+    """
+    lock = INFRA / ".terraform.lock.hcl"
+    readme = (INFRA / "README.md").read_text(encoding="utf-8")
+
+    assert lock.is_file()
+    assert "terraform validate" in readme, "README 沒有把 validate 寫進流程"

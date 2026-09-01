@@ -49,5 +49,8 @@ backend/firstrun_walk.db
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
+# .terraform.lock.hcl **要進版控**（Terraform 自己的建議，也是這個 repo 對
+# requirements.lock 用的同一條規則）。providers.tf 說 provider 握有刪掉那幾個資源
+# 的權限、所以要釘死——而 `~> 1.9` 是一個範圍，不是釘死；真正把版本連同校驗碼記
+# 下來的是那個鎖檔。它裡面沒有秘密，只有版本和雜湊。
 *.tfvars

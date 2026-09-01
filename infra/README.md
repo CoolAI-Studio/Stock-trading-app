@@ -18,6 +18,11 @@ export TF_VAR_render_owner_id=...
 
 terraform init
 
+# 這兩步**不需要任何 token**，所以它們先跑：
+#   init     去 registry 抓 provider，並寫出 .terraform.lock.hcl（版本＋校驗碼）
+#   validate 對著真正的 provider schema 檢查每一個欄位名稱
+terraform validate
+
 # 把現有的東西接進來。id 從各家後台或 API 拿。
 terraform import neon_project.db          <neon-project-id>
 terraform import render_web_service.backend <srv-...>
