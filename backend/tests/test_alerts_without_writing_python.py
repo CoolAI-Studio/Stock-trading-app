@@ -50,6 +50,13 @@ def feed(template_key: str, params: dict, closes: list[float]) -> list[str]:
     return [loaded.on_bar(bar(close)) for close in closes]
 
 
+def feed_ticks(template_key: str, params: dict, prices: list[float]) -> list[str]:
+    """同上，但走逐筆——到價提醒看的是**現在的價格**，不是日 K 的收盤價。"""
+    template = get_template(template_key)
+    loaded = compile_strategy(template.source, params=params)
+    return [loaded.on_tick(price) for price in prices]
+
+
 # --- 每一個範本本身 -------------------------------------------------------------------
 
 
@@ -59,7 +66,10 @@ def test_every_template_compiles_with_its_own_defaults(template):
     has already filled in the form."""
     loaded = compile_strategy(template.source)
 
-    assert loaded.entry_point == "on_bar"
+    # 兩種入口都是合法的，而**哪一種是對的由那個範本在講什麼決定**：到價提醒講的是
+    # 「現在的價格」所以走逐筆，跌破均線講的是收盤價所以走 K 棒。這裡只驗「有一個入
+    # 口而且編得起來」——選錯入口由底下那幾條各自守。
+    assert loaded.entry_point in ("on_bar", "on_tick")
 
 
 @pytest.mark.parametrize("template", TEMPLATES, ids=lambda t: t.key)
@@ -90,13 +100,13 @@ def test_every_template_says_what_it_is_for_in_the_owners_language(template):
 
 
 def test_a_price_alert_fires_when_the_price_falls_to_the_number_you_typed():
-    signals = feed("price_alert", {"buy_below": 900.0, "sell_above": 0.0}, [950.0, 899.0])
+    signals = feed_ticks("price_alert", {"buy_below": 900.0, "sell_above": 0.0}, [950.0, 899.0])
 
     assert signals == ["HOLD", "BUY"]
 
 
 def test_and_when_it_rises_past_the_other_one():
-    signals = feed("price_alert", {"buy_below": 0.0, "sell_above": 1200.0}, [1100.0, 1250.0])
+    signals = feed_ticks("price_alert", {"buy_below": 0.0, "sell_above": 1200.0}, [1100.0, 1250.0])
 
     assert signals == ["HOLD", "SELL"]
 
@@ -104,7 +114,7 @@ def test_and_when_it_rises_past_the_other_one():
 def test_filling_in_only_one_side_is_a_complete_answer():
     """「跌到 900 叫我」是完整的需求。強迫他也想一個賣出價，是在問一個他沒有
     答案的問題。0 表示這一邊不用管。"""
-    signals = feed("price_alert", {"buy_below": 900.0, "sell_above": 0.0}, [5000.0, 899.0])
+    signals = feed_ticks("price_alert", {"buy_below": 900.0, "sell_above": 0.0}, [5000.0, 899.0])
 
     assert signals == ["HOLD", "BUY"]
 
@@ -112,7 +122,7 @@ def test_filling_in_only_one_side_is_a_complete_answer():
 def test_zero_does_not_mean_alert_on_everything():
     """A blank side must be inert, not a threshold of zero that every price is
     above -- that would notify on every single candle, forever."""
-    signals = feed("price_alert", {"buy_below": 0.0, "sell_above": 0.0}, [1.0, 999.0, 0.5])
+    signals = feed_ticks("price_alert", {"buy_below": 0.0, "sell_above": 0.0}, [1.0, 999.0, 0.5])
 
     assert set(signals) == {"HOLD"}
 
@@ -324,3 +334,55 @@ def test_nobody_else_can_read_the_template_list(client):
     """It is not secret, but nothing in this app answers a stranger without a
     reason, and this one has none."""
     assert client.get("/api/strategies/templates").status_code == 401
+
+
+# --- 「跌到 900 叫我」要在他跌到 900 的時候叫他 -------------------------------
+#
+# CLAUDE.md：「不用寫 Python 就能設定的簡單價格提醒，是**核心功能**，不是加分項。」
+#
+# 而到價提醒原本是 `timeframe = "1d"` ＋ 只有 `on_bar`，也就是**一天只看一次，而且看
+# 的是收盤價**。盤中摸到 890 又拉回 910 收盤，他什麼都收不到——那跟「跌到 900 叫我」
+# 這句話直接矛盾，而畫面上沒有一個字提過這件事。
+#
+# 「跌破均線」那幾個範本用日收盤是**對的**（那本來就是收盤價的概念），所以只有這一個
+# 要換條路走。
+
+
+def test_a_price_alert_reacts_to_the_live_price_not_the_daily_close():
+    """他說「跌到 900 叫我」，就要在價格是 900 的那一刻叫他。"""
+    template = get_template("price_alert")
+    loaded = compile_strategy(template.source, params={"buy_below": 900.0, "sell_above": 0.0})
+
+    assert loaded.entry_point == "on_tick", (
+        "到價提醒還是 on_bar——那表示它一天只看一次收盤價，盤中跌到 900 不會通知"
+    )
+    assert loaded.on_tick(950.0) == "HOLD"
+    assert loaded.on_tick(899.0) == "BUY"
+
+
+def test_the_intraday_dip_that_recovers_still_alerts():
+    """**這一條就是差別本身。**
+
+    盤中跌到 890、收盤拉回 910。用日 K 收盤價看，這一天什麼都沒發生；而他要的正是
+    那一刻。
+    """
+    template = get_template("price_alert")
+    loaded = compile_strategy(template.source, params={"buy_below": 900.0, "sell_above": 0.0})
+
+    intraday = [950.0, 920.0, 890.0, 905.0, 910.0]
+
+    assert "BUY" in [loaded.on_tick(price) for price in intraday]
+
+
+def test_the_other_templates_still_read_the_close():
+    """跌破均線、新高、回檔、超賣——這幾個講的本來就是收盤價的概念。
+
+    把它們一起改成逐筆，會讓「收盤價跌破均線」變成「盤中摸到均線就叫」，那是另一個
+    完全不同的策略，而且會吵得多。
+    """
+    # 鍵名從 TEMPLATES 拿，不要用背的：我第一版猜了 new_high／pullback／oversold，
+    # 而真正的名字是 high_break／drawdown／rsi_oversold，get_template 回 None，
+    # 測試炸在 AttributeError 而不是斷言失敗——一個看不出真正原因的紅燈。
+    for key in [t.key for t in TEMPLATES if t.key != "price_alert"]:
+        loaded = compile_strategy(get_template(key).source)
+        assert loaded.entry_point == "on_bar", f"{key} 不應該改成逐筆"

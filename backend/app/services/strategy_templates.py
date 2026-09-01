@@ -65,17 +65,24 @@ _PRICE_ALERT = '''class Strategy:
         self.name = "到價提醒"
         self.symbol = "2330.TW"
         self.params = {"buy_below": 0.0, "sell_above": 0.0}
-        self.warmup_bars = 1
-        self.timeframe = "1d"
 
-    def on_bar(self, bar) -> str:
+    # **逐筆，不是日 K 收盤。**
+    #
+    # 這一格原本是 timeframe = "1d" ＋ on_bar，也就是一天只看一次、而且看的是收盤
+    # 價。盤中跌到 890 又拉回 910 收盤，他什麼都收不到——那跟「跌到 900 叫我」這句
+    # 話直接矛盾，而畫面上沒有一個字提過。
+    #
+    # 底下那幾個範本（跌破均線、新高、回檔、超賣）維持 on_bar 是對的：它們講的本來
+    # 就是收盤價的概念，改成逐筆會變成「盤中摸到均線就叫」，那是另一個策略，而且會
+    # 吵得多。到價提醒不一樣——它講的就是「現在的價格」。
+    def on_tick(self, current_price: float) -> str:
         buy_below = self.params["buy_below"]
         sell_above = self.params["sell_above"]
         # 0 是「這一邊關掉」，不是「零元」：沒有這個判斷，空白的那一側會變成
-        # 一個每一根 K 棒都成立的條件，然後每天都通知。
-        if buy_below > 0 and bar.close <= buy_below:
+        # 一個每一次報價都成立的條件，然後一直通知。
+        if buy_below > 0 and current_price <= buy_below:
             return "BUY"
-        if sell_above > 0 and bar.close >= sell_above:
+        if sell_above > 0 and current_price >= sell_above:
             return "SELL"
         return "HOLD"
 '''
