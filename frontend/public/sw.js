@@ -14,7 +14,18 @@
 // This file is served verbatim from Vite's public/ directory, so it is never
 // compiled and import.meta.env does not exist in it. The API origin therefore
 // arrives as a query string on the registration URL -- see lib/push.ts.
-const API_BASE = new URL(self.location.href).searchParams.get('api') || ''
+//
+// **空的代表同源，不是「不知道」。** 後端直接供應前端之後（#53），正式建置根本不設
+// VITE_API_BASE_URL，所以註冊網址是 `/sw.js?api=`。這裡原本是 `|| ''`，配上底下
+// `if (!token || !API_BASE) return`，等於**每一份真實部署都整條跳過送達回報**。
+//
+// 後果不是少一個統計：通知頁的「測試」按鈕會等 15 秒，然後告訴他「這台裝置沒有回報
+// 收到」，並建議他把一個其實正常的推播管道刪掉重建——那是他唯一用來確認通知路徑還活
+// 著的儀器，而它在每一份真實部署上都給錯的答案。
+//
+// 跟 lib/useWebSocket.ts 那個是同一個病，而 lib/apiBase.ts 早就把規則寫下來了：空字
+// 串是「我要同源」。service worker 一定跟它服務的頁面同源，所以那個答案就在手邊。
+const API_BASE = new URL(self.location.href).searchParams.get('api') || self.location.origin
 
 // Well under the 30-second silent-push budget, and long enough for a phone
 // waking on a slow connection.
