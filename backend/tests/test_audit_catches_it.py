@@ -301,3 +301,47 @@ def test_a_deployment_that_does_not_serve_a_frontend_is_not_a_finding(auditor):
 
     assert auditor.findings == []
     assert auditor.counts["bundle_files_scanned"] == 0
+
+
+# --- 線上的 bundle 不可以指回使用者自己的電腦 --------------------------------
+
+
+def test_a_bundle_pointing_at_localhost_is_a_finding(auditor):
+    """**這一條是線上實測到的一個靜默失效。**
+
+    `useWebSocket` 自己寫了 `?? 'http://localhost:8000'`，沒有走 `resolveApiBase`。
+    #53 之後正式建置根本不設 `VITE_API_BASE_URL`（後端直接供應前端＝同源），所以線上
+    每一份副本的 socket 位址都是 `ws://localhost:8000`——瀏覽器去打**使用者自己電腦上
+    的** 8000 埠。
+
+    症狀完全靜默：頁面正常、REST 正常、健康檢查全綠，只有即時報價永遠不更新，而
+    README 第一行就在宣傳那個功能。抓到它的方式是直接 grep 線上的 bundle。
+
+    這個掃描原本只找秘密（`REPO_FORBIDDEN` 的那六種形狀）。秘密不是唯一一種「不該出現
+    在成品裡」的東西：一個指回 localhost 的位址同樣只有在成品上看得見，而且同樣沒有任
+    何一關會變紅。
+    """
+    served = {
+        "/": '<!doctype html><script src="/assets/app.js"></script>',
+        "/assets/app.js": 'var ws=new WebSocket("ws://localhost:8000/ws")',
+    }
+    auditor.served_bundle(lambda path: (200, served.get(path, "")))
+
+    assert any("localhost" in str(f) for f in auditor.findings), (
+        "線上的 bundle 指回 localhost，稽查卻沒有說"
+    )
+
+
+def test_a_clean_bundle_is_not_a_finding(auditor):
+    """而正常的那一份不可以報警。
+
+    一個會對正確設定報警的稽查，跟壞掉的稽查一樣沒有用——這個檔案裡已經有兩條測試在守
+    同一件事（文件範例的連線字串、沒有內建前端）。
+    """
+    served = {
+        "/": '<!doctype html><script src="/assets/app.js"></script>',
+        "/assets/app.js": "var ws=new WebSocket(location.origin.replace('http','ws')+'/ws')",
+    }
+    auditor.served_bundle(lambda path: (200, served.get(path, "")))
+
+    assert not auditor.findings, f"對一份正常的 bundle 報警了：{auditor.findings}"

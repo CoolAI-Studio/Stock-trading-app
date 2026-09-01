@@ -373,3 +373,32 @@ def test_the_ignore_file_is_where_the_context_root_is_now():
     # 會把秘密或本機資料帶進映像檔的，一個都不能少。
     for must in ("**/.env", "**/venv/", "**/*.db", "**/node_modules/"):
         assert must in patterns, f".dockerignore 少了 {must}"
+
+
+def test_both_halves_get_a_dependency_vulnerability_check():
+    """後端有 pip-audit，前端一直沒有對應的東西。
+
+    Dependabot 兩邊都涵蓋（.github/dependabot.yml 有 pip 和 npm），所以前端不是沒守
+    ——缺的是**推送當下的能見度**。而這個 repo 已經因為「兩半不對稱」出過事：更新的
+    路徑曾經只有後端有、前端那半是斷的（#52／#53）。
+
+    兩邊都要是**通知不是關卡**，理由是 ci.yml 對 pip-audit 寫的那一句：一個傳遞相依套
+    件裡的 CVE 要等別人發版，擋住 build 只會連帶擋掉一個無關的修復——而這個專案的最高
+    優先是警告不能停擺，一個修通知路徑的 hotfix 不可以被別人家的 CVE 卡住。
+
+    **解析 YAML，不要在原始碼裡找字串。** 第一版用 `ci.index("pip-audit")` 找位置，而
+    那個字第一次出現是在 SAST 步驟的註解裡（「A GATE, unlike pip-audit below」）——於是
+    它去檢查了一個不相干的步驟，然後對著一個完全正確的設定檔報錯。
+    """
+    import yaml
+
+    ci = yaml.safe_load((_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    steps = [step for job in ci["jobs"].values() for step in (job.get("steps") or [])]
+
+    for tool in ("pip-audit", "npm audit"):
+        running = [s for s in steps if tool in (s.get("run") or "")]
+        assert running, f"CI 裡沒有真的執行 {tool} 的步驟"
+        for step in running:
+            assert step.get("continue-on-error") is True, (
+                f"{tool} 是硬性關卡——別人家的 CVE 會擋住修通知路徑的 hotfix"
+            )

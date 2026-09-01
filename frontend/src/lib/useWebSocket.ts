@@ -2,14 +2,22 @@ import { useEffect } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import { websocketBaseUrl } from './wsUrl'
+import { resolveApiBase } from './apiBase'
 import type { WsEvent } from './types'
 
 // Derived from the API address unless VITE_WS_URL says otherwise. See
 // lib/wsUrl.ts: asking a deployer to paste the same host twice with a
 // different scheme is a blank that should not exist.
+//
+// **走 resolveApiBase，跟 REST 那一半同一條路。** 這裡本來自己寫
+// `?? 'http://localhost:8000'`，而 #53 之後正式建置根本不設 VITE_API_BASE_URL（後端
+// 直接供應前端＝同源）。結果是線上每一份副本的 socket 都指向使用者自己電腦上的 8000
+// 埠：頁面正常、REST 正常，只有即時報價永遠不更新。兩個地方各自決定「後端在哪」就是
+// 這樣漂移的。
 const WS_BASE_URL = websocketBaseUrl(
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
+  resolveApiBase({ base: import.meta.env.VITE_API_BASE_URL, dev: import.meta.env.DEV }),
   import.meta.env.VITE_WS_URL,
+  typeof window === 'undefined' ? undefined : window.location.origin,
 )
 const RECONNECT_DELAY_MS = 3000
 

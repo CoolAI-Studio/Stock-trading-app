@@ -596,6 +596,21 @@ class Audit:
             return
 
         patterns = [(re.compile(pattern), why) for pattern, why in REPO_FORBIDDEN]
+        # 秘密不是唯一一種「不該出現在成品裡」的東西。
+        #
+        # 這是線上量到的一個靜默失效：useWebSocket 自己寫了
+        # `?? 'http://localhost:8000'`，沒有走 resolveApiBase，而 #53 之後正式建置根本
+        # 不設 VITE_API_BASE_URL（後端直接供應前端＝同源）。於是線上每一份副本的 socket
+        # 位址都指回**使用者自己電腦上的** 8000 埠：頁面正常、REST 正常、健康檢查全綠，
+        # 只有即時報價永遠不更新——而 README 第一行就在宣傳那個功能。
+        #
+        # 它跟秘密同一類：只有在成品上看得見，而且沒有任何一關會因此變紅。
+        patterns.append(
+            (
+                re.compile(r"(?:ws|wss|http|https)://(?:localhost|127\.0\.0\.1)(?::\d+)?"),
+                "一個指回這台電腦的位址（localhost）——使用者的瀏覽器會去打他自己的機器",
+            )
+        )
         scanned = 0
         # 上限是防呆，不是省事：一份正常的 bundle 只有兩三個檔案，而一個會讓稽查跑不
         # 完的首頁應該當成異常處理，不是慢慢掃完。

@@ -139,6 +139,22 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Known vulnerabilities in the locked dependencies
+        # 跟後端那一步同一件事、同一個姿態，而前端一直沒有。
+        #
+        # Dependabot 兩邊都涵蓋（.github/dependabot.yml），所以這不是「沒守」——缺的是
+        # **推送當下的能見度**。而這個 repo 已經因為兩半不對稱出過事：更新的路徑曾經
+        # 只有後端有，前端那半是斷的（#52／#53）。
+        #
+        # Advisory, not a gate，理由跟 pip-audit 那一步寫的一樣：一個傳遞相依套件裡的
+        # CVE 要等別人發版，擋住 build 只會連帶擋掉一個無關的修復——而這個專案的最高
+        # 優先是警告不能停擺，一個修通知路徑的 hotfix 不可以被別人家的 CVE 卡住。
+        #
+        # --omit=dev：進到使用者瀏覽器裡的只有 dependencies。開發相依（vitest、
+        # playwright…）的 CVE 不會出現在任何一個部署上，混在一起報只會讓人不看它。
+        continue-on-error: true
+        run: npm audit --omit=dev
+
   # THE ONE GATE THAT OPENS A REAL BROWSER.
   #
   # It exists because of a specific escape. `e8124ce` fixed 「圖表往前拉是一片空
