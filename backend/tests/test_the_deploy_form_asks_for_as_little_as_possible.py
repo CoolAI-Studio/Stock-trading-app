@@ -390,3 +390,55 @@ def test_the_platform_own_database_is_offered_as_a_choice_with_its_cost():
     detail = platform[0].detail
     assert "到期" in detail or "期限" in detail, "列了選項卻沒說它會到期"
     assert "刪" in detail, "沒說到期之後資料是被刪掉，不是停用"
+
+
+# --- DEPLOYMENT.md 也要跟著事實走 ---------------------------------------------
+#
+# **沒有任何測試在讀這個檔案**，所以它變舊不會讓任何東西變紅——而 README:50
+# 「完整說明見 DEPLOYMENT.md」正是把使用者送過去的那一行。
+#
+# 它落後的後果不是「文件不準」那麼輕：§6 教的舊 VAPID 流程如果照做，會用一對新金鑰
+# 蓋掉推導值，讓**每一台已經訂閱的手機靜默收不到推播**（config.py 自己寫著
+# 「changing the pair invalidates every existing subscription」）。
+
+
+def _deployment_md() -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parent.parent.parent / "DEPLOYMENT.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_it_does_not_tell_him_to_paste_a_vapid_pair_back():
+    """照著做會讓已經訂閱的每一台裝置失效，而且那顆按鈕根本不會出現。
+
+    推播金鑰現在從 SECRET_ENCRYPTION_KEY 推導（兩格都空才推），而設定頁那一列的條件
+    是 `not push_works`——正常部署上推得出來，所以那一列不出現、那顆「產生」按鈕也不
+    存在。這份文件同時在叫他去按一顆不存在的按鈕，以及去做一件會弄壞推播的事。
+    """
+    text = _deployment_md()
+
+    assert "把兩個值貼回你的部署平台的環境變數" not in text
+    assert "VAPID_SUBJECT` 填你自己的聯絡信箱" not in text
+
+
+def test_it_does_not_send_him_to_install_postgres_just_to_back_up():
+    """app 自己就會定期把加密備份寄到他的信箱（backup_schedule.py）。
+
+    而這一節叫一個不是工程師的人去下載安裝 PostgreSQL Command Line Tools、打開終端機
+    貼一行 pg_dump，而且把那件事列進檢查清單。CLAUDE.md：「任何『請在你的電腦上跑這
+    支腳本』的指示，對這個使用者等於流程到此結束。」
+
+    pg_dump 那條路沒有被拿掉——它是完整的資料庫傾印，對想要那個的人是對的。改的是
+    **順序**：先講 app 自己會做的那個。
+    """
+    text = _deployment_md()
+
+    # 比對的是**那件事被提到**，不是某一句特定的話：文案會改，而規則是「app 自己會做
+    # 的事要先講」。第一版比對「寄到你的信箱」而我寫的是「寄到你的 Email」，於是它對
+    # 著一份已經改好的文件報錯。
+    assert "排程" in text and "備份密碼" in text, "備份那一節沒有提到 app 內建的排程備份"
+    assert text.index("排程") < text.index("pg_dump"), (
+        "先教他裝 PostgreSQL，才提 app 自己就會做的那件事"
+    )

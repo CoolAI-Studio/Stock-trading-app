@@ -243,3 +243,26 @@ def test_a_nonsense_interval_is_refused(auth_client, days):
 
 def test_the_schedule_needs_a_login(client):
     assert client.get("/api/backup/schedule").status_code == 401
+
+
+def test_the_email_does_not_tell_him_to_run_a_python_script():
+    """**這封信是 app 自己寄給他的，所以它說的話要對他成立。**
+
+    內文原本寫著「要檢視內容：python scripts/inspect_backup.py 這個檔案」。而收信的人
+    是按按鈕部署的——他手上沒有這個 repo、沒有 Python、也沒有終端機。CLAUDE.md 的使用
+    者規則第一條：「任何『請在你的電腦上跑這支腳本』的指示，對這個使用者等於流程到此
+    結束。」
+
+    這一封特別諷刺：整個排程備份存在的理由，就是讓他不用記得去做一件手動的事；然後信
+    裡叫他做一件他做不到的事。
+
+    腳本沒有被拿掉（對真的在命令列上的人它是對的），改的是**先講他做得到的那一個**。
+    """
+    from app.services import backup_schedule
+
+    source = __import__("pathlib").Path(backup_schedule.__file__).read_text(encoding="utf-8")
+    body_start = source.index("附件是這個帳號的加密備份")
+    body = source[body_start : source.index('f"trading-backup', body_start)]
+
+    assert "python scripts/" not in body, "備份信還在叫他跑 Python 腳本"
+    assert "帳號" in body or "還原" in body, "沒有告訴他這個檔案要怎麼用"
