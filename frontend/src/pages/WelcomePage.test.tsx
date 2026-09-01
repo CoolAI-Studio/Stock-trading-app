@@ -5,11 +5,19 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WelcomePage } from './WelcomePage'
 import { api } from '../lib/api'
+import { requestPushPermission, subscribeToPush } from '../lib/push'
 import type { StrategyTemplate } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
   api: { get: vi.fn(), post: vi.fn() },
+}))
+
+vi.mock('../lib/push', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/push')>()),
+  isPushSupported: vi.fn(() => true),
+  requestPushPermission: vi.fn(),
+  subscribeToPush: vi.fn(),
 }))
 
 const TEMPLATE: StrategyTemplate = {
@@ -345,3 +353,54 @@ describe('引導流程：讓 AI 幫我', () => {
   })
 })
 
+describe('引導那顆推播按鈕（全新裝置）', () => {
+  /**
+   * **這一條是實地找出來的，而它讓引導唯一「不用去別的地方拿值」的通知管道必定失敗。**
+   *
+   * subscribeToPush() 在 lib/push.ts:78 開頭就寫著
+   *
+   *     if (Notification.permission !== 'granted') throw new Error('未取得通知權限')
+   *
+   * ——它**不會**去要權限，那是 requestPushPermission() 的事，而註解裡明說了原因
+   * （要權限必須由使用者手勢直接觸發）。NotificationsPage 有照做（:746 先要再訂），
+   * 兩個引導頁沒有。
+   *
+   * 全新裝置上 Notification.permission 是 'default'，所以引導那顆
+   * 「開啟這台裝置的推播（最快，按一下就好）」在**每一台第一次打開的手機上都必定丟錯**
+   * ——而它正是引導裡唯一不需要他去別的服務註冊的那條路。
+   */
+  beforeEach(() => {
+    vi.mocked(requestPushPermission).mockReset()
+    vi.mocked(subscribeToPush).mockReset()
+  })
+
+  it('先向瀏覽器要權限，再訂閱', async () => {
+    serve({})
+    vi.mocked(requestPushPermission).mockResolvedValue('granted')
+    vi.mocked(subscribeToPush).mockResolvedValue(undefined as never)
+    const user = userEvent.setup()
+    renderWizard()
+    // 推播那一步在精靈的第二頁，先跳過建立提醒。
+    await user.click(await screen.findByRole('button', { name: /先跳過/ }))
+
+    await user.click(await screen.findByRole('button', { name: /開啟這台裝置的推播/ }))
+
+    await waitFor(() => expect(requestPushPermission).toHaveBeenCalled())
+    expect(subscribeToPush).toHaveBeenCalled()
+  })
+
+  it('他按了「封鎖」就不要去訂閱，並且說得出唯一能改回來的地方', async () => {
+    serve({})
+    vi.mocked(requestPushPermission).mockResolvedValue('denied')
+    const user = userEvent.setup()
+    renderWizard()
+    await user.click(await screen.findByRole('button', { name: /先跳過/ }))
+
+    await user.click(await screen.findByRole('button', { name: /開啟這台裝置的推播/ }))
+
+    await waitFor(() => expect(requestPushPermission).toHaveBeenCalled())
+    // 訂閱一定會失敗（權限不是 granted），送出去只換到一句他看不懂的「未取得通知權限」。
+    expect(subscribeToPush).not.toHaveBeenCalled()
+    expect(await screen.findByText(/瀏覽器不會再問一次/)).toBeInTheDocument()
+  })
+})

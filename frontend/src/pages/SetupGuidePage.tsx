@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AiCredentialsForm } from '../components/AiCredentialsForm'
 import { ApiError, api } from '../lib/api'
-import { isPushSupported, subscribeToPush } from '../lib/push'
+import { isPushSupported, requestPushPermission, subscribeToPush } from '../lib/push'
 import type { NotificationChannel } from '../lib/types'
 
 type TabKey = 'database' | 'ai' | 'notifications'
@@ -114,6 +114,20 @@ export function SetupGuidePage() {
 
   const enablePush = useMutation({
     mutationFn: async () => {
+      // **先要權限，再訂閱。** subscribeToPush() 在權限不是 granted 時第一件事就是丟
+      // 錯（見 lib/push.ts 的註解：要權限必須由使用者手勢直接觸發，所以那件事不能藏
+      // 在訂閱裡）。全新裝置上 Notification.permission 是 'default'，所以少了這一步，
+      // 這顆按鈕在**每一台第一次打開的手機上都必定失敗**——而它是引導裡唯一不需要他
+      // 去別的服務註冊的那條通知路。通知頁早就這樣做了（NotificationsPage 的
+      // startCreate），只有引導這兩頁漏掉。
+      const permission = await requestPushPermission()
+      if (permission !== 'granted') {
+        throw new Error(
+          permission === 'denied'
+            ? '通知權限被封鎖了，瀏覽器不會再問一次。請到裝置的「設定」→ 通知（或瀏覽器的網站設定）把這個網站的通知打開，再回來按一次。'
+            : '沒有取得通知權限，所以沒有開啟這台裝置的推播 —— 開了也永遠收不到東西。請再按一次並選擇「允許」。',
+        )
+      }
       const { public_key } = await api.get<{ public_key: string }>(
         '/api/notifications/push/vapid-public-key',
       )
@@ -128,9 +142,12 @@ export function SetupGuidePage() {
       setPushError(null)
       queryClient.invalidateQueries({ queryKey: ['notification-channels'] })
     },
+    // **任何帶訊息的錯誤都比那段通用文字精確。** 原本只認 ApiError，於是「你按了封鎖，
+    // 要去裝置設定改回來」這種只有前端知道、而且指得出唯一解法的訊息，會被換成一段
+    // 「常見原因：…」的清單，讓他自己去猜是哪一個。
     onError: (err) =>
       setPushError(
-        err instanceof ApiError
+        err instanceof Error && err.message
           ? err.message
           : '這個瀏覽器沒有讓推播開起來。常見原因：拒絕過通知權限、無痕視窗、'
             + '或 iPhone 上還沒把這個網頁「加入主畫面」。也可以改用 Telegram 或 Email。',
