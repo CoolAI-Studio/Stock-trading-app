@@ -125,3 +125,54 @@ def test_both_time_zones_resolve_at_all():
     here."""
     assert ZoneInfo("Asia/Taipei") is not None
     assert ZoneInfo("America/New_York") is not None
+
+
+# --- 加密貨幣沒有收盤鐘 -------------------------------------------------------
+#
+# market_loop 檢查停損停利和委託逾期時，呼叫 is_open() **沒有帶 data_source**（策略那
+# 一處有帶，這兩處沒有）。而 Position 和 Order 都沒有 data_source 欄位，所以預設走
+# YFINANCE，於是一個裸的 BTCUSDT 沒有點、不是全數字 → 被判成美股。
+#
+# 後果：加密貨幣部位的停損只在美股 09:30–16:00（週一到五）被檢查過，週末整個跳過——
+# 而那正是它在動的時候。market_loop 自己的註解已經寫著「Crypto has no closing bell and
+# is therefore never held」，意圖本來就在，只是沒生效。
+
+
+def test_a_bare_binance_pair_is_never_closed():
+    """BTCUSDT、ETHUSDC 這種沒有分隔符號的交易對。
+
+    BTC-USD（yfinance 的寫法）早就判對了；漏的是幣安的寫法，而那是 DataSource.BINANCE
+    的使用者會拿到的代號形狀。沒有一個美股代號長這樣——美股代號不會以 USDT 結尾。
+    """
+    from datetime import UTC, datetime
+
+    from app.services import market_calendar
+
+    # 週六凌晨三點的紐約，美股關得最死的時候。
+    saturday = datetime(2026, 8, 22, 7, 0, tzinfo=UTC)
+
+    # ETHBTC 也在裡面：它是真的交易對，而 market_mismatch 早就會拒絕拿 yfinance 去抓
+    # 它——輸入端說「這不是美股」，行事曆卻說是，那是同一個事實兩套規則。第一版我另開
+    # 了一條只認穩定幣的樣式，就漏掉了它。
+    for pair in ("BTCUSDT", "ETHUSDT", "SOLUSDC", "ETHBTC"):
+        assert market_calendar.is_open(pair, at=saturday), (
+            f"{pair} 被判成閉市——它的停損整個週末不會被檢查，而那正是它在動的時候"
+        )
+
+
+def test_a_real_us_ticker_is_still_closed_at_the_weekend():
+    """而美股不可以因此變成永遠開著。
+
+    這一條是上一條的另一半：把判斷放寬到「看不懂就當開著」會讓每一個打錯的代號在半夜
+    被輪詢，並且在收盤後用最後一筆收盤價去比停損——那正是 market_loop 註解裡說「filed a
+    SELL at 3am that nobody could act on」的那個 bug。
+    """
+    from datetime import UTC, datetime
+
+    from app.services import market_calendar
+
+    saturday = datetime(2026, 8, 22, 7, 0, tzinfo=UTC)
+
+    # USDT 自己只有四個字，短於 _UNMISTAKABLE_PAIR_MIN_LEN，所以它不會被誤判成交易對。
+    for ticker in ("AAPL", "TSLA", "USDT", "USDU"):
+        assert not market_calendar.is_open(ticker, at=saturday), f"{ticker} 不該永遠開著"

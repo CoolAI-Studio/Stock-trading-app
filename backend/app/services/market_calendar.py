@@ -95,7 +95,7 @@ def _session_for(symbol: str, data_source: DataSource) -> _Session | None:
             # it. Same precedent as the bare numeric code below.
             return _TAIWAN
         return None  # crypto trades continuously; nothing to be closed
-    if symbol_search.is_yfinance_crypto(upper):
+    if symbol_search.is_crypto_pair(upper):
         # BTC-USD, ETH-USD: yfinance's own crypto tickers. Real, priceable and
         # traded around the clock. The bare-ticker rule below has no dot to go
         # on, so it read these as US equities and called them 閉市 from 16:00

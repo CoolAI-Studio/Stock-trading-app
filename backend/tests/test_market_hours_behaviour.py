@@ -29,6 +29,13 @@ pytestmark = pytest.mark.real_market_hours
 TW_OPEN = datetime(2026, 8, 19, 2, 0, tzinfo=UTC)  # 10:00 Taipei
 TW_SHUT = datetime(2026, 8, 19, 18, 0, tzinfo=UTC)  # 02:00 Taipei, next day
 
+# 2026-08-22 是星期六，07:00 UTC = 03:00 紐約：美股關得最死的時刻。
+#
+# **加密貨幣的測試不能用 TW_SHUT。** 它是紐約星期三 14:00，美股正開著——所以一條用它
+# 來測「加密貨幣沒有收盤鐘」的測試，測到的其實是「美股盤中」，不管代號被判成什麼都會
+# 綠。底下那條 crypto 測試原本就是這樣，它宣稱守著的東西一次都沒守住過。
+CRYPTO_WEEKEND = datetime(2026, 8, 22, 7, 0, tzinfo=UTC)
+
 ALWAYS_BUY = """
 class Strategy:
     def __init__(self):
@@ -170,7 +177,11 @@ def test_a_stale_pending_order_still_expires_during_trading_hours(db_session):
 
 
 def test_a_crypto_order_still_expires_at_three_in_the_morning(db_session):
-    """Crypto has no closing bell, so nothing here should hold its clock."""
+    """Crypto has no closing bell, so nothing here should hold its clock.
+
+    前提從 TW_SHUT 換成 CRYPTO_WEEKEND：前者是紐約星期三 14:00，美股正開著，所以這條
+    測試無論 BTCUSDT 被判成什麼都會綠。斷言一個字沒改——改的是它終於真的在問那件事。
+    """
     user = _user(db_session)
     order = Order(
         user_id=user.id,
@@ -185,7 +196,7 @@ def test_a_crypto_order_still_expires_at_three_in_the_morning(db_session):
     order.created_at = utcnow() - timedelta(hours=6)
     db_session.commit()
 
-    with _at(TW_SHUT):
+    with _at(CRYPTO_WEEKEND):
         market_loop.tick_once(db=db_session, market_data_service=_service())
 
     db_session.refresh(order)

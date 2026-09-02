@@ -637,16 +637,47 @@ def market_mismatch(symbol: str, data_source) -> str | None:
             )
         return None
 
-    if (
-        _CRYPTO_PAIR.match(text)
-        and len(text) >= _UNMISTAKABLE_PAIR_MIN_LEN
-        and not _YF_CRYPTO.match(text)
-    ):
+    if _is_binance_pair(text):
         return (
             f"「{text}」看起來是 Binance 的交易對，yfinance 抓不到它。"
             "資料來源請改成 Binance，或改用 yfinance 自己的寫法（例如 BTC-USD）。"
         )
     return None
+
+
+def _is_binance_pair(text: str) -> bool:
+    """幣安寫法的交易對（BTCUSDT、ETHBTC）。傳入的要是 normalise 過的字串。
+
+    抽出來不是為了好看，是因為現在有兩個地方要問同一件事，而它們**不可以各判各的**：
+    market_mismatch 在輸入端擋下 yfinance ＋ BTCUSDT，market_calendar 則要對已經存在的
+    那些列說它們沒有收盤鐘。同一條規則，才不會出現輸入端說「這不是美股」而行事曆說
+    「這是美股」。
+
+    第一版我另開了一條樣式，那正是兩套規則的開始——而且它漏掉了 ETHBTC 這種以 BTC／ETH
+    計價的交易對，因為我只想到穩定幣。
+    """
+    return bool(
+        _CRYPTO_PAIR.match(text)
+        and len(text) >= _UNMISTAKABLE_PAIR_MIN_LEN
+        and not _YF_CRYPTO.match(text)
+    )
+
+
+def is_crypto_pair(symbol: str) -> bool:
+    """任何一種寫法的加密貨幣交易對：BTC-USD（yfinance）或 BTCUSDT／ETHBTC（幣安）。
+
+    market_calendar 需要這個事實，理由跟它原本只認得 BTC-USD 時一樣，只是漏掉了另一半
+    的代號形狀：Position 和 Order **都沒有 data_source 欄位**，所以檢查停損停利和委託
+    逾期時只能從代號本身判斷這個市場有沒有收盤鐘。
+
+    判錯的方向不對稱：一個裸的 BTCUSDT 被當成美股，它的停損就只在美股 09:30–16:00
+    （週一到五）被檢查過，整個週末跳過——而那正是加密貨幣在動的時候。
+
+    「確定才說」仍然成立：美股代號最多五個字母（見 _US_TICKER），所以六個字以上、又剛
+    好以穩定幣／BTC／ETH 結尾的裸代號，不可能是美股。
+    """
+    text = normalise(symbol)
+    return bool(_YF_CRYPTO.match(text)) or _is_binance_pair(text)
 
 
 def is_yfinance_crypto(symbol: str) -> bool:
