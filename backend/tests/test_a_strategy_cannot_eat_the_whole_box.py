@@ -223,3 +223,51 @@ def test_a_limit_too_tight_to_load_the_sandbox_gets_lifted():
 
     assert done.returncode == 0, done.stderr[-3000:]
     assert "OK" in done.stdout
+
+
+# --- 每殺一次，不可以永久漏掉一個行程和兩個管線 -------------------------------
+#
+# 逾時的處置是**殺行程**（CLAUDE.md 的第二條不可退讓），而 _kill() 把被殺的那個
+# Popen 放進模組級的 _abandoned 清單、從不關 stdin／stdout。唯一會修剪那份清單的
+# abandoned_children_still_running() 在正式路徑上沒有呼叫端——grep 全 repo，只有測試
+# 經由 market_loop.stuck_children_still_running 用到。
+#
+# 所以每一次策略逾時、每一次 /validate 打到跑不完的策略、每一次掃描裡卡住的那一組，
+# 都在後端行程裡永久多留兩個 fd。而終點正是這個 repo 最不能接受的那一種：fd 耗光之後
+# Popen 再也起不來，每一支策略永遠停在「策略行程暫時不可用」——那是全面停擺。
+
+
+def test_killing_a_worker_closes_its_pipes():
+    """殺掉之後，那兩個管線要關掉。
+
+    行程本身被作業系統收走了，但父行程這一端的 fd 不會自己消失——它們活到整個後端
+    重啟為止。
+    """
+    worker = StrategyWorker()
+    worker.start()
+    process = worker._process
+    assert process is not None
+
+    worker._kill()
+
+    assert process.stdin is None or process.stdin.closed, "stdin 沒關"
+    assert process.stdout is None or process.stdout.closed, "stdout 沒關"
+
+
+def test_the_abandoned_list_does_not_grow_without_bound():
+    """死掉的行程要從清單裡消失，而且不需要有人記得去呼叫回收。
+
+    這份清單存在的理由是「讓無窮迴圈真的被殺掉了驗得到」，那是對的；但它同時變成一個
+    只增不減的容器，而回收只在測試裡被呼叫過。
+    """
+    from app.services import strategy_worker as module
+
+    before = len(module._abandoned)
+    for _ in range(5):
+        worker = StrategyWorker()
+        worker.start()
+        worker._kill()
+
+    assert len(module._abandoned) <= before, (
+        f"殺了 5 次之後清單多了 {len(module._abandoned) - before} 筆，而它們都已經死了"
+    )

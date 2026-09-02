@@ -114,10 +114,19 @@ def _child_environment() -> dict[str, str]:
 _abandoned: list[subprocess.Popen] = []
 
 
-def abandoned_children_still_running() -> list[int]:
-    """被殺掉之後還活著的子行程 PID。正常情況下永遠是空的。"""
+def _reap_abandoned() -> None:
+    """把已經死掉的從清單裡拿掉。
+
+    抽出來是因為它有兩個呼叫端，而其中一個（_kill）是唯一在正式運作時會跑到的：報告
+    用的那個函式只有測試在呼叫，所以回收如果只放在那裡，等於沒有回收。
+    """
     global _abandoned
     _abandoned = [process for process in _abandoned if process.poll() is None]
+
+
+def abandoned_children_still_running() -> list[int]:
+    """被殺掉之後還活著的子行程 PID。正常情況下永遠是空的。"""
+    _reap_abandoned()
     return [process.pid for process in _abandoned]
 
 
@@ -235,6 +244,28 @@ class StrategyWorker:
         with contextlib.suppress(Exception):
             process.kill()
             process.wait(timeout=2)
+
+        # **關掉這一端的管線。**
+        #
+        # 行程被作業系統收走了，但父行程手上那兩個 fd 不會自己消失——它們活到整個後端
+        # 重啟為止。而殺行程是逾時的正常處置（CLAUDE.md 第二條不可退讓），所以每一次
+        # 策略逾時、每一次 /validate 打到跑不完的策略、每一次掃描裡卡住的那一組，都會
+        # 永久多留兩個。
+        #
+        # 終點正是這個 repo 最不能接受的那一種：fd 耗光之後 Popen 再也起不來，每一支
+        # 策略永遠停在「策略行程暫時不可用」——全面停擺，而且沒有東西會說。
+        for pipe in (process.stdin, process.stdout):
+            if pipe is not None:
+                with contextlib.suppress(Exception):
+                    pipe.close()
+
+        # 順手把已經死掉的清掉。
+        #
+        # _abandoned 存在的理由是「讓無窮迴圈真的被殺掉了驗得到」，那是對的；但回收只
+        # 在 abandoned_children_still_running() 裡做，而那個函式在正式路徑上**沒有呼叫
+        # 端**（grep 全 repo，只有測試用）。於是一個診斷用的清單變成一個只增不減的容
+        # 器。在這裡收，就不需要有人記得去呼叫它。
+        _reap_abandoned()
 
     def request(self, command: str, timeout: float | None = None, **payload) -> dict:
         with self._lock:
