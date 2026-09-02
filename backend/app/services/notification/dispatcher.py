@@ -1,4 +1,5 @@
 import logging
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 
@@ -39,6 +40,28 @@ _DISPATCHED_EVENT_TYPES = {"order.created", "order.updated", "strategy.error", "
 # subscribers. Without this key the bus-subscribed dispatcher would send a
 # second copy of every alert.
 DISPATCHED_INLINE_KEY = "dispatched_inline"
+
+
+def mint_receipt_token(channel_type: ChannelType) -> str | None:
+    """只有瀏覽器推播那條路有 service worker 可以回報，所以只有它值得發權杖。
+
+    給 Telegram／Email／LINE 發一張，等於發一張永遠兌換不掉的票：那一列會永遠停在
+    「沒回報」，而那正好是「真的沒送到」長的樣子——等於把唯一一個看得出通知路徑死掉的
+    訊號變成雜訊。
+    """
+    return secrets.token_urlsafe(32) if channel_type == ChannelType.WEB_PUSH else None
+
+
+def send_with_receipt(sender, config: dict, message: str, receipt_token: str | None):
+    """帶著回條送；沒有回條就照原樣送。
+
+    base.py 的 NotificationSender 協定只有兩個參數，第三個只存在於 WebPushSender 上，
+    所以多帶一個給 Telegram 會是 TypeError——而那條路上的 TypeError 會讓那個管道的每
+    一則提醒都變成失敗。分岔寫在這裡一次，dispatcher 和 retry 兩條送出路共用。
+    """
+    if receipt_token is None:
+        return sender.send(config, message)
+    return sender.send(config, message, receipt_token)
 
 
 @dataclass
@@ -299,8 +322,18 @@ def _deliver_to_channel(
         session.commit()
         return "deferred"
 
+    # 真正的提醒也要帶回條，不能只有那顆「測試」按鈕帶。
+    #
+    # RFC 8030 §5 原文寫著推播服務回 2xx「does not indicate that the message was
+    # delivered to the user agent」。所以在裝置回報之前，一支被 iOS 悄悄收回通知權限的
+    # 手機，跟一支好好收到的手機，在這個 app 裡長得一模一樣：都是 SENT、都沒有錯誤、管
+    # 道都還寫著「啟用中」。回條的機制早就整條建好了（權杖進加密內容、sw.js 顯示完就
+    # POST 回來、delivered_at 記那一刻），卻只有 /test 端點會發權杖——等於他唯一問得出
+    # 「我的提醒真的有到嗎」的地方，是一顆要自己去按的按鈕。而警告真的停擺的時候，沒有
+    # 人會想到要去按它。
+    receipt_token = mint_receipt_token(channel.channel_type)
     try:
-        send_result = sender.send(channel.config_encrypted, message)
+        send_result = send_with_receipt(sender, channel.config_encrypted, message, receipt_token)
     except Exception as exc:
         logger.exception("notification send crashed for channel %s", channel.id)
         ok, error = False, str(exc)
@@ -317,6 +350,12 @@ def _deliver_to_channel(
         # Kept even on success, so the row says what the owner was actually
         # told rather than only that something was sent.
         message=message,
+        # 送出去的那張權杖要記在這一列上，否則裝置回報時對不到任何一列，而
+        # delivered_at 就永遠是 NULL——等於發了權杖卻沒有人收得下。
+        #
+        # 送失敗就不記：那張權杖從來沒有離開過這台伺服器，留著只會讓一列失敗的紀錄
+        # 看起來像「還在等裝置回報」。
+        receipt_token=receipt_token if ok else None,
     )
     if not ok:
         # order.created and strategy.error fire once and never again, so

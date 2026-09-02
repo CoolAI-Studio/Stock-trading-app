@@ -138,7 +138,17 @@ def retry_pending(db: Session, clock: Callable[[], float] = time.monotonic) -> i
         log.attempts += 1
         attempted += 1
         try:
-            result = sender.send(channel.config_encrypted, log.message)
+            from app.services.notification import dispatcher
+
+            # 重送也要帶回條，理由跟第一次送一樣（見 dispatcher.mint_receipt_token）。
+            # 少了這裡，一則第一次沒送成、第二次成功的提醒會永遠停在「沒回報」——而那
+            # 正好是「真的沒送到」長的樣子。
+            token = dispatcher.mint_receipt_token(channel.channel_type)
+            result = dispatcher.send_with_receipt(
+                sender, channel.config_encrypted, log.message, token
+            )
+            if result.ok and token:
+                log.receipt_token = token
         except Exception as exc:
             logger.exception("notification retry crashed for channel %s", channel.id)
             ok, error = False, str(exc)
