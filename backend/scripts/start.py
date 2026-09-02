@@ -23,6 +23,7 @@ import os
 import re
 import subprocess  # nosec B404
 import sys
+import time
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +114,72 @@ def readable_reason(output: str) -> str:
     return "\n".join(kept[-2:]).strip()
 
 
+# 探測資料庫的預算。要小：它擋在服務起來的前面，而它的答案只決定要不要鎖住設定頁。
+_PROBE_CONNECT_TIMEOUT_SEC = 5
+# **查詢也要有期限，不只連線。** libpq 的 connect_timeout 只管連線建立，不管查詢跑多
+# 久——一個連得上但卡在鎖上的資料庫會讓這裡永遠回不來，而「回不來」正是這個檔案存在要
+# 防的那件事：一個死掉的網址。
+_PROBE_STATEMENT_TIMEOUT_MS = 3000
+# 問幾次。「容器起來那一刻資料庫剛好抖一下」是這條路上真的會遇到的一種：alembic 幾秒內
+# 就連不上而失敗，十秒後資料庫卻回來了。只問一次會把那種情況判成「第一次部署」，而那個
+# 判斷的代價是他所有的提醒停擺。
+_PROBE_ATTEMPTS = 3
+_PROBE_GAP_SEC = 2
+
+
+def deployment_has_accounts() -> bool:
+    """這個資料庫裡已經有帳號了嗎。問不到就是 False。
+
+    這是「這份部署以前成功跑起來過」唯一問得到的證據，而它決定一次跑不動的遷移是什麼
+    意思：
+
+        沒有帳號（或問不到）→ 這份部署從來沒有跑起來過 → 設定模式，設定頁解釋
+        已經有帳號          → 是我們這次的更新弄壞了什麼 → **不可以**鎖
+
+    走錯第二邊的代價不對稱，而且正是 CLAUDE.md「更新不可以停掉已經在跑的那一份」整條在
+    講的形狀：鎖住的話 app/main.py 的 run_worker 是 False，worker 一次都不跑，他每一則
+    提醒都不會送出去，而且行程活著就不會自己復原——畫面上只寫「這個部署還沒設定完成」，
+    而他昨天什麼都沒動。
+
+    用「有沒有帳號」而不是「schema 在不在」，因為它同時就是「有沒有東西可以失去」：沒有
+    帳號就沒有策略、沒有提醒，鎖住不會讓任何一則通知消失。
+
+    問不到算沒有，因為連不上正是第一次部署最常見的樣子（DATABASE_URL 是整張表單上唯一
+    一個 app 生不出來、只能去別人家的服務複製貼上的值），而那時候鎖住是對的。
+
+    **不丟例外，也不會永遠回不來。** 為了問這個問題把服務卡在開機是本末倒置。
+    """
+    for attempt in range(_PROBE_ATTEMPTS):
+        try:
+            from sqlalchemy import create_engine, select, text
+
+            from app.config import settings
+            from app.models.user import User
+
+            url = settings.DATABASE_URL
+            connect_args: dict = {}
+            if url.startswith("postgres"):
+                connect_args["connect_timeout"] = _PROBE_CONNECT_TIMEOUT_SEC
+            engine = create_engine(url, connect_args=connect_args, pool_pre_ping=False)
+            try:
+                with engine.connect() as connection:
+                    if url.startswith("postgres"):
+                        # 連得上但卡在鎖上，是這條路真的會遇到的一種——而它跟連不上的
+                        # 差別在於：連不上會很快回來，卡住不會。
+                        connection.execute(
+                            text(f"SET statement_timeout = {_PROBE_STATEMENT_TIMEOUT_MS}")
+                        )
+                    found = connection.execute(select(User.__table__.c.id).limit(1)).first()
+                return found is not None
+            finally:
+                engine.dispose()
+        except Exception as exc:  # noqa: BLE001 -- 問不到就是沒有，不是壞掉
+            logger.info("問不到這個部署有沒有帳號（第 %s 次）：%s", attempt + 1, exc)
+            if attempt + 1 < _PROBE_ATTEMPTS:
+                time.sleep(_PROBE_GAP_SEC)
+    return False
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO)
     problem = run_migrations()
@@ -121,7 +188,21 @@ def main() -> int:
         # this to whoever is looking at the setup page.
         logger.error("資料庫遷移沒有跑成功，服務仍然會啟動，好讓設定頁說得出原因：\n%s", problem)
         # 讓 app 那一側也讀得到，設定頁才分得出「還沒填」和「填了連不上」。
-        os.environ["DATABASE_MIGRATION_ERROR"] = problem
+        # **已經有帳號的部署不可以被鎖起來。**
+        #
+        # DATABASE_MIGRATION_ERROR 會讓 app 進設定模式，而設定模式下 run_worker 是
+        # False——一次跑不動的遷移就讓一份跑了三個月的部署所有提醒停擺，而且行程活
+        # 著就不會自己復原。這正是 #50 那條規則的形狀，只是入口從編譯移到開機。
+        #
+        # 「不鎖」不等於「不說」：理由留在 WARNING 裡，log 也照樣印。
+        if deployment_has_accounts():
+            logger.error(
+                "這個部署已經有帳號了，所以不會因為這次遷移失敗而鎖住——worker 照跑、"
+                "提醒照送。但 schema 可能跟程式碼對不上，請看上面的原因。"
+            )
+            os.environ["DATABASE_MIGRATION_STALE"] = problem
+        else:
+            os.environ["DATABASE_MIGRATION_ERROR"] = problem
     else:
         logger.info("資料庫遷移完成")
 
