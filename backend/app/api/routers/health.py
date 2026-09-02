@@ -105,6 +105,21 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         checks["symbols"] = (
             {"status": _FAIL, "stale_count": len(stale)} if stale else {"status": _OK}
         )
+
+        # 迴圈在轉、行情抓得到、每個代號都有價——而使用者的策略一支都跑不起來。
+        #
+        # 上面每一項都看不到這件事：策略跑在子行程裡，而「子行程壞掉不是策略的錯」
+        # （#18）刻意讓它不累積、不停用，於是它也不留下任何痕跡。那個狀態就是提醒
+        # 全面停擺，而這支探測是唯一會在沒有人看的時候說話的東西。
+        blind = sorted(
+            strategy_id
+            for strategy_id, blocked_sec in beat.strategy_blocked_sec.items()
+            if blocked_sec > settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC
+        )
+        # 數量，不是 id——跟上面的代號同一條規則：這支端點沒有憑證也打得到。
+        checks["strategies"] = (
+            {"status": _FAIL, "blocked_count": len(blind)} if blind else {"status": _OK}
+        )
     else:
         # An intentionally idle worker (local runs, the test suite) is a
         # configuration choice, not something to wake the owner over.
@@ -113,6 +128,7 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         # Nothing is polling, so no symbol can have a price. The worker check
         # already says that; a second failure repeating it is noise.
         checks["symbols"] = {"status": _DISABLED}
+        checks["strategies"] = {"status": _DISABLED}
 
     # A muted notifier is not a healthy one FOR THIS PRODUCT. WORKER_ENABLED
     # off is a configuration choice somebody makes to run the app locally;

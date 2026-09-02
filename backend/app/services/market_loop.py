@@ -127,9 +127,18 @@ _MAX_CONSECUTIVE_ERRORS = 5
 
 
 def _record_strategy_error(
-    db: Session, strategy: Strategy, exc: Exception, events: list[Event]
+    db: Session, strategy: Strategy, exc: Exception, events: list[Event], blocked: set[int]
 ) -> None:
+    """`blocked` 跟 `events` 一樣是拿來往外帶東西的：這一輪有哪幾支策略是因為子行程
+    叫不動而沒跑成。tick_once 收齊之後交給心跳，那是 /healthz 和狀態頁唯一看得到這件
+    事的管道。"""
     if isinstance(exc, WorkerUnavailable):
+        # 記下來，但**只是記下來**：底下那些「累積、停用」一個都不做。
+        #
+        # 這一行是「看得見」與「怪罪使用者」的分界。子行程起不來的時候，這個部署一則
+        # 提醒都發不出去，而在這之前它在 /healthz 上是全綠的、狀態頁上一格都沒有、看
+        # 門狗永遠不會寄信——唯一的線索是這一列上的一句話，而那一頁他不會打開。
+        blocked.add(strategy.id)
         # **子行程壞掉不是策略的錯，所以不能累積、不能停用。**
         #
         # 這裡連續五次就把策略停用，而輪詢五秒一次。一次 spawn 失敗（記憶體不夠、
@@ -178,7 +187,7 @@ def _mark_compiled(db: Session, strategy: Strategy) -> None:
 
 
 def _record_compile_failure(
-    db: Session, strategy: Strategy, exc: Exception, events: list[Event]
+    db: Session, strategy: Strategy, exc: Exception, events: list[Event], blocked: set[int]
 ) -> None:
     """編不過。**是他的程式碼壞了，還是我們的更新弄壞的？**
 
@@ -200,7 +209,7 @@ def _record_compile_failure(
     upgraded = bool(was) and bool(running) and was != running
 
     if not upgraded:
-        _record_strategy_error(db, strategy, exc, events)
+        _record_strategy_error(db, strategy, exc, events, blocked)
         return
 
     message = (
@@ -243,12 +252,17 @@ def _record_feed_problem(db: Session, strategy: Strategy, detail: str) -> None:
 
 
 def _run_tick_strategy(
-    db: Session, strategy: Strategy, loaded: RunnableStrategy, quote: Quote, events: list[Event]
+    db: Session,
+    strategy: Strategy,
+    loaded: RunnableStrategy,
+    quote: Quote,
+    events: list[Event],
+    blocked: set[int],
 ) -> None:
     try:
         signal_str = loaded.on_tick(float(quote.price))
     except Exception as exc:
-        _record_strategy_error(db, strategy, exc, events)
+        _record_strategy_error(db, strategy, exc, events, blocked)
         return
 
     strategy.last_run_at = utcnow()
@@ -258,7 +272,12 @@ def _run_tick_strategy(
 
 
 def _run_bar_strategy(
-    db: Session, strategy: Strategy, loaded: RunnableStrategy, bars: list[Bar], events: list[Event]
+    db: Session,
+    strategy: Strategy,
+    loaded: RunnableStrategy,
+    bars: list[Bar],
+    events: list[Event],
+    blocked: set[int],
 ) -> None:
     """Feeds closed candles to on_bar: at most one call per candle, and never
     for a candle the strategy has already been shown."""
@@ -300,7 +319,7 @@ def _run_bar_strategy(
             signal_str = loaded.on_bar(signal_bar)
             loaded.last_bar_ts = signal_bar.timestamp
     except Exception as exc:
-        _record_strategy_error(db, strategy, exc, events)
+        _record_strategy_error(db, strategy, exc, events, blocked)
         return
 
     strategy.consecutive_errors = 0
@@ -469,6 +488,12 @@ def tick_once(
     owns_session = db is None
     session = db or SessionLocal()
     events: list[Event] = []
+    # 這一輪有哪幾支策略因為子行程叫不動而沒跑成。
+    #
+    # 往下傳給每一個記錄錯誤的地方，收齊之後交給心跳——那是 /healthz、狀態頁和外部看
+    # 門狗唯一看得到這件事的管道。在這之前，「三個 worker 都起不來」等於提醒全面停擺，
+    # 而每一項檢查都是綠的。
+    blocked: set[int] = set()
 
     try:
         strategies = session.query(Strategy).filter(Strategy.is_active.is_(True)).all()
@@ -487,7 +512,7 @@ def tick_once(
                     strategy.id, strategy.source_code, params=strategy.params
                 )
             except Exception as exc:
-                _record_compile_failure(session, strategy, exc, events)
+                _record_compile_failure(session, strategy, exc, events, blocked)
             else:
                 # 編得過就記下版本。這是下一次判斷「是不是我們的更新造成的」唯一的
                 # 依據，而它必須在**成功**的時候寫，不是在失敗的時候猜。
@@ -540,6 +565,10 @@ def tick_once(
         _last_watched = [(strat.symbol, strat.data_source) for strat in strategies] + [
             (pos.symbol, DataSource.YFINANCE) for pos in positions
         ]
+
+        # 整組重寫：沒被列出來的就是這一輪沒有這個問題（跑成功了，或根本沒輪到
+        # 它——關市時 on_tick 策略不會被呼叫）。「沒有被問」不等於「壞掉」。
+        worker_health.heartbeat.mark_blocked_strategies(blocked)
 
         if symbols_by_source:
             if quotes:
@@ -600,7 +629,9 @@ def tick_once(
                     # 一句會自己過去的話。抓不到就說抓不到。
                     _record_feed_problem(session, strategy, f"抓不到 K 棒：{problem}")
                     continue
-                _run_bar_strategy(session, strategy, loaded, bars_by_key.get(key, []), events)
+                _run_bar_strategy(
+                    session, strategy, loaded, bars_by_key.get(key, []), events, blocked
+                )
                 continue
             quote = quotes.get(strategy.symbol)
             if quote is None:
@@ -612,7 +643,7 @@ def tick_once(
             # closed_bars() already withholds a candle until it has closed.
             if not market_calendar.is_open(strategy.symbol, data_source=strategy.data_source):
                 continue
-            _run_tick_strategy(session, strategy, loaded, quote, events)
+            _run_tick_strategy(session, strategy, loaded, quote, events, blocked)
 
         for position in positions:
             quote = quotes.get(position.symbol)

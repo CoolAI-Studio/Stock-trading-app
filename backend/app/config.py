@@ -191,6 +191,17 @@ class Settings(BaseSettings):
     # resolved at all rather than that nothing is trading.
     HEALTH_MAX_SYMBOL_GAP_SEC: float = 900.0
 
+    # 一支策略「叫不動子行程」多久之後，/healthz 才把它當成停擺。
+    #
+    # 上面那三個看的都是行情：迴圈在不在轉、有沒有價、某個代號是不是死了。全部正常
+    # 而**策略一支都跑不起來**是一個獨立的失效——行情每五秒抓得好好的，一則提醒都不
+    # 會發出，而每一項檢查都是綠的。
+    #
+    # 這個數字要蓋過關市時的輪詢週期再加一輪 tick，理由跟 HEALTH_MAX_AGE_SEC 一樣：
+    # 不然一次失敗的重生就足以在半夜寄出一封信，而一個會亂叫的警報器等於沒有警報器
+    # （tests/test_the_watchdog_does_not_cry_wolf.py）。
+    HEALTH_MAX_STRATEGY_BLOCKED_SEC: float = 600.0
+
     # This deployment's own public address, used to tell the owner what URL to
     # paste into TradingView. Not derivable from a request: the app sits
     # behind a proxy, so the Host header is whatever that proxy forwards.

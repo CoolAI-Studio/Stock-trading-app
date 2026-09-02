@@ -11,7 +11,7 @@ be able to make a healthy worker look hours stale, or a dead one look fresh.
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,16 @@ class HeartbeatSnapshot:
     # nine working symbols hide the tenth that never resolves -- and every
     # threshold on that tenth has silently stopped evaluating.
     symbol_gap_sec: dict[str, float]
+    # 每一支策略叫不動它的子行程多久了。
+    #
+    # **這張快照上沒有別的東西看得到這件事。** 迴圈照轉、輪詢照完成、每一個代號照
+    # 樣有價——而一支策略都沒跑，所以一則提醒都沒發出。「子行程壞掉不是策略的錯」
+    # （#18）是那個失敗刻意在策略那一列上安靜的理由；這一欄是讓它不要在**其他每一
+    # 個地方**也一起安靜。
+    #
+    # 有預設值，所以舊的測試用關鍵字自己組這張快照仍然可以跑：空的就是「沒有東西
+    # 卡住」，而那是誠實的讀法。
+    strategy_blocked_sec: dict[int, float] = field(default_factory=dict)
 
 
 class WorkerHeartbeat:
@@ -46,6 +56,8 @@ class WorkerHeartbeat:
         self._consecutive_empty_polls = 0
         # symbol -> monotonic time it has been priceless since.
         self._priceless_since: dict[str, float] = {}
+        # 策略 id -> 它從什麼時候開始叫不動子行程（monotonic）。
+        self._blocked_since: dict[int, float] = {}
 
     def mark_loop(self) -> None:
         """The loop reached the top of an iteration, so it is not wedged."""
@@ -86,6 +98,27 @@ class WorkerHeartbeat:
             if symbol in answered or symbol not in asked:
                 del self._priceless_since[symbol]
 
+    def mark_blocked_strategies(self, blocked: set[int]) -> None:
+        """這一輪有哪幾支策略是因為子行程叫不動而沒跑成。
+
+        **整組重寫，不是累加。** 沒被列出來的就是這一輪沒有這個問題——它跑成功了，或
+        者根本沒輪到它（關市的時候 on_tick 策略不會被呼叫）。「沒有被問」不等於「壞
+        掉」，這條規則跟 mark_symbols 是同一條，理由也一樣：一個半夜亂叫的警報器會被
+        學會忽略，然後真的停擺那一次的信長得一模一樣。
+
+        也刻意不用單一計數器。CLAUDE.md 記過同一個教訓兩次（consecutive_empty_polls
+        一次成功就歸零，會被九個好的蓋掉第十個）：三格 worker 只死一格的時候，單一計
+        數器會 1,0,1,0 永遠跨不過門檻，而那三分之一的提醒是真的停了。
+        """
+        now = self._clock()
+        for strategy_id in blocked:
+            # setdefault：持續中的故障留著它**開始**的時間，不是每一輪重新計時——
+            # 重新計時的話任何門檻都永遠跨不過去。
+            self._blocked_since.setdefault(strategy_id, now)
+        for strategy_id in list(self._blocked_since):
+            if strategy_id not in blocked:
+                del self._blocked_since[strategy_id]
+
     def snapshot(self) -> HeartbeatSnapshot:
         # The marks are written from the event loop thread and read from the
         # threadpool thread serving /healthz. Single float attribute reads and
@@ -99,6 +132,7 @@ class WorkerHeartbeat:
             last_poll_age_sec=None if self._last_poll_at is None else now - self._last_poll_at,
             consecutive_empty_polls=self._consecutive_empty_polls,
             symbol_gap_sec={s: now - since for s, since in self._priceless_since.items()},
+            strategy_blocked_sec={sid: now - since for sid, since in self._blocked_since.items()},
         )
 
 

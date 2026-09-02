@@ -243,6 +243,30 @@ def system_status(
             {"symbol": symbol, "gap_sec": round(gap, 1)} for symbol, gap in sorted(own_gaps.items())
         ],
     }
+    # 哪幾支策略叫不動它的子行程。**只列你自己的**，跟 stale_symbols 同一個理由：
+    # 心跳是行程層級的單例，它的表是跨全部帳號的聯集。
+    own_strategies = {
+        sid: name
+        for sid, name in db.query(Strategy.id, Strategy.name).filter(Strategy.user_id == user.id)
+    }
+    own_blocked = {
+        sid: sec for sid, sec in beat.strategy_blocked_sec.items() if sid in own_strategies
+    }
+    strategies_block = {
+        # 具名，不是計數。他要知道的是「哪一支現在不會發提醒」，而 /healthz 依設計說
+        # 不出這件事（它沒有憑證）。
+        "blocked": [
+            {"strategy_id": sid, "name": own_strategies[sid], "blocked_sec": round(sec, 1)}
+            for sid, sec in sorted(own_blocked.items())
+        ]
+    }
+    if settings.WORKER_ENABLED:
+        if any(sec > settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC for sec in own_blocked.values()):
+            overall = _worse(overall, _FAIL)
+        elif own_blocked:
+            # 還沒跨過門檻是一次重生失敗，不是停擺——但那正是停擺開始的樣子。
+            overall = _worse(overall, _WARN)
+
     if settings.WORKER_ENABLED:
         if beat.consecutive_empty_polls >= settings.HEALTH_MAX_EMPTY_POLLS:
             overall = _worse(overall, _FAIL)
@@ -332,6 +356,7 @@ def system_status(
         "overall": overall,
         "worker": worker,
         "market_data": market_data,
+        "strategies": strategies_block,
         "notifications": notifications,
         "accounts": accounts,
         "database": database,
@@ -379,6 +404,11 @@ def _state_for_assistant(db: Session, user: User) -> str:
     stale = ", ".join(
         f"{row['symbol']}（已 {row['gap_sec']:.0f} 秒沒有價格）" for row in market["stale_symbols"]
     )
+    # 少了這一句，助手會看到 overall=fail 卻每一格都正常，然後開始猜。
+    blind = "、".join(
+        f"{row['name']}（已 {row['blocked_sec']:.0f} 秒叫不動子行程）"
+        for row in status["strategies"]["blocked"]
+    )
     return (
         f"這個部署目前的狀態：\n"
         f"- 整體：{status['overall']}\n"
@@ -387,6 +417,7 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"最後一次成功抓行情：{worker['last_poll_age_sec']} 秒前\n"
         f"- 連續抓不到任何價格的次數：{market['consecutive_empty_polls']}\n"
         f"- 抓不到報價的代號：{stale or '無'}\n"
+        f"- 叫不動子行程的策略：{blind or '無'}\n"
         f"- 通知功能啟用：{notifications['enabled']}\n"
         f"- 最近 {notifications['window_hours']} 小時的通知："
         f"已送出 {notifications['sent']}、還在重試 {notifications['retrying']}、"
