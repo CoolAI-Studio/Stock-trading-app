@@ -276,11 +276,30 @@ _SERVER_FAULT_CODES = ("HTTP 400", "HTTP 401", "HTTP 403")
 # silence and then dropped.
 _TOO_LARGE_CODES = ("HTTP 413",)
 
-_PERMANENT_CODES = _DEVICE_GONE_CODES + _SERVER_FAULT_CODES + _TOO_LARGE_CODES
+# SMTP 不是 HTTP，所以它有自己的前綴（見 email.py 的 _describe）。535／534／530 是
+# 認證被拒——改過密碼、關掉兩步驟驗證都會讓應用程式密碼失效，而那**很常發生**。
+# 4xx 開頭的 SMTP 碼是暫時性的，不在這裡。
+_SMTP_AUTH_CODES = ("SMTP 530", "SMTP 534", "SMTP 535")
+
+_PERMANENT_CODES = _DEVICE_GONE_CODES + _SERVER_FAULT_CODES + _TOO_LARGE_CODES + _SMTP_AUTH_CODES
+
+# **「訊息太長」不是憑證錯誤，而它們共用同一個 400。**
+#
+# Telegram 用 400 回答「機器人權杖不對」，也用 400 回答「訊息太長」。兩者的處置相反：
+# 前者要停用管道並叫他去換權杖；後者是**我們自己送出去的內容**造成的，權杖好好的，
+# 停用它等於因為一則過長的策略錯誤訊息把他的 Telegram 永久關掉。
+#
+# 比對的是對方回的說明文字。那是唯一分得出來的線索，而且比「乾脆別停用 400」安全：
+# 真正的權杖錯誤仍然要停。
+_NOT_OUR_CREDENTIALS = ("too long", "message is too long", "text is too long")
 
 
 def _is_permanent(error: str | None) -> bool:
-    return bool(error) and error.startswith(_PERMANENT_CODES)
+    if not error:
+        return False
+    if any(phrase in error.lower() for phrase in _NOT_OUR_CREDENTIALS):
+        return False
+    return error.startswith(_PERMANENT_CODES)
 
 
 def _permanent_explanation(channel_type: ChannelType, error: str) -> str:

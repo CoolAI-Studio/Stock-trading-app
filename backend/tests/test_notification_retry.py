@@ -242,3 +242,106 @@ def test_a_delivered_notification_is_not_queued(db_session):
     log = db_session.query(NotificationLog).filter(NotificationLog.channel_id == channel.id).one()
     assert log.status == NotificationStatus.SENT
     assert log.next_retry_at is None
+
+
+# --- 憑證失效要被認出來，而「訊息太長」不是憑證失效 ---------------------------
+#
+# retry.py 的註解說「the 'HTTP <code>' prefix every sender now emits」。那句話對
+# telegram 和 webpush 成立，對 **LINE 和 Email 不成立**——它們直接回 `str(exc)`。
+#
+# 後果是靜默的、而且方向最壞：憑證失效永遠不會被判成永久失敗，所以管道不會停用、不會
+# 透過其他管道告訴他、畫面上永遠寫著「啟用中」，而每一則提醒都送進黑洞。這個 repo 的
+# 最高優先就是這種東西。
+
+
+def test_a_line_token_that_stopped_working_is_recognised():
+    """LINE 的 access token 過期或被撤銷 → 401。
+
+    那要停用管道並告訴他去哪裡換一把，而不是每十分鐘重試一次直到永遠。
+    """
+    import httpx
+
+    from app.services.notification import retry
+    from app.services.notification.line import LineSender
+
+    request = httpx.Request("POST", "https://api.line.me/v2/bot/message/push")
+    exc = httpx.HTTPStatusError(
+        "Client error", request=request, response=httpx.Response(401, request=request)
+    )
+
+    assert retry._is_permanent(LineSender()._describe(exc)), (
+        "LINE 的憑證失效沒有被認出來——管道會一直寫著「啟用中」而每則提醒都消失"
+    )
+
+
+def test_an_smtp_password_that_stopped_working_is_recognised():
+    """Email 的應用程式密碼被撤銷 → SMTP 535。
+
+    這個特別常見：Gmail 的應用程式密碼會因為改密碼、關閉兩步驟驗證而失效。
+    """
+    import smtplib
+
+    from app.services.notification import retry
+    from app.services.notification.email import EmailSender
+
+    exc = smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
+
+    assert retry._is_permanent(EmailSender()._describe(exc)), (
+        "SMTP 的認證失敗沒有被認出來——他改過一次密碼之後就再也收不到 Email 提醒"
+    )
+
+
+def test_a_temporary_smtp_problem_is_not_permanent():
+    """而暫時性的（對方忙、連線斷）要繼續重試，不可以把管道關掉。"""
+    import smtplib
+
+    from app.services.notification import retry
+    from app.services.notification.email import EmailSender
+
+    for exc in (
+        smtplib.SMTPServerDisconnected("connection lost"),
+        smtplib.SMTPResponseException(451, b"4.3.0 Temporary failure"),
+    ):
+        assert not retry._is_permanent(EmailSender()._describe(exc)), f"{exc} 不應該永久停用管道"
+
+
+def test_a_message_that_was_too_long_does_not_disable_telegram():
+    """**Telegram 的 400 有兩種意思，而它們的處置相反。**
+
+    400 是「機器人權杖不對」，也是「訊息太長」。現在兩個都被當成憑證錯誤而永久停用管
+    道，並叫他去檢查權杖——而權杖是好的。一則過長的策略錯誤訊息就足以把他的 Telegram
+    永久關掉。
+    """
+    from app.services.notification import retry
+
+    assert not retry._is_permanent("HTTP 400: Bad Request: message is too long"), (
+        "訊息太長把管道永久停用了，而那是我們自己送出去的內容造成的"
+    )
+    # 而真正的憑證錯誤還是要停。
+    assert retry._is_permanent("HTTP 400: Bad Request: bot token is invalid")
+    assert retry._is_permanent("HTTP 401: Unauthorized")
+
+
+def test_a_long_alert_is_trimmed_before_it_is_sent():
+    """上一條的另一半：**根本不該送出過長的訊息**。
+
+    webpush 有 MAX_BODY_CHARS（600），telegram 和 line 一個都沒有。而策略的錯誤訊息可
+    以很長（Python 的例外字串、使用者自己寫的 message），所以那個 400 是我們自己造成
+    的。分類修好只是不再把管道關掉；不送出過長的訊息才是讓那則提醒真的送到。
+
+    Telegram 的上限是 4096 字元，LINE 是 5000。取比較小的那一個當共用上限，因為同一則
+    提醒會走每一個管道，而截斷點不一致只會讓比對變難。
+    """
+    from app.services.notification.line import LineSender
+    from app.services.notification.telegram import TelegramSender
+
+    long_message = "跌破 900：" + "詳細說明" * 2000
+
+    for sender in (TelegramSender(), LineSender()):
+        fitted = sender._fit(long_message)
+        assert len(fitted) < len(long_message), f"{type(sender).__name__} 沒有截斷過長的訊息"
+        assert len(fitted) <= 4096, f"{type(sender).__name__} 截完還是超過 Telegram 的上限"
+        # 截斷要看得出來，否則他會以為那就是全部。
+        assert fitted.endswith("…") or "…" in fitted[-10:]
+        # 最重要的那一段在開頭，不可以被截掉。
+        assert fitted.startswith("跌破 900：")
