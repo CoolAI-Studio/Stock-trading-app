@@ -11,7 +11,26 @@
 # When it fails, GitHub emails the repo owner -- that email is the entire
 # point of this file.
 #
-# The repo is public, so scheduled Actions minutes are free.
+# 這個 repo 是公開的，所以排程用掉的 Actions 分鐘是免費的（GitHub：「The use of
+# standard GitHub-hosted runners is free: In public repositories.」）。
+#
+# **但使用者那一份不一定是公開的**，而這件事會咬到「更新」。
+#
+# Vercel 的 clone 會在他自己的帳號下開一個新的 repo（不是 fork，所以排程一開始就會
+# 跑），而那多半是私人的——這是他自己的股票提醒系統。私人 repo 在 GitHub Free 上一個
+# 月只有 **2,000 分鐘**，而且「usage is blocked once you use up your quota」。
+#
+# 這個排程是每 15 分鐘一次 = 一個月 2,880 次，每一次都要 checkout 加 setup-python，
+# 所以就算 HEALTH_URL 沒設、腳本第一行就 exit 0，那一分鐘照樣算。2,880 > 2,000。
+#
+# 額度用完之後 GitHub 擋掉的是**所有**的 Actions，包括 sync-from-upstream.yml——那條
+# 每天從上游快轉的線，正是他拿到更新（含安全修補）的唯一管道。也就是說：一個為了
+# 「看得到提醒有沒有在跑」而存在的排程，每個月大約第二十天會把「拿得到更新」關掉。
+# 兩件事都是安靜的。
+#
+# 所以底下那個 `if: vars.HEALTH_URL != ''`。**被跳過的 job 不計分鐘**，而沒設
+# HEALTH_URL 的人本來就沒有在用這個看門狗。他有更好的東西：安裝頁教他設一個每 5 分鐘
+# 檢查一次、壞掉就寄信的外部監控（#93），比這個快三倍而且不吃他的額度。
 #
 # ONE HOLE, WRITTEN DOWN RATHER THAN HOPED OVER: GitHub disables scheduled
 # workflows in a public repository after 60 days with no activity in it. If
@@ -43,6 +62,9 @@ concurrency:
 
 jobs:
   health:
+    # 沒設就不要起。理由在檔頭：起來只為了印一行「沒設定，略過」的 job 照樣算一分
+    # 鐘，而那會在私人副本上每個月把他的更新管道一起關掉。
+    if: vars.HEALTH_URL != ''
     runs-on: ubuntu-latest
     # A hung request must not hold a runner open; the script's own timeout is
     # 60s and it makes at most two attempts 45s apart.
