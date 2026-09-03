@@ -132,7 +132,7 @@ def read_verdict(status_code: int | None, body: str | None) -> list[str]:
         # than trusting either half of a contradiction.
         problems.append(
             f"HTTP {status_code}，但回傳的檢查項目都說正常。"
-            "可能是 Render 或中間的代理擋下來的，不是 app 自己回的。"
+            "可能是 部署平台 或中間的代理擋下來的，不是 app 自己回的。"
         )
 
     return problems
@@ -239,8 +239,13 @@ def main(argv: list[str]) -> int:
     for problem in problems:
         print(f"  - {problem}")
     print(
-        "\n這代表提醒可能已經停擺。先去 Render 的 dashboard 看 log，"
-        "確認服務有沒有在跑；必要時按一次 Manual Deploy。"
+        # **不要指名某一家平台。** 這支腳本跑在 GitHub Actions 上，手上只有一個網址
+        # 和一份健康檢查的 JSON——它不知道那是 Render、Railway、Fly.io 還是他自己的
+        # 機器（安裝頁四條路都給了）。對走另外三條的人說「Render 後台」，他會真的去
+        # 找那一頁、找不到、然後以為是自己弄錯了。app 那一側用 platform.env_where 講
+        # 對的說法，這裡辦不到，所以只講對每一家都成立的話。
+        "\n這代表提醒可能已經停擺。去你部署後端的那個平台看這個服務的 log，"
+        "確認它有沒有在跑；必要時手動重新部署一次。"
     )
     return 1
 

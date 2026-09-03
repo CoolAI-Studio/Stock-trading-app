@@ -379,3 +379,32 @@ def test_a_configured_and_healthy_deployment_is_still_quiet():
     body = json.dumps({"status": "ok", "checks": {"worker": {"status": "ok"}}})
 
     assert run_check(lambda: (200, body)) == []
+
+
+def test_the_advice_does_not_assume_which_platform_he_used():
+    """看門狗說不出他部署在哪裡，所以它不可以講得好像知道。
+
+    這封信的建議原本是「先去 **Render** 的 dashboard 看 log」。但安裝頁上明明白白給
+    了四條路：Render、Railway、Fly.io、自己的機器。對一個部署在 Fly.io 的人說「Render
+    後台」，比含糊更糟——他會真的去找那一頁，然後找不到，然後以為是自己弄錯了。
+
+    這條規則 app 那一側早就有了：`/api/system/status` 會回 `platform.env_where`，用他
+    實際所在平台的說法講話。但看門狗跑在 GitHub Actions 上，它手上只有一個網址和一份
+    健康檢查的 JSON——**它不知道那是哪一家**，所以它只能講對每一家都成立的話。
+    """
+    import re
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / "scripts" / "watchdog.py"
+    text = source.read_text(encoding="utf-8")
+    # 只看真的會印出去的字串，不看註解——註解裡提到 Render 是在解釋歷史，那沒有問題。
+    printed = "\n".join(line for line in text.split("\n") if not line.lstrip().startswith("#"))
+    said = re.findall(r'"([^"]*)"', printed)
+
+    hosts = ("Render", "Railway", "Fly.io", "Vercel")
+    named = [s for s in said if any(host in s for host in hosts)]
+
+    assert not named, (
+        f"信裡指名了某一家平台：{named}。看門狗不知道他部署在哪裡——"
+        "安裝頁給了四條路，而對走另外三條的人來說，那句話會把他送去一個不存在的頁面。"
+    )
