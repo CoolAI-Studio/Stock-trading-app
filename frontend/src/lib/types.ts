@@ -655,6 +655,13 @@ export interface SystemStatus {
      *
      * `null` 是「問不到」。誤判成分岔比誤判成落後更糟，所以那時候照舊講落後。 */
     frontend_from_upstream?: boolean | null
+    /** 這一份是「一次部署」（前端和後端同一個映像檔）還是「兩次部署」。
+     *
+     * **畫面自己不知道這件事**——它在哪裡被送出來的，只有伺服器知道。而它決定
+     * 「你看到的畫面是舊的」後面該接什麼：兩次部署要他去前端那個平台重新部署；
+     * 一次部署的兩半依建構為真同版，所以唯一可能的原因是瀏覽器手上那份 bundle
+     * 是舊的，而修法是重新整理。 */
+    serves_its_own_frontend?: boolean
   }
   /** Whether asking the assistant would produce an answer rather than an
    * error. AI_API_KEY is one more blank in a deploy form and is optional by

@@ -261,13 +261,42 @@ export function SystemStatusPage() {
         比不出來（latest 是 null，或這次建置沒有帶 commit）就什麼都不說——誤報會讓
         他去重新部署一個其實沒有問題的東西。
       */}
-      {update?.latest && FRONTEND_COMMIT && FRONTEND_COMMIT !== update.latest && (
-        <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-          <strong>你看到的這個畫面是舊的。</strong>
-          它是 <code>{FRONTEND_COMMIT}</code>，最新的是 <code>{update.latest}</code>。
-          前端跟後端是分開部署的，所以它們可以不同步——去你部署前端的平台按一次重新部署。
-        </p>
-      )}
+      {/* **同一句話，兩種原因，兩個完全不同的辦法。**
+
+          兩次部署（後端 Render、前端 Vercel）：前端那一份真的落後了，因為它們各自
+          更新。修法是去前端那個平台按重新部署，而要比的是**上游最新的**——前端可能
+          比後端舊好幾個月，那正是要抓的。
+
+          一次部署（同一個映像檔，按鈕那條路，多數人）：同一個映像檔裡的兩半依建構
+          為真是同一個 commit，所以「畫面是舊的」的唯一可能原因是**瀏覽器手上那份
+          bundle 是舊的**（#92 的啟發式快取）。要比的是**這台伺服器自己跑的那一
+          版**，而修法是重新整理。
+
+          對一次部署的人講第一種，他會去找一個不存在的平台，找不到，然後得到「這個
+          app 壞了而我修不好」——而真正有效的動作只要一次重新整理。 */}
+      {update?.serves_its_own_frontend &&
+        update.running &&
+        FRONTEND_COMMIT &&
+        FRONTEND_COMMIT !== update.running && (
+          <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+            <strong>你看到的這個畫面是舊的，但伺服器上已經是新的了。</strong>
+            這個畫面是 <code>{FRONTEND_COMMIT}</code>，伺服器跑的是{' '}
+            <code>{update.running}</code>。是你的瀏覽器還留著上一版的快取——
+            <strong>重新整理一次</strong>就會拿到新的（還是一樣的話，重新整理時按住
+            Shift，或到瀏覽器設定裡清一次這個網站的資料）。
+          </p>
+        )}
+
+      {!update?.serves_its_own_frontend &&
+        update?.latest &&
+        FRONTEND_COMMIT &&
+        FRONTEND_COMMIT !== update.latest && (
+          <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+            <strong>你看到的這個畫面是舊的。</strong>
+            它是 <code>{FRONTEND_COMMIT}</code>，最新的是 <code>{update.latest}</code>。
+            前端跟後端是分開部署的，所以它們可以不同步——去你部署前端的平台按一次重新部署。
+          </p>
+        )}
 
       {update && update.behind === null && (
         <p className="rounded border border-slate-700 px-3 py-2 text-sm text-slate-400">

@@ -487,3 +487,66 @@ describe('這個行程起來之前的那段空白', () => {
     expect(await screen.findByText(/一切正常/)).toBeInTheDocument()
   })
 })
+
+// --- 「你看到的畫面是舊的」後面該接什麼 --------------------------------------
+
+/**
+ * 有兩種部署形狀，而修法完全不同：
+ *
+ *   兩次部署（後端 Render、前端 Vercel）→ 前端那一份真的落後了 → 去那個平台重新部署
+ *   一次部署（同一個映像檔，按鈕那條路）→ 兩半依建構為真同版，所以唯一可能的原因是
+ *                                          瀏覽器手上那份 bundle 是舊的（#92）
+ *                                          → 重新整理就好
+ *
+ * 對一次部署的人講第一種，他會去找一個不存在的平台，找不到，然後得到「這個 app 壞了
+ * 而我修不好」——而真正有效的動作只要一次重新整理。
+ */
+describe('畫面比伺服器舊的時候', () => {
+  const OLD = 'aaaaaaa'
+
+  it('一次部署：說是快取，教他重新整理', async () => {
+    show({
+      update: {
+        running: 'bbbbbbb',
+        latest: 'bbbbbbb',
+        behind: false,
+        why: null,
+        serves_its_own_frontend: true,
+      },
+    })
+
+    expect(await screen.findByText(/伺服器上已經是新的/)).toBeInTheDocument()
+    // 說得出可以怎麼辦，而且那個辦法真的有用。
+    expect(screen.getAllByText(/重新整理/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/部署前端的平台/)).not.toBeInTheDocument()
+  })
+
+  it('兩次部署：說是前端那一份落後了，教他去那個平台', async () => {
+    show({
+      update: {
+        running: 'bbbbbbb',
+        latest: 'bbbbbbb',
+        behind: false,
+        why: null,
+        serves_its_own_frontend: false,
+      },
+    })
+
+    expect(await screen.findByText(/部署前端的平台/)).toBeInTheDocument()
+  })
+
+  it('兩邊同版就一個字都不要提', async () => {
+    show({
+      update: {
+        running: OLD,
+        latest: OLD,
+        behind: false,
+        why: null,
+        serves_its_own_frontend: true,
+      },
+    })
+
+    expect(await screen.findByText(/背景 worker/)).toBeInTheDocument()
+    expect(screen.queryByText(/你看到的這個畫面是舊的/)).not.toBeInTheDocument()
+  })
+})

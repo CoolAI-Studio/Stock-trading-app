@@ -197,6 +197,23 @@ def system_status(
         update_check.is_from_upstream(asked_about) if asked_about else None
     )
 
+    # 這一份是「一次部署」還是「兩次部署」。
+    #
+    # **畫面自己不知道這件事**——它在哪裡被送出來的，只有伺服器知道。而它決定「你看
+    # 到的畫面是舊的」那句話後面該接什麼：
+    #
+    #     兩次部署（後端 Render、前端 Vercel）→ 前端那一份真的落後了 → 去那個平台
+    #                                            按重新部署。
+    #     一次部署（同一個映像檔，按鈕那條路）→ 同一個映像檔裡的兩半依建構為真是同
+    #                                            一個 commit，所以「畫面是舊的」的唯
+    #                                            一可能原因是**瀏覽器手上那份 bundle
+    #                                            是舊的**（#92）→ 重新整理就好。
+    #
+    # 講錯的代價不對稱：叫一次部署的人「去你部署前端的平台」，他會去找一個不存在的
+    # 東西，找不到，然後得到「這個 app 壞了而我修不好」——而真正有效的那個動作只要
+    # 一次重新整理。
+    update["serves_its_own_frontend"] = main.FRONTEND_DIST.is_dir()
+
     worker: dict[str, Any] = {
         "enabled": settings.WORKER_ENABLED,
         "uptime_sec": round(beat.uptime_sec, 1),
