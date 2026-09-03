@@ -149,7 +149,90 @@ describe('改過骨架的副本', () => {
   })
 })
 
+describe('一個驚嘆號就好', () => {
+  // --- 一個驚嘆號就好 --------------------------------------------------------
+  //
+  // 使用者：「應該跟其他程式一樣，會有一個驚嘆號提醒就好，要不要裝隨便使用者。」
+  //
+  // 原本這一格全部都是一行字。字要讀才知道有沒有事，而他不會每次都讀角落——別的軟體
+  // 用的是一個掃過去就看得到的記號。要不要更新仍然是他的事，這裡只負責讓他知道。
+
+  it('有新版的時候掛一個驚嘆號', async () => {
+    show({ running: 'aaaaaaa', latest: 'bbbbbbb', behind: true, why: null })
+
+    expect(await screen.findByRole('status')).toHaveTextContent('!')
+  })
+
+  it('這一份被改過的時候也掛一個 —— 那一種更需要他知道', async () => {
+    // 分岔的副本再也不會自動更新，包括安全修補。它比「落後一版」嚴重，不可以反而
+    // 比較安靜。
+    vi.mocked(api.get).mockResolvedValue({
+      update: {
+        running: 'aaaaaaa',
+        latest: 'bbbbbbb',
+        behind: true,
+        why: null,
+        frontend_from_upstream: false,
+      },
+    } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <VersionBadge signedIn />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('status')).toHaveTextContent('!')
+  })
+
+  it('沒事的時候不掛 —— 平常就在閃的東西，真的有事那一次也沒人看', async () => {
+    show({ running: 'aaaaaaa', latest: 'aaaaaaa', behind: false, why: null })
+
+    const badge = await screen.findByRole('status')
+    expect(badge).toHaveTextContent(/aaaaaaa/)
+    expect(badge).not.toHaveTextContent('!')
+  })
+
+  it('分岔的時候要說得出「有一個等你按的更新」', async () => {
+    // 同步遇到分岔改成開 PR 之後（見 sync-from-upstream.yml），這件事就不再是
+    // 「從此不會更新」而是「有一個等你決定的更新」。畫面上要跟著改口，不然他還是
+    // 以為沒救了。
+    vi.mocked(api.get).mockResolvedValue({
+      update: {
+        running: 'aaaaaaa',
+        latest: 'bbbbbbb',
+        behind: true,
+        why: null,
+        frontend_from_upstream: false,
+      },
+    } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <VersionBadge signedIn />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/等你|PR|自己決定/)
+  })
+
+  it('查不到的時候也不給記號 —— 那不是他按得下去的東西', async () => {
+    // 那多半是 GitHub 抖一下。一個會因為別人抖一下就亮起來的記號，兩天之後就沒有
+    // 人看了——而「查不到」該說的話已經在那一行字裡。
+    show({ running: 'aaaaaaa', latest: null, behind: null, why: '問不到 GitHub。' })
+
+    const badge = await screen.findByRole('status')
+    expect(badge).toHaveTextContent(/查不到|不知道/)
+    expect(badge).not.toHaveTextContent('!')
+  })
+})
+
 describe('還沒登入的時候', () => {
+
   it('登入頁也看得到版本 —— 那是他第一眼看到的畫面', async () => {
     // 版本只在登入之後才有的話，「隨時知道自己在哪一版」就少了一半：他第一眼看到
     // 的就是登入頁。
@@ -191,4 +274,5 @@ describe('還沒登入的時候', () => {
     await screen.findByRole('status')
     expect(api.get).not.toHaveBeenCalledWith(expect.stringContaining('/api/system/status'))
   })
+
 })

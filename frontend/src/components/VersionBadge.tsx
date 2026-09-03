@@ -26,6 +26,27 @@ import { api } from '../lib/api'
 import { FRONTEND_COMMIT } from '../lib/buildInfo'
 import type { SystemStatus } from '../lib/types'
 
+/** 一個掃過去就看得到的記號。
+ *
+ * 使用者：「應該跟其他程式一樣，會有一個驚嘆號提醒就好，要不要裝隨便使用者。」
+ *
+ * 原本這一格全部都是一行字，而字要讀才知道有沒有事——他不會每次都讀角落。別的軟體用
+ * 的是一個記號，而那個記號的意思只有「有件事等你」，不是「你現在得處理」。
+ *
+ * **只掛在他按得下去的兩種狀態上**：落後了、被改過。「查不到有沒有新版」不掛——那多半
+ * 是 GitHub 抖一下，而一個會因為別人抖一下就亮起來的記號，兩天之後就沒有人看了。
+ */
+function Bang() {
+  return (
+    <span
+      aria-hidden="true"
+      className="mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500/90 text-[10px] font-bold leading-none text-slate-950"
+    >
+      !
+    </span>
+  )
+}
+
 export function VersionBadge({ signedIn }: { signedIn: boolean }) {
   // 還沒登入的時候只問 /healthz。
   //
@@ -91,7 +112,9 @@ export function VersionBadge({ signedIn }: { signedIn: boolean }) {
         role="status"
         className="fixed bottom-3 right-3 z-40 rounded border border-slate-600 bg-slate-900/90 px-3 py-1.5 text-xs text-slate-300 shadow"
       >
-        這一份被改過（<code>{running}</code>），所以不會自動更新
+        <Bang />
+        這一份被改過（<code>{running}</code>），所以不會自動更新——你的 GitHub 上會有一個
+        <strong>等你按的更新</strong>
         <Link to="/system" className="ml-2 underline">
           說明
         </Link>
@@ -105,6 +128,7 @@ export function VersionBadge({ signedIn }: { signedIn: boolean }) {
         role="status"
         className="fixed bottom-3 right-3 z-40 rounded border border-amber-700 bg-amber-950/90 px-3 py-1.5 text-xs text-amber-200 shadow"
       >
+        <Bang />
         有新版 <code>{update.latest}</code>（你是 <code>{running}</code>）
         <Link to="/system" className="ml-2 underline">
           怎麼更新

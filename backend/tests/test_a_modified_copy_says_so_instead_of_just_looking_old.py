@@ -336,3 +336,73 @@ def test_the_status_function_is_callable_directly(db_session, monkeypatch):
     body = system_status(db=db_session, user=user)
 
     assert body["update"]["frontend_from_upstream"] is None
+
+
+# --- 分岔了不代表從此不更新 ---------------------------------------------------
+#
+# 使用者：「應該跟其他程式一樣，會有一個驚嘆號提醒就好，要不要裝隨便使用者，但他只要
+# 安裝，中間不管經過幾版，就直接變成最新版。」
+#
+# 原本 `sync-from-upstream.yml` 遇到分岔就 `exit 1`——從此那份副本再也拿不到任何東
+# 西，包括安全修補，而唯一的痕跡是一個他不會打開的 Actions 分頁上的紅叉。那不是
+# Windows 的樣子：你裝了什麼驅動程式，系統更新照樣會來敲門，只是你可以不裝。
+#
+# 改成開一個 PR：更新變成「一個等你按的東西」，而不是「一件已經停掉的事」。而且那個
+# PR 是直接對著上游的 stable 開的——不管中間過了幾版，合下去就是最新版，不用一版一版
+# 追。要不要合是他的事。
+
+
+def _sync_workflow() -> str:
+    """`sync-from-upstream.yml` 的內容，**去掉註解**。
+
+    不用 PyYAML 解析。它在 requirements.lock 裡只是因為 bandit 把它拉進來（CI 的測試那
+    一格裝的是 lock，SAST 那一格才另外 `pip install bandit`），所以拿它當測試的相依，
+    是一條會在別人重新產生 lock 的時候安靜斷掉的線。
+
+    去掉註解則是因為這個 repo 已經被咬過一次：一條 `"pip-audit" in ci` 的斷言命中的是
+    另一步的**註解**，於是那條測試守的其實是一段說明文字。
+    """
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "sync-from-upstream.yml"
+    return "\n".join(
+        line
+        for line in path.read_text(encoding="utf-8").split("\n")
+        if not line.lstrip().startswith("#")
+    )
+
+
+def test_a_diverged_copy_gets_a_pull_request_not_a_dead_end():
+    """分岔的時候要開 PR，不是放棄。"""
+    assert "gh pr create" in _sync_workflow(), (
+        "分岔的時候只是 exit 1——那份副本從此拿不到任何更新，包括安全修補，"
+        "而唯一的痕跡是一個他不會打開的分頁上的紅叉。"
+    )
+
+
+def test_the_pull_request_goes_straight_to_the_tip():
+    """一個 PR 直接跳到最新，不是一版一版追。
+
+    他只要按一次合併就變成最新版——中間過了幾版不影響，因為那個 PR 的來源就是上游
+    `stable` 現在指的那一個 commit。
+    """
+    assert "upstream/stable" in _sync_workflow()
+
+
+def test_the_workflow_is_allowed_to_open_one():
+    """權限少一格，上面那件事就會在真的跑起來的時候才失敗。"""
+    text = _sync_workflow()
+
+    assert "pull-requests: write" in text
+    assert "contents: write" in text
+
+
+def test_it_does_not_open_a_new_one_every_day():
+    """每天一個 PR 就是每天一個噪音，而噪音會讓他關掉 Actions。
+
+    做法是釘死一個分支名字：已經有那個 PR 就更新它，沒有才開。
+    """
+    text = _sync_workflow()
+
+    assert "gh pr list" in text
+    assert "SYNC_BRANCH" in text

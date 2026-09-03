@@ -38,6 +38,8 @@ on:
 
 permissions:
   contents: write
+  # 分岔的時候要開一個 PR，而不是就此不再更新。見底下那一步。
+  pull-requests: write
 
 jobs:
   sync:
@@ -60,6 +62,10 @@ jobs:
           git fetch upstream stable
 
       - name: 快轉，不覆蓋
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 固定的分支名字，所以每天只會有同一個 PR 被更新，不會冒出一堆。
+          SYNC_BRANCH: upstream-sync
         run: |
           current="$(git rev-parse HEAD)"
           upstream="$(git rev-parse upstream/stable)"
@@ -70,14 +76,48 @@ jobs:
           fi
 
           # 快轉的定義：我現在的 HEAD 是上游那一版的祖先。不是的話，代表這份副本
-          # 上有上游沒有的東西——他改過程式碼。那要他自己決定怎麼合，不是我們決定。
+          # 上有上游沒有的東西——他改過程式碼。怎麼合要由他決定，不是我們決定。
+          #
+          # **但「由他決定」不等於「從此不再更新」。** 原本這裡是 exit 1，於是那份副
+          # 本再也拿不到任何東西（包括安全修補），而唯一的痕跡是一個他不會打開的分頁
+          # 上的紅叉。那不是別的軟體的樣子：你裝了什麼外掛，系統更新照樣會來敲門，只
+          # 是你可以不裝。
+          #
+          # 所以改成開一個 PR：更新變成「一個等你按的東西」。而且那個 PR 的來源就是
+          # 上游 `stable` 現在指的那一個 commit——**不管中間過了幾版，合下去就是最新
+          # 版**，不用一版一版追。
           if ! git merge-base --is-ancestor "$current" "$upstream"; then
-            echo "::error::這一份副本上有上游沒有的修改，所以不能直接快轉。"
-            echo "你自己改過這份程式碼嗎？如果是，要由你決定怎麼把上游的更新合進來。"
-            echo "如果不是，最省事的做法是重新從上游部署一份。"
+            echo "::warning::這一份副本上有上游沒有的修改，所以不能直接快轉。開一個 PR 讓你自己決定。"
             echo "  你的版本：${current:0:7}"
             echo "  上游 stable：${upstream:0:7}"
-            exit 1
+
+            # 釘死一個分支名字。每天開一個新的 PR 就是每天一個噪音，而噪音會讓他把
+            # Actions 關掉——那樣連這個 PR 都不會再有。
+            git push --force origin "$upstream:refs/heads/$SYNC_BRANCH"
+
+            if [ -z "$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[].number')" ]; then
+              gh pr create \
+                --head "$SYNC_BRANCH" \
+                --base "$GITHUB_REF_NAME" \
+                --title "更新到上游最新版（${upstream:0:7}）" \
+                --body "$(printf '%s\n' \
+                  '這份副本上有上游沒有的修改，所以每天的自動同步不能直接快轉——改成開這個 PR。' \
+                  '' \
+                  '**要不要更新是你的事。** 但合下去就是最新版：這個 PR 的來源是上游 `stable` 現在' \
+                  '指的那一個 commit，不管中間過了幾版，一次就到位。' \
+                  '' \
+                  '- 你的版本：`'"${current:0:7}"'`' \
+                  '- 上游最新：`'"${upstream:0:7}"'`' \
+                  '' \
+                  '如果 GitHub 說有衝突，那是你改過的檔案跟上游改到同一個地方。合掉衝突之後' \
+                  '再按合併就好；你自己加的東西不會不見。' \
+                  '' \
+                  '合併之後前端會自動重新部署。')"
+              echo "::notice::開了一個 PR。要不要合是你的事，合了就是最新版。"
+            else
+              echo "::notice::已經有一個等著的 PR 了，把它更新到 ${upstream:0:7}。"
+            fi
+            exit 0
           fi
 
           git push origin "$upstream:$GITHUB_REF_NAME"
