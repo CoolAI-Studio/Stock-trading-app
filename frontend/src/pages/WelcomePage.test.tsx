@@ -192,6 +192,52 @@ describe('引導流程', () => {
     expect(await screen.findByText(/你現在有/)).toHaveTextContent('1 則提醒')
   })
 
+  it('完成畫面不可以說「通知會送到 X」，如果那個管道從來沒送成功過', async () => {
+    // 這是他讀到的最後一句話，也是他之後憑什麼相信這個系統的那一句。建了一列
+    // 就說「會送到」，等於用引導的口氣保證一件還沒有任何證據的事——而第一則真的
+    // 警告掉在地上的時候，他不會知道。
+    //
+    // 「傳一則測試」那顆按鈕就在設定引導上，所以這句話是可以按著做的。
+    serve({
+      channels: [{ id: 1, channel_type: 'telegram', label: '我的 Telegram', is_enabled: true }],
+      strategies: [{ id: 1, name: '到價提醒 2330.TW', is_active: true }],
+    })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /先跳過/ }))
+    await user.click(await screen.findByRole('button', { name: /完成/ }))
+
+    // findAllByText，不是 findByText：這句話的一半包在 <strong> 裡，所以 <p> 和
+    // <strong> 兩個都會命中，而單數版本碰到多個就直接丟例外。
+    expect(await screen.findAllByText(/還沒有成功送出過/)).not.toHaveLength(0)
+  })
+
+  it('送成功過的管道就不用再囉唆', async () => {
+    // 平常就在喊的東西，真的出事那一次也不會有人看。
+    serve({
+      channels: [
+        {
+          id: 1,
+          channel_type: 'telegram',
+          label: '我的 Telegram',
+          is_enabled: true,
+          last_sent_at: '2026-09-01T00:00:00Z',
+          last_error: null,
+        },
+      ],
+      strategies: [{ id: 1, name: '到價提醒 2330.TW', is_active: true }],
+    })
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /先跳過/ }))
+    await user.click(await screen.findByRole('button', { name: /完成/ }))
+
+    await screen.findByText(/你現在有/)
+    expect(screen.queryAllByText(/還沒有成功送出過/)).toHaveLength(0)
+  })
+
   it('整個引導可以直接離開，不會把人關在裡面', async () => {
     serve({})
     const user = userEvent.setup()

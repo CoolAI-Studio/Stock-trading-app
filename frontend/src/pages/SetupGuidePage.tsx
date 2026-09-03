@@ -74,7 +74,19 @@ export function SetupGuidePage() {
     // 放著一個檔案」才算沒完成。
     database: database ? !database.ephemeral : false,
     ai: aiQuery.data?.configured === true,
-    notifications: channels.length > 0,
+    // **建了一列不算完成，送成功過才算。**
+    //
+    // 這一頁的檔頭說「三件事的共同點是：光是填了不算完成，要真的通得過」，而這一格
+    // 原本只看 `channels.length > 0`——建了一列就打勾。那是這個產品最不能有的謊：他
+    // 看到 ✅ 就相信提醒會到，然後第一則真的警告安靜地掉在地上。這一頁自己也寫著
+    // 「沒有真的收到就不算完成」，只是那句話跟旁邊的勾勾說的不是同一件事。
+    //
+    // 兩個條件一起看，因為 `last_sent_at` 在 dispatcher 裡是**成功和失敗都會寫**的
+    // （它其實是「最後一次試過」）。只看它的話，一個憑證過期的管道會永遠掛著 ✅。
+    //
+    // 這仍然不等於「他真的收到了」——推播那條路上，RFC 8030 的 2xx 不代表送達，那是
+    // 回條（delivered_at）在管的事。這裡用的是管道列上拿得到的最強證據。
+    notifications: channels.some((channel) => channel.last_sent_at && !channel.last_error),
   }
 
   // 一打開就停在第一個還沒完成的那一件事。全部完成時停在第一頁。

@@ -39,7 +39,17 @@ const POSTGRES = {
 function serve({
   system = POSTGRES,
   ai = { configured: true },
-  channels = [{ id: 3, label: '我的 Telegram', is_enabled: true }],
+  // 預設是一個**真的送過而且沒有失敗**的管道。光是存在不算完成——那正是底下
+  // 「填了不算完成」那一組在守的事。
+  channels = [
+    {
+      id: 3,
+      label: '我的 Telegram',
+      is_enabled: true,
+      last_sent_at: '2026-09-01T00:00:00Z',
+      last_error: null,
+    },
+  ],
 }: { system?: unknown; ai?: unknown; channels?: unknown[] } = {}) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path.includes('system/status')) return Promise.resolve(system) as never
@@ -316,6 +326,83 @@ describe('設定引導（分頁）', () => {
         vi.mocked(api.post).mock.calls.some(([p]) => String(p).includes('/channels/3/test')),
       ).toBe(true),
     )
+  })
+
+  /** 等到後端的答案真的回來了。
+   *
+   * **沒有這一步，⭕ 那兩條會在載入畫面上就通過。** 第一次 render 的時候三個查詢都還
+   * 沒回來，所以 done 全是 false、三格都是 ⭕——`findByRole('tab', {name: /⭕.*通知/})`
+   * 立刻命中，判準改壞了也不會紅。實測過：把判準換回舊的 `channels.length > 0`，那兩
+   * 條照樣綠。
+   *
+   * 資料庫那一格是 POSTGRES，所以它變成 ✅ 就代表 /api/system/status 回來了；AI 那一
+   * 格同理。兩個都到齊，通知那一格顯示的才是真的判準算出來的。
+   */
+  async function loaded() {
+    await screen.findByRole('tab', { name: '✅ 資料庫' })
+    await screen.findByRole('tab', { name: '✅ AI 的 API' })
+  }
+
+  // --- 「填了不算完成」對通知那一格原本是假的 -------------------------------
+  //
+  // 這一頁的檔頭自己寫著「三件事的共同點是：光是填了不算完成，要真的通得過」，而
+  // 通知那一格原本只看 `channels.length > 0`——建了一列就打勾。
+  //
+  // 那是這個產品最不能有的謊：他看到 ✅ 就相信提醒會到，然後第一則真的警告安靜地
+  // 掉在地上。而這一頁上早就寫著「沒有真的收到就不算完成」，只是那句話跟旁邊的勾
+  // 勾說的不是同一件事。
+  //
+  // `last_sent_at` 在 dispatcher 裡是**成功和失敗都會寫**的（它其實是「最後一次試
+  // 過」），所以判準要兩個一起看：試過，而且那一次沒有錯。
+
+  it('通知分頁：管道建好了但從來沒送成功過，不算完成', async () => {
+    serve({
+      channels: [{ id: 3, label: '我的 Telegram', is_enabled: true, last_sent_at: null }],
+    })
+    renderGuide()
+
+    await loaded()
+
+    expect(screen.getByRole('tab', { name: '⭕ 通知' })).toBeInTheDocument()
+  })
+
+  it('通知分頁：最後一次送出去是失敗的，也不算完成', async () => {
+    // last_sent_at 有值不代表送到了——失敗也會寫。只看它的話，一個憑證過期的管道
+    // 會永遠掛著一個 ✅。
+    serve({
+      channels: [
+        {
+          id: 3,
+          label: '我的 Telegram',
+          is_enabled: true,
+          last_sent_at: '2026-09-01T00:00:00Z',
+          last_error: 'HTTP 401',
+        },
+      ],
+    })
+    renderGuide()
+
+    await loaded()
+
+    expect(screen.getByRole('tab', { name: '⭕ 通知' })).toBeInTheDocument()
+  })
+
+  it('通知分頁：真的送成功過才打勾', async () => {
+    serve()
+    renderGuide()
+
+    expect(await screen.findByRole('tab', { name: '✅ 通知' })).toBeInTheDocument()
+  })
+
+  it('通知分頁：沒送成功過的時候，引導就停在通知這一格', async () => {
+    // 停在哪一格是這一頁唯一會主動說話的地方。判準錯了，它就會把他送去別的地方，
+    // 而那一格其實已經好了。
+    serve({
+      channels: [{ id: 3, label: '我的 Telegram', is_enabled: true, last_sent_at: null }],
+    })
+    renderGuide()
+
+    expect(await screen.findByRole('tab', { name: /通知/, selected: true })).toBeInTheDocument()
   })
 
   it('通知分頁：一個管道都沒有的時候，先給不用去別的地方拿值的那一種', async () => {

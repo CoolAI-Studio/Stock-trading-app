@@ -140,8 +140,31 @@ function ChangeList() {
     )
   }
 
+  // 最早那一個沒拿到的更新是多久以前的。
+  //
+  // **「有新版」這句話沒有辦法分辨兩件差很多的事**：更新流程好好的、只是剛好落後一
+  // 版；還是更新流程壞掉了，而他已經半年沒收到任何東西（包括安全修補）。畫面上兩種
+  // 長得一模一樣，而第二種正是這個專案最怕的那個形狀——什麼都沒壞、只是安靜地停在
+  // 那裡（見 DEPLOYMENT.md 第 8 節「情況 D」）。
+  //
+  // 這個數字不用多打一次 API：清單本來就帶著每一個 commit 的日期，而**最早**那一個
+  // 就是「我從什麼時候開始沒跟上」。
+  const oldest = changes.find((change) => change.at)?.at ?? null
+  const behindDays = oldest ? Math.floor((Date.now() - Date.parse(oldest)) / 86_400_000) : null
+
   return (
     <ul className="space-y-1 text-xs">
+      {behindDays !== null && behindDays >= 0 && (
+        <li className="pb-1 text-amber-200/90">
+          你已經落後 {behindDays} 天
+          {behindDays >= 30 && (
+            <span className="ml-1">
+              —— 這麼久通常不是「還沒去按」，而是自動更新那條路斷了。去部署平台看有沒有失敗的
+              deploy（DEPLOYMENT.md 第 8 節「情況 D」）。
+            </span>
+          )}
+        </li>
+      )}
       {changes.map((change) => (
         <li key={change.sha} className="flex gap-2">
           <code className="shrink-0 text-amber-300/60">{change.sha}</code>

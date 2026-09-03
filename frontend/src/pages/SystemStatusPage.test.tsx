@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SystemStatusPage } from './SystemStatusPage'
 import { api } from '../lib/api'
 import type { SystemStatus } from '../lib/types'
@@ -335,5 +335,51 @@ describe('這一版之後改了什麼', () => {
     withChanges([])
 
     expect(await screen.findByText(/列不出|查不到/)).toBeInTheDocument()
+  })
+
+  // 「有新版」這句話分不出兩件差很多的事：更新流程好好的、只是剛好落後一版；還是
+  // 更新流程壞掉了，而他已經半年沒收到任何東西（包括安全修補）。畫面上兩種長得一模
+  // 一樣，而第二種是這個專案最怕的形狀——什麼都沒壞，只是安靜地停在那裡。
+  describe('落後多久', () => {
+    afterEach(() => vi.useRealTimers())
+
+    function at(daysAgo: number): string {
+      return new Date(Date.parse('2026-09-03T00:00:00Z') - daysAgo * 86_400_000).toISOString()
+    }
+
+    function frozenAt2026_09_03() {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      vi.setSystemTime(new Date('2026-09-03T00:00:00Z'))
+    }
+
+    it('說得出落後幾天，不是只說「有新版」', async () => {
+      frozenAt2026_09_03()
+      withChanges([
+        { sha: 'ccc1111', title: '最早那一個沒拿到的', at: at(45) },
+        { sha: 'ddd2222', title: '後來又有一個', at: at(2) },
+      ])
+
+      // 45，不是 2：問的是「我從什麼時候開始沒跟上」，所以看最早那一個。
+      expect(await screen.findByText(/落後 45 天/)).toBeInTheDocument()
+    })
+
+    it('落後很久的時候要說那多半是自動更新斷了，不是他還沒去按', async () => {
+      // 這一句才是這一格真正的用途。他看到「有新版」會以為那是待辦事項；看到「落後
+      // 一百多天」才會想到去看部署平台上有沒有一直失敗的 build——而那正是
+      // DEPLOYMENT.md 第 8 節「情況 D」那一種：什麼都沒壞，只是再也不會更新了。
+      frozenAt2026_09_03()
+      withChanges([{ sha: 'ccc1111', title: '很久以前的', at: at(187) }])
+
+      expect(await screen.findByText(/自動更新/)).toBeInTheDocument()
+    })
+
+    it('只落後幾天的時候不要嚇他', async () => {
+      // 平常就在喊的東西，真的出事那一次也不會有人看。
+      frozenAt2026_09_03()
+      withChanges([{ sha: 'ccc1111', title: '昨天的', at: at(3) }])
+
+      expect(await screen.findByText(/落後 3 天/)).toBeInTheDocument()
+      expect(screen.queryByText(/自動更新/)).not.toBeInTheDocument()
+    })
   })
 })

@@ -54,6 +54,13 @@ export function WelcomePage() {
   })
 
   const enabled = (channelsQuery.data ?? []).filter((channel) => channel.is_enabled)
+  // **開著的不等於送得到。** 這是他讀到的最後一句話，也是他之後憑什麼相信這個系統
+  // 的那一句——用引導的口氣說「通知會送到 X」，而 X 從來沒有成功送出過一次，就是把
+  // 一件還沒有任何證據的事講成了事實。
+  //
+  // 兩個條件一起看：`last_sent_at` 在 dispatcher 裡成功和失敗都會寫（它其實是「最後
+  // 一次試過」），所以只看它的話，一個憑證過期的管道也會算成送得到。
+  const proven = enabled.filter((channel) => channel.last_sent_at && !channel.last_error)
   const alerts = strategiesQuery.data ?? []
 
   const askAi = useMutation({
@@ -434,6 +441,13 @@ export function WelcomePage() {
               '。'
             )}
           </p>
+
+          {enabled.length > 0 && proven.length === 0 && (
+            <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+              這個管道<strong>還沒有成功送出過任何一則</strong>，所以現在還不能確定提醒到得了。
+              到「設定引導 → 通知」按一次「傳一則測試」，收到了才算數。
+            </p>
+          )}
 
           {(skippedChannel || enabled.length === 0) && (
             <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
