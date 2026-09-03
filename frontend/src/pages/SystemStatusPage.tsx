@@ -205,7 +205,11 @@ export function SystemStatusPage() {
   const [copied, setCopied] = useState(false)
   // 這個 app 自己的網址。**只有它知道**——每一份部署都是使用者自己的網域，而這正是
   // 他要貼進監控服務那一格裡的字串。寫死一個上游的網址等於給錯的答案。
-  const keepAliveUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/healthz`
+  // **`?deep=1` 不能漏。** 沒帶參數的那一條只回答「重開這台機器有沒有機會修好」，
+  // 因為部署平台的健康檢查看的是同一個網址，而它失敗一分鐘就會把行程重開（整段推理
+  // 在後端 health.py 的 healthz 註解裡）。監控服務要問的是另一件事：有沒有人會被通
+  // 知——那是深的那一條。給錯的話他會裝好一個永遠不寄信的監控。
+  const keepAliveUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/healthz?deep=1`
   // 在他自己的電腦上跑的那條路（README 上的第二條）。
   //
   // **兩條路的原因和辦法完全不同，而講錯的那一邊會浪費他的時間。** 叫本機那一份去

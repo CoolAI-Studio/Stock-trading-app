@@ -166,6 +166,34 @@ def read_verdict(status_code: int | None, body: str | None) -> list[str]:
 _ALLOWED_SCHEMES = ("http", "https")
 
 
+# `deep_url` 為什麼存在。
+#
+# `/healthz` 沒帶參數的時候只回答「重開這台機器有沒有機會修好」，因為部署平台的健康
+# 檢查看的是同一個網址，而那類檢查失敗一分鐘就會把行程重開——一顆下架的代號或一則放
+# 棄的提醒會讓那件事每十幾分鐘發生一次，永遠（整段推理在 app/api/routers/health.py
+# 的 healthz 註解裡）。
+#
+# 看門狗要問的是另一件事：**有沒有人會被通知**。那是深的那一條。
+#
+# 由這支腳本自己加參數，不是叫使用者去改他 repo 上的 HEALTH_URL——已經設好的人一個字
+# 都不用動，那跟「永遠不要叫他去別的地方拿一個值」是同一條規則的另一面。
+def deep_url(url: str) -> str:
+    """在網址上加一個 deep=1，問完整的那一條。
+
+    絕不拋出：看門狗是「沒有人看的時候唯一會說話的東西」，寧可少問一格，也不可以因
+    為組網址而整個不跑。
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        if any(key == "deep" for key, _ in query):
+            return url
+        query.append(("deep", "1"))
+        return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
+    except Exception:  # noqa: BLE001 -- 組不出來就用原本那個，不要因此不跑
+        return url
+
+
 def fetch(url: str) -> tuple[int | None, str | None]:
     """The response, or (None, None) if nothing came back at all."""
     if urllib.parse.urlparse(url).scheme not in _ALLOWED_SCHEMES:
@@ -232,7 +260,7 @@ def main(argv: list[str]) -> int:
         print("用法：python scripts/watchdog.py <健康檢查網址>")
         return 2
 
-    url = argv[1].strip()
+    url = deep_url(argv[1].strip())
     problems = run_check(lambda: fetch(url))
 
     if not problems:

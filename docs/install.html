@@ -269,8 +269,10 @@
           <ul>
             <li>類型選 <strong>HTTP(s)</strong>。</li>
             <li>
-              網址填你剛剛抄下來那個，後面加上 <code>/healthz</code>——
-              像 <code>https://你的服務.onrender.com/healthz</code>。
+              網址填你剛剛抄下來那個，後面加上 <code>/healthz?deep=1</code>——
+              像 <code>https://你的服務.onrender.com/healthz?deep=1</code>
+              （<strong>後面那個參數不要漏掉</strong>：少了它，這個網址只回答「這台機器
+              要不要重開」，壞掉的時候不會寄信給你）。
             </li>
             <li>檢查間隔選 <strong>5 分鐘</strong>（比 15 分鐘短就行）。</li>
           </ul>

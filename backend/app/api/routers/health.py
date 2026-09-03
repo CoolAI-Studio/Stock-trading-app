@@ -54,8 +54,44 @@ def _check_age(label: str, age_sec: float | None, uptime_sec: float) -> dict[str
 
 
 @router.get("/healthz")
-def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
+def healthz(
+    response: Response,
+    deep: bool = False,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     """Unauthenticated liveness probe; UptimeRobot hits it every 5 minutes.
+
+    ＊ 兩個讀者，兩件不同的事。
+
+    這支端點有兩個人在看，而他們拿狀態碼去做的事完全不同：
+
+        Render（render.yaml 的 healthCheckPath）→ 要不要**重開這台機器**
+        看門狗／UptimeRobot                      → 要不要**寄信給人**
+
+    Render 的文件（2026-09 讀的）：已經在跑的服務，健康檢查失敗 15 秒就先把流量拔
+    掉，失敗 60 秒「Render automatically restarts the instance」；部署當中 15 分鐘
+    內沒有全部通過就「Render cancels the deploy」。
+
+    而這裡有好幾格是**重開機修不好、也不會自己好**的：一顆下架的代號、
+    NOTIFICATIONS_ENABLED 被關掉、上游整個掛掉、24 小時內有一則放棄的提醒。任何一
+    個成立，原本的規則就會讓這台機器每十幾分鐘被重開一次，永遠——而重開的代價正是
+    策略池被丟掉、暖身重來、那幾秒服務是斷的。**為了保護提醒而做的探測，把提醒弄停
+    了。** 部署當中那條更狠：他從此收不到任何更新，包含安全修補。
+
+    所以狀態碼分兩種，內容完全一樣：
+
+        沒有參數      503 只留給「重開這個行程有機會修好」的（資料庫連不上、迴圈卡
+                      死、輪詢沒完成）。
+        ?deep=1       任何一格 fail 就 503。
+
+    **預設是淺的，這一點是刻意的。** 已經在跑的那些服務，後台的 healthCheckPath 是
+    建立當下抄過去的一份（#53 的教訓），改 render.yaml 追不回去——所以那個沒有參數的
+    網址必須自己就是安全的。深的那一條要由我們控制得到的東西去指（watchdog.py、文
+    件、系統狀態頁上印出來的那一串）。
+
+    這個判斷這個 repo 做過一次，只是做窄了：test_first_deploy_comes_up 已經寫著
+    「a probe that never passes is a deploy Render marks as FAILED」，所以設定模式
+    回 200。那個推論對，範圍太小。
 
     Deliberately more than {"status": "ok"}. Every serious failure mode this app
     has is silent -- a database that went away, a worker wedged mid-tick, a poll
@@ -67,6 +103,8 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
     touches a market-data provider.
     """
     checks: dict[str, dict[str, Any]] = {"database": _check_database(db)}
+    # 重開這個行程有沒有機會修好。只有這個決定沒帶參數的那一條要不要 503。
+    restart_might_help = checks["database"]["status"] == _FAIL
 
     if settings.WORKER_ENABLED:
         beat = worker_health.heartbeat.snapshot()
@@ -75,6 +113,13 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         checks["worker"] = _check_age("last_loop_age_sec", beat.last_loop_age_sec, beat.uptime_sec)
         checks["market_data"] = _check_age(
             "last_poll_age_sec", beat.last_poll_age_sec, beat.uptime_sec
+        )
+        # **在下面那個覆寫之前記下來。** 這兩格失敗的意思是「這個行程的迴圈沒有在
+        # 轉」，那正是重開機修得好的一種；而底下的連續空輪詢會用同一個鍵覆寫掉它，
+        # 意思卻完全不同（上游掛了，重開我們這台不會讓 Yahoo 回來）。
+        restart_might_help = restart_might_help or _FAIL in (
+            checks["worker"]["status"],
+            checks["market_data"]["status"],
         )
         # Age alone said healthy through a total outage: the providers catch
         # every exception and return {}, so the loop went on completing polls
@@ -202,7 +247,7 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         checks["notifications"] = {"status": _OK}
 
     failing = any(check["status"] == _FAIL for check in checks.values())
-    if failing:
+    if failing if deep else restart_might_help:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     # Which build answered. Deploys are automatic now, and the failure that
     # makes automatic dangerous is silent: a backend running code older than

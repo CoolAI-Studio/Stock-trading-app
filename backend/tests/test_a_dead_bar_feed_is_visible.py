@@ -199,7 +199,11 @@ def _healthz(client, monkeypatch, *, gap_for: float, gaps=frozenset({"AAPL 1wk"}
     monkeypatch.setattr(settings, "WORKER_ENABLED", True)
     monkeypatch.setattr(settings, "NOTIFICATIONS_ENABLED", True)
     monkeypatch.setattr(worker_health, "heartbeat", beat)
-    return client.get("/healthz")
+    # **看門狗看的是深的那一條。** `/healthz` 沒帶參數的時候只回答「重開這台機器有沒有
+    # 機會修好」——Render 的健康檢查看的是它，而它失敗 60 秒就會把行程重開（見
+    # test_the_probe_render_watches_cannot_restart_him_forever）。這裡問的是「有沒有人
+    # 會被通知」，那是 ?deep=1。
+    return client.get("/healthz", params={"deep": "1"})
 
 
 def test_a_brief_bar_outage_does_not_page_anyone(client, monkeypatch):

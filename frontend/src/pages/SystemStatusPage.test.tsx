@@ -500,7 +500,7 @@ describe('這個行程起來之前的那段空白', () => {
     atHost('alerts.onrender.com')
     show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
 
-    expect(await screen.findByText('https://alerts.onrender.com/healthz')).toBeInTheDocument()
+    expect(await screen.findByText('https://alerts.onrender.com/healthz?deep=1')).toBeInTheDocument()
     expect(screen.getByText(/監控/)).toBeInTheDocument()
   })
 
