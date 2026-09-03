@@ -276,3 +276,86 @@ describe('還沒登入的時候', () => {
   })
 
 })
+
+describe('畫面比伺服器舊的時候', () => {
+  /**
+   * 這一格問的是「**伺服器**在哪一版」，所以瀏覽器手上那份 bundle 是舊的時候，它會
+   * 一路顯示灰色的「沒事」——伺服器確實沒事。
+   *
+   * 但他看到的東西是舊的。這正是這個檔案開頭那條規則的另一種違反：「不知道」不可以
+   * 畫成「已經是最新」，而這裡是「舊的」被畫成「已經是最新」，更糟。
+   *
+   * 一次部署（前端後端同一個映像檔）才判得出來：兩半依建構為真是同一個 commit，所以
+   * 畫面的 commit 跟伺服器的不一樣，只可能是快取。兩次部署不能這樣比——前端那一份本
+   * 來就可能比後端舊，那是另一句話（系統狀態頁在講）。
+   */
+  it('說出來，並且教他重新整理', async () => {
+    show({
+      running: 'bbbbbbb',
+      latest: 'bbbbbbb',
+      behind: false,
+      why: null,
+      serves_its_own_frontend: true,
+    })
+
+    const badge = await screen.findByRole('status')
+    expect(badge).toHaveTextContent(/重新整理/)
+  })
+
+  it('要看得出來有事，不是一行灰字', async () => {
+    show({
+      running: 'bbbbbbb',
+      latest: 'bbbbbbb',
+      behind: false,
+      why: null,
+      serves_its_own_frontend: true,
+    })
+
+    const badge = await screen.findByRole('status')
+    expect(badge.className).toMatch(/amber|rose|red|slate-600/)
+  })
+
+  it('兩次部署不能這樣比：前端本來就可能比後端舊', async () => {
+    // 那是另一句話，系統狀態頁在講（去前端那個平台按重新部署）。這裡講的話會
+    // 給錯的辦法。
+    show({
+      running: 'bbbbbbb',
+      latest: 'bbbbbbb',
+      behind: false,
+      why: null,
+      serves_its_own_frontend: false,
+    })
+
+    const badge = await screen.findByRole('status')
+    expect(badge).not.toHaveTextContent(/重新整理/)
+  })
+
+  it('同版就什麼都不提', async () => {
+    show({
+      running: 'aaaaaaa',
+      latest: 'aaaaaaa',
+      behind: false,
+      why: null,
+      serves_its_own_frontend: true,
+    })
+
+    const badge = await screen.findByRole('status')
+    expect(badge).not.toHaveTextContent(/重新整理/)
+    expect(badge.className).not.toMatch(/amber|rose|red/)
+  })
+
+  it('落後於上游比快取更值得說', async () => {
+    // 兩件事同時成立的時候（伺服器落後，而且瀏覽器的畫面又更舊），先說落後——
+    // 那個要他做的事比較大，而且重新整理之後那句話還是會在。
+    show({
+      running: 'bbbbbbb',
+      latest: 'ccccccc',
+      behind: true,
+      serves_its_own_frontend: true,
+      why: null,
+    })
+
+    const badge = await screen.findByRole('status')
+    expect(badge).toHaveTextContent(/新版/)
+  })
+})

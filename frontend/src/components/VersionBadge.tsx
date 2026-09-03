@@ -137,6 +137,35 @@ export function VersionBadge({ signedIn }: { signedIn: boolean }) {
     )
   }
 
+  // **這一格問的是「伺服器在哪一版」**，所以瀏覽器手上那份 bundle 是舊的時候，它會
+  // 一路顯示灰色的「沒事」——伺服器確實沒事。但他看到的東西是舊的，而這是這個檔案開
+  // 頭那條規則更糟的一種違反：不是把「不知道」畫成「已經是最新」，是把「舊的」畫成
+  // 「已經是最新」。
+  //
+  // 只有一次部署判得出來（前端後端同一個映像檔）：兩半依建構為真是同一個 commit，所
+  // 以畫面的 commit 跟伺服器的不一樣，只可能是快取（#92）。兩次部署不能這樣比——前端
+  // 那一份本來就可能比後端舊，而那是另一句話、另一個辦法（系統狀態頁在講）。
+  //
+  // 排在「有新版」後面：兩件事同時成立的時候，落後要他做的事比較大，而且重新整理之
+  // 後那句話還是會在。排在「查不到」前面：這個有一個一按就好的辦法，那個沒有。
+  if (
+    update.serves_its_own_frontend &&
+    update.running &&
+    FRONTEND_COMMIT &&
+    FRONTEND_COMMIT !== update.running
+  ) {
+    return (
+      <div
+        role="status"
+        className="fixed bottom-3 right-3 z-40 rounded border border-amber-700 bg-amber-950/90 px-3 py-1.5 text-xs text-amber-200 shadow"
+      >
+        <Bang />
+        這個畫面是舊的（<code>{FRONTEND_COMMIT}</code>），伺服器已經是{' '}
+        <code>{update.running}</code>——<strong>重新整理一次</strong>
+      </div>
+    )
+  }
+
   if (update.behind === null) {
     // **不是「已經是最新」。** 查不到就說查不到——說成最新會讓他錯過安全修補，而那
     // 正是這一格存在的理由。
