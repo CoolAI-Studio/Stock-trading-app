@@ -52,7 +52,7 @@
         <input class="path-radio" type="radio" name="install-path" data-path-choice="local">
         <p class="who">關機就停</p>
         <h3>跑在自己的電腦上</h3>
-        <p>不用雲端，什麼都不用填。</p>
+        <p>不用雲端，什麼都不用填。要 8 GB 記憶體。</p>
       </label>
     </div>
 
@@ -144,7 +144,10 @@
       <li data-path="local">
         <h3>在你的電腦上跑起來</h3>
         <ol>
-          <li>裝 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer noopener">Docker Desktop</a>。</li>
+          <li>
+            裝 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer noopener">Docker Desktop</a>。
+            它連背後的虛擬機大約吃 2–4 GB，<strong>建議記憶體 8 GB 以上</strong>。
+          </li>
           <li>
             <a href="https://github.com/CoolAI-Studio/Stock-trading-app/archive/refs/heads/stable.zip">下載這個專案（ZIP）</a>，解壓縮。
           </li>
@@ -152,6 +155,25 @@
           <li>你的網址就是 <code>http://localhost:8000</code>。</li>
         </ol>
         <p class="gotcha"><strong>電腦關機或睡著，盯盤就停了。</strong></p>
+        <details>
+          <summary>記憶體不夠會怎樣？用完怎麼還回來？</summary>
+          <div class="detail-body">
+            <p>
+              不夠的時候不會有人跟你說「記憶體不夠」——它會長成別的樣子：建置跑到一半停住、
+              容器起來又掛掉、或者整台機器慢到動不了。
+            </p>
+            <p>
+              <strong>用完把 Docker Desktop 關掉，記憶體就還你。</strong>
+              Windows 上再補一句 <code>wsl --shutdown</code>：Docker 背後那個虛擬機
+              <strong>在 Docker Desktop 關掉之後還會繼續佔著記憶體</strong>，這一句才會真的放掉
+              （在開發這個專案的機器上量到的：可用記憶體從 5.7 GB 回到 10.9 GB）。
+            </p>
+            <p class="gotcha">
+              <strong>是停用，不是刪除。</strong>映像檔、設定、你的資料都還在，
+              下次從開始選單打開 Docker Desktop 就好。
+            </p>
+          </div>
+        </details>
         <details>
           <summary>要填什麼嗎？</summary>
           <div class="detail-body">

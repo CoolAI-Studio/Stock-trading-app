@@ -627,6 +627,56 @@ describe('第三頁：雲端還是本機，一開始就選', () => {
     expect(link?.closest('[data-path="local"]'), '下載連結不在本機那條路上').not.toBeNull()
   })
 
+  it('兩張卡片都要說得出自己的條件，不能只有一張有', () => {
+    // 雲端那張寫著「要一個免費資料庫」，本機那張原本只寫「什麼都不用填」——聽起來
+    // 完全沒有條件。可是它有，而且是這兩條路裡唯一會把他的電腦弄到當掉的那一個。
+    //
+    // 條件要在**做決定的那一刻**看得到，不是選完之後才在步驟裡出現。
+    mountPage('install.html')
+
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('.path-choice .card'))
+    expect(cards).toHaveLength(2)
+    for (const card of cards) {
+      expect(card.textContent, `這張卡片沒有說出它要什麼：${card.textContent}`).toMatch(
+        /資料庫|GB/,
+      )
+    }
+  })
+
+  it('本機那條路要說出它吃多少記憶體 —— 那是他唯一會踩到的硬體條件', () => {
+    // 這一條是維護者自己在這台機器上踩出來的：他去試「跑在自己的電腦上」那條路，
+    // 機器當掉了兩次。量到的原因是 Docker 背後那個 WSL 虛擬機——**Docker Desktop 關
+    // 掉、每一個 distro 都停掉之後它還握著 2.8 GB**，而 `wsl --shutdown` 讓可用記憶
+    // 體從 5.7 GB 跳到 10.9 GB。
+    //
+    // 那一頁原本只說「約五分鐘，要先裝 Docker Desktop」。雲端那條路的條件寫得很清楚
+    // （要一個免費資料庫），本機這條的條件卻是隱形的——而它是這兩條路裡唯一會把他的
+    // 電腦弄到當掉的那一條。
+    //
+    // 要在**不用展開**的地方講：一個藏在折疊區塊裡的硬體需求，等於沒有講。
+    mountPage('install.html')
+
+    const step = pathBlocks('local')[0]
+    expect(step?.textContent).toMatch(/GB/)
+
+    const said = Array.from(step.querySelectorAll<HTMLElement>('p, li')).find((el) =>
+      /GB/.test(el.textContent ?? ''),
+    )
+    expect(said, '沒有任何一段講到記憶體').toBeDefined()
+    expect(said?.closest('details'), '記憶體需求被收在折疊區塊裡，等於沒有講').toBeNull()
+  })
+
+  it('而且要說得出不用的時候怎麼把記憶體要回來', () => {
+    // 「需要 8 GB」單獨講，對一台只有 8 GB 的機器等於一句壞消息。真正有用的是下一
+    // 句：關掉 Docker Desktop（Windows 上再一句 wsl --shutdown）就還你，而且映像檔
+    // 和設定都還在——是停用，不是刪除。
+    mountPage('install.html')
+
+    const step = pathBlocks('local')[0]
+    expect(step?.textContent).toMatch(/wsl --shutdown/)
+    expect(step?.textContent).toMatch(/關掉|停用/)
+  })
+
   it('本機那條路上該有的字還在，而且不用展開就看得到', () => {
     mount()
 
