@@ -404,7 +404,12 @@ def test_alert_message_names_the_strategy_symbol_side_and_price():
     assert "rsi-watch" in message
     assert "AAPL" in message
     assert "123.45" in message
-    assert "BUY" in message.upper()
+    # 說法跟畫面上同一組（OrdersPage 的 SIDE_LABEL）。同一件事在兩個地方叫不同的名
+    # 字，會讓他以為那是兩件事——而這一行是他唯一真的會讀的東西。
+    assert "買進" in message
+    # 這個專案不接券商 API，那一列是提醒紀錄。讓他以為單子已經送出去的提醒，比沒有
+    # 提醒危險：他會什麼都不做，然後以為部位已經建好了。
+    assert "沒有真的下單" in message
 
 
 def test_bus_does_not_send_an_alert_a_second_time(db_session):

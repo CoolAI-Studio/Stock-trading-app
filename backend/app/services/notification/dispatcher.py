@@ -11,6 +11,8 @@ from app.db.session import SessionLocal
 from app.enums import ChannelType, NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
+from app.models.order import Order
+from app.models.strategy import Strategy
 from app.models.user import User
 from app.services.events import Event
 from app.services.notification.email import EmailSender
@@ -84,24 +86,96 @@ class DispatchResult:
         return self.delivered > 0
 
 
-def _format_message(event: Event) -> str:
+# 買賣和狀態的說法，跟畫面上用的同一組（frontend OrdersPage 的 SIDE_LABEL /
+# STATUS_LABEL）。同一件事在兩個地方叫不同的名字，會讓他以為那是兩件事。
+_SIDE_LABEL = {"buy": "買進", "sell": "賣出"}
+_STATUS_LABEL = {
+    "pending": "待確認",
+    "confirmed": "已確認",
+    "rejected": "已拒絕",
+    "expired": "已過期",
+    "failed": "失敗",
+}
+
+
+def _label(mapping: dict[str, str], value) -> str:
+    return mapping.get(str(getattr(value, "value", value) or "").lower(), str(value))
+
+
+def _format_message(event: Event, session=None) -> str:
+    """手機上跳出來的那一行。
+
+    ＊ 這是這個產品的產出本身。
+
+    整個系統存在的理由就是為了在事情發生的時候送出這一行，而它是使用者唯一真的會讀
+    的東西。原本 order.created 送的是
+
+        New pending order #42 -- review it in the dashboard.
+
+    三個問題：沒有說發生了什麼（他得打開 app 才知道是哪一檔——而提醒的意義正是「不用
+    一直看著」）、是英文的（整個產品其他地方都是繁體中文）、而且「pending order」聽起
+    來像下單了（這個專案不接券商 API，那一列是提醒紀錄）。
+
+    ＊ 為什麼要 session。
+
+    事件裡只有 order_id。代號、買賣、價格、哪一支策略都在那一列上，所以要撈。不把它
+    們塞進事件裡，是因為那份資料會過期：事件在重送佇列裡等的時候，那一列可能已經被
+    確認或取消了。
+
+    撈不到就退回只有編號的講法——事件在佇列裡等的時候那一列可能已經被刪掉，而這裡拋
+    出去的話，外面那層會把它記成「這個管道整個炸了」。
+    """
     if event.type == "order.created":
-        return f"New pending order #{event.data.get('order_id')} -- review it in the dashboard."
-    if event.type == "order.updated":
-        return f"Order #{event.data.get('order_id')} is now {event.data.get('status')}."
-    if event.type == "strategy.error":
+        order = _load_order(session, event.data.get("order_id"))
+        if order is None:
+            return f"有一筆新的訊號（#{event.data.get('order_id')}），到畫面上看細節。"
+        who = _strategy_name(session, order.strategy_id) or "手動建立"
         return (
-            f"Strategy {event.data.get('strategy_id')} was deactivated after repeated "
-            f"errors: {event.data.get('error')}"
+            f"{who}：{order.symbol} {_label(_SIDE_LABEL, order.side)}訊號"
+            f"，訊號價 {order.signal_price}。"
+            "這是提醒，沒有真的下單——要下單請到你的券商 App。"
+        )
+    if event.type == "order.updated":
+        order = _load_order(session, event.data.get("order_id"))
+        status = _label(_STATUS_LABEL, event.data.get("status"))
+        if order is None:
+            return f"訊號 #{event.data.get('order_id')} 變成{status}。"
+        return f"{order.symbol} 的訊號變成{status}。"
+    if event.type == "strategy.error":
+        # 名字，不是 id：「策略 7」對他不是一個可以拿去做事的東西。
+        who = _strategy_name(session, event.data.get("strategy_id"))
+        who = who or f"策略 {event.data.get('strategy_id')}"
+        return (
+            f"「{who}」連續出錯太多次，已經被停用——在你修好之前，它不會再發出任何提醒。"
+            f"原因：{event.data.get('error')}"
         )
     if event.type == "strategy.alert":
-        side = str(event.data.get("side", "")).upper()
+        side = _label(_SIDE_LABEL, event.data.get("side"))
         return (
-            f"[Alert only] {event.data.get('strategy_name')}: {side} "
-            f"{event.data.get('symbol')} @ {event.data.get('price')} -- "
-            f"no order was created."
+            f"{event.data.get('strategy_name')}：{event.data.get('symbol')} {side}訊號"
+            f"，價格 {event.data.get('price')}。"
+            "這是提醒，沒有真的下單——要下單請到你的券商 App。"
         )
     return f"{event.type}: {event.data}"
+
+
+def _load_order(session, order_id):
+    if session is None or order_id is None:
+        return None
+    try:
+        return session.get(Order, order_id)
+    except Exception:  # noqa: BLE001 -- 撈不到就用簡短的講法，不要讓一則提醒送不出去
+        return None
+
+
+def _strategy_name(session, strategy_id) -> str | None:
+    if session is None or strategy_id is None:
+        return None
+    try:
+        strategy = session.get(Strategy, strategy_id)
+    except Exception:  # noqa: BLE001 -- 同上
+        return None
+    return strategy.name if strategy else None
 
 
 def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
@@ -140,7 +214,7 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
             )
             .all()
         )
-        message = _format_message(event)
+        message = _format_message(event, session)
 
         if not channels:
             # An alert nobody was told about is this product's critical
