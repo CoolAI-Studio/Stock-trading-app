@@ -22,7 +22,13 @@ vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 
 const HEALTHY: SystemStatus = {
   overall: 'ok',
-  worker: { enabled: true, uptime_sec: 3600, last_loop_age_sec: 2, last_poll_age_sec: 3 },
+  worker: {
+    enabled: true,
+    uptime_sec: 3600,
+    last_loop_age_sec: 2,
+    last_poll_age_sec: 3,
+    slept_sec: null,
+  },
   market_data: { consecutive_empty_polls: 0, stale_symbols: [], stale_bars: [] },
   assistant_available: false,
   database: {
@@ -161,7 +167,13 @@ describe('警告會不會停擺', () => {
   it('worker 停了要看得出來', async () => {
     show({
       overall: 'fail',
-      worker: { enabled: true, uptime_sec: 9999, last_loop_age_sec: 9999, last_poll_age_sec: 9999 },
+      worker: {
+        enabled: true,
+        uptime_sec: 9999,
+        last_loop_age_sec: 9999,
+        last_poll_age_sec: 9999,
+        slept_sec: null,
+      },
     })
 
     expect(await screen.findByText(/背景|worker/i)).toBeInTheDocument()
@@ -421,5 +433,57 @@ describe('這一版之後改了什麼', () => {
       expect(await screen.findByText(/落後 3 天/)).toBeInTheDocument()
       expect(screen.queryByText(/自動更新/)).not.toBeInTheDocument()
     })
+  })
+})
+
+// --- 「你剛剛有八個小時沒有在盯盤」 ------------------------------------------
+
+/**
+ * Render 免費方案沒有外來流量 15 分鐘就休眠，而休眠期間一則提醒都不會送出。
+ *
+ * 醒來之後每一個探測都是綠的：行程剛起來，心跳是新的。看門狗也看不到——它去打
+ * /healthz 的那一下就是把服務叫醒的那一下。所以那段空白只有一個地方講得出來，
+ * 就是他自己會打開的這一頁。
+ *
+ * 後端從 market_quotes.fetched_at 回頭算（見 market_loop.note_downtime_since_last_run）。
+ * 這裡守的是「算出來了，而畫面上真的看得到，而且看得懂是多久」。
+ */
+describe('這個行程起來之前的那段空白', () => {
+  it('睡了很久就要說出來，而且要說多久', async () => {
+    show({
+      worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 },
+    })
+
+    expect(await screen.findByText(/沒有在盯盤|沒有人在看|停過/)).toBeInTheDocument()
+    expect(screen.getByText(/8 小時/)).toBeInTheDocument()
+  })
+
+  it('要說得出可以怎麼辦，不然他讀完只會擔心', async () => {
+    show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
+
+    expect(await screen.findByText(/休眠|保持喚醒|閒置/)).toBeInTheDocument()
+  })
+
+  it('要貼去監控服務的那個網址就印在頁面上，不是叫他去文件裡找', async () => {
+    // CLAUDE.md：「永遠不要叫他去別的地方拿一個值」。而這個值只有這份部署自己
+    // 知道——每個人的網域都不一樣，寫死一個上游的網址就是給錯的答案。
+    show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
+
+    expect(await screen.findByText(`${window.location.origin}/healthz`)).toBeInTheDocument()
+  })
+
+  it('沒有那段空白的時候一個字都不要提', async () => {
+    show()
+
+    expect(await screen.findByText(/背景 worker/)).toBeInTheDocument()
+    expect(screen.queryByText(/沒有在盯盤|休眠/)).not.toBeInTheDocument()
+  })
+
+  it('那段空白不會讓整頁變成「停擺」', async () => {
+    // 它已經過去了。現在是醒著的，而把它算成故障會讓紅燈失去意義——免費方案
+    // 本來就會反覆休眠。
+    show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
+
+    expect(await screen.findByText(/一切正常/)).toBeInTheDocument()
   })
 })

@@ -1,14 +1,16 @@
 import asyncio
 import logging
 import time
-from datetime import timedelta
+from datetime import UTC, timedelta
 from decimal import Decimal
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import SessionLocal
 from app.enums import DataSource, OrderSide, OrderSource, OrderStatus
+from app.models.market import MarketQuote
 from app.models.mixins import utcnow
 from app.models.order import Order
 from app.models.position import Position
@@ -56,6 +58,16 @@ _SLOW_TICK_FACTOR = 3
 # while taking one symbol from ~17,000 requests a day to a few hundred
 # against a scraper that blocks IPs for precisely that behaviour.
 CLOSED_POLL_INTERVAL_SEC = 300.0
+
+# 開機時回頭看，多長的空白才算「這段時間沒有人在盯盤」。
+#
+# 二十分鐘，而不是十五。十五是 Render 免費方案休眠的門檻，但**每一次更新也是一段空
+# 白**——建置加部署在免費方案上要好幾分鐘，而更新是我們自己造成的、每一次推送都會發
+# 生。把它算進去的話，這句話會在第一天就變成雜訊，然後真的睡了八小時那一次長得一模
+# 一樣。
+#
+# 寧可漏掉一次短的休眠：短的漏掉的提醒少，而一個被學會忽略的訊號漏掉的是全部。
+DOWNTIME_THRESHOLD_SEC = 20 * 60.0
 
 # What the last tick was watching, so working out the next sleep costs no
 # query. Empty until the first tick, which means the first sleep is the slow
@@ -801,6 +813,56 @@ def next_poll_delay(db: Session | None = None) -> float:
         return settings.MARKET_DATA_POLL_INTERVAL_SEC
 
 
+def note_downtime_since_last_run(db: Session) -> float | None:
+    """開機時回頭看：這個行程起來之前，有多久沒有任何行程在跑。
+
+    ＊ 為什麼行程內的心跳答不出這個問題。
+
+    心跳是這個行程自己的記憶，而這裡要問的正是「上一個行程已經不在了」那段時間。
+    行程死掉，心跳跟著歸零，所以醒來之後每一欄都是健康的——那八個小時在那張快照上
+    不存在。看門狗也看不到：它去打 `/healthz` 的那一下**就是**把服務叫醒的那一下。
+
+    ＊ 唯一還記得的東西。
+
+    `market_quotes.fetched_at` 是每一輪輪詢都會寫的牆上時鐘，而**關市不會讓它停**
+    （`CLOSED_POLL_INTERVAL_SEC`：週期從 5 秒拉長到 300 秒，但照樣抓）。所以「最後
+    一次抓到報價是 8 小時前」的意思只有一個：這 8 小時裡沒有行程在跑。
+
+    這一點是整個判斷成立的前提。要是關市完全不抓，每天早上開機都會看起來像睡了 17
+    個小時，而這個功能就變成一個每天喊一次狼來了的東西。
+
+    ＊ 沒有東西在盯，就沒有東西被錯過。
+
+    他把策略全部停掉的話，報價本來就不會再更新——那不是停擺，那是沒事做。少了這一
+    條，一個空的部署每次重啟都會說自己睡了很久，而那句話是假的。
+
+    **絕不拋出。** 這是在盯盤迴圈起跑之前跑的。為了一句「你剛剛睡著了」而讓迴圈起不
+    來，剛好把事情做反。
+    """
+    try:
+        if not _watched_symbols(db):
+            return None
+        last = db.query(func.max(MarketQuote.fetched_at)).scalar()
+        if last is None:
+            # 一筆報價都沒有＝這份部署從來沒跑過，不是睡了很久。
+            return None
+        if last.tzinfo is None:
+            # SQLite 存回來是 naive 的。拿它跟 aware 的現在相減會直接炸。
+            last = last.replace(tzinfo=UTC)
+        slept = (utcnow() - last).total_seconds()
+        if slept < DOWNTIME_THRESHOLD_SEC:
+            return None
+        logger.warning(
+            "這個行程起來之前，有 %.0f 分鐘沒有任何行程在跑——那段時間裡的提醒沒有送出。",
+            slept / 60,
+        )
+        worker_health.heartbeat.mark_downtime(slept)
+        return slept
+    except Exception:
+        logger.exception("問不到上一次跑是什麼時候；當成沒有空白")
+        return None
+
+
 def _watched_symbols(db: Session) -> list[tuple[str, DataSource]]:
     watched = [
         (strategy.symbol, strategy.data_source)
@@ -813,6 +875,19 @@ def _watched_symbols(db: Session) -> list[tuple[str, DataSource]]:
     return watched
 
 
+def _note_downtime_in_its_own_session() -> None:
+    """開機那一刻沒有別人的 session 可以借，所以自己開一個、用完就關。"""
+    try:
+        db = SessionLocal()
+    except Exception:
+        logger.exception("開不了 session 來問上一次跑是什麼時候；當成沒有空白")
+        return
+    try:
+        note_downtime_since_last_run(db)
+    finally:
+        db.close()
+
+
 async def run_forever(stop_event: asyncio.Event) -> None:
     logger.warning(
         "Starting background market-data worker in this process. Run with "
@@ -823,6 +898,10 @@ async def run_forever(stop_event: asyncio.Event) -> None:
     # 詢週期是五秒——不先暖，重啟後的第一輪會被自己的暖機吃掉大半。
     if isinstance(_registry, StrategyPool):
         await asyncio.to_thread(_registry.prewarm)
+
+    # 回頭看一次，在第一輪把 fetched_at 蓋掉之前。免費方案閒置就休眠，而休眠期間一
+    # 則提醒都沒送出——醒來之後沒有任何一個探測看得到那段空白（見那個函式的說明）。
+    await asyncio.to_thread(_note_downtime_in_its_own_session)
 
     while not stop_event.is_set():
         # Marked before the tick, so a tick that hangs (and therefore never

@@ -206,6 +206,12 @@ def system_status(
         "last_poll_age_sec": (
             None if beat.last_poll_age_sec is None else round(beat.last_poll_age_sec, 1)
         ),
+        # 這個行程起來之前，有多久沒有任何行程在跑。
+        #
+        # **刻意不影響 overall，也刻意不上 /healthz。** 那個洞已經過去了——現在是醒
+        # 著的。紅燈是給「現在停擺了」用的，而看門狗每 15 分鐘打一次、免費方案本來
+        # 就會反覆休眠，每次醒來寄一封信，收件匣一天就會被塞到他不再看。
+        "slept_sec": (None if beat.slept_sec is None else round(beat.slept_sec, 1)),
     }
     if settings.WORKER_ENABLED:
         stalled = (

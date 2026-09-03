@@ -50,6 +50,16 @@ function age(seconds: number | null): string {
   return `${(seconds / 3600).toFixed(1)} 小時前`
 }
 
+/** 一段長度，不是一個時間點。`age` 講的是「多久以前」，這個講的是「持續了多久」。
+ *
+ * 分開寫是因為單位要進位得更兇：一段空白的重點是「久到什麼程度」，而「28800.0 秒」
+ * 和「8.0 小時前」都不會讓人立刻意識到那是**一整個交易日**。 */
+function span(seconds: number): string {
+  if (seconds < 5400) return `${Math.round(seconds / 60)} 分鐘`
+  if (seconds < 172800) return `${Math.round(seconds / 3600)} 小時`
+  return `${(seconds / 86400).toFixed(1)} 天`
+}
+
 /** 「Something is wrong and I do not know what」, answered against this
  * deployment's own numbers.
  *
@@ -177,6 +187,10 @@ function ChangeList() {
 }
 
 export function SystemStatusPage() {
+  const [copied, setCopied] = useState(false)
+  // 這個 app 自己的網址。**只有它知道**——每一份部署都是使用者自己的網域，而這正是
+  // 他要貼進監控服務那一格裡的字串。寫死一個上游的網址等於給錯的答案。
+  const keepAliveUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/healthz`
   const query = useQuery({
     queryKey: ['system-status'],
     queryFn: () => api.get<SystemStatus>('/api/system/status'),
@@ -276,6 +290,50 @@ export function SystemStatusPage() {
               bad={worker.last_poll_age_sec === null || worker.last_poll_age_sec > 300}
             />
             <Row label="已經連續運作" value={age(worker.uptime_sec).replace('前', '')} />
+            {/* 上面三格全都是這個行程自己的記憶，所以它們**結構上**看不到這件事：
+                行程死掉，它們跟著歸零，醒來之後每一格都是健康的。
+
+                而這正是免費方案最常見的狀態——沒有外來流量 15 分鐘就休眠，休眠期
+                間一則提醒都不會送出。他打開這一頁的那個動作本身就把服務叫醒了，
+                所以他看到的永遠是一個剛起床、精神很好的行程。
+
+                看門狗也看不到，理由一模一樣：它去打 /healthz 的那一下，就是把服務
+                叫醒的那一下。
+
+                所以這段空白只有這裡講得出來。 */}
+            {worker.slept_sec !== null && (
+              <div className="mt-2 rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+                <p>
+                <strong>這個服務有 {span(worker.slept_sec)} 沒有在盯盤。</strong>
+                那段時間裡如果有策略該發提醒，它沒有發出來——現在已經恢復了，補不回來。
+                <br />
+                免費方案閒置一段時間就會休眠（沒有人打開它就等於閒置），這是最常見的
+                原因。
+                {/* **網址就印在這裡，不是叫他去文件裡找。** 這一條是 CLAUDE.md 的
+                    「永遠不要叫他去別的地方拿一個值」：他要貼進監控服務的那一格就
+                    是這個字串，而只有這個 app 知道自己的網址長什麼樣子。 */}
+                <br />
+                要避免的話，去任何一家免費的網站監控服務（例如 UptimeRobot），設一個每
+                5 分鐘檢查一次的監控，網址填：
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <code className="break-all rounded bg-slate-900 px-2 py-1 text-xs text-slate-200">
+                    {keepAliveUrl}
+                  </code>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(keepAliveUrl)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                  >
+                    {copied ? '已複製' : '複製'}
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <Row label="狀態" value="被關掉了（WORKER_ENABLED=false）—— 策略不會執行" bad />

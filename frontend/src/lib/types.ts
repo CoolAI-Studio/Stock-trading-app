@@ -675,6 +675,12 @@ export interface SystemStatus {
     uptime_sec: number
     last_loop_age_sec: number | null
     last_poll_age_sec: number | null
+    /** 這個行程起來之前，有多久沒有**任何**行程在跑（秒）。null＝沒有這種空白。
+     *
+     * 上面三個都是這個行程自己的記憶，所以結構上不可能看到這件事：行程死掉，它們
+     * 跟著歸零，醒來之後每一欄都是健康的。後端從 market_quotes.fetched_at 回頭算，
+     * 因為那是唯一跨得過行程生死的牆上時鐘。 */
+    slept_sec: number | null
   }
   market_data: {
     consecutive_empty_polls: number

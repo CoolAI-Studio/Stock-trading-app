@@ -54,6 +54,16 @@ class HeartbeatSnapshot:
     #
     # 鍵是 "代號 週期"，因為同一個代號的日線好好的、週線抓不到是常見的形狀。
     bar_gap_sec: dict[str, float] = field(default_factory=dict)
+    # 這個行程起來之前，有多久沒有任何行程在跑。None 代表沒有這種空白。
+    #
+    # **這張快照上其他每一欄都看不到這件事，而且結構上不可能看得到**：它們全都是這
+    # 個行程自己的記憶，而這裡要講的正是「上一個行程已經不在了」那段時間。行程死掉
+    # 的時候，那些欄位跟著一起歸零，所以醒來之後每一欄都是健康的——那八個小時在這張
+    # 快照上不存在。
+    #
+    # 唯一還記得的東西在資料庫裡（market_quotes.fetched_at），所以這一欄由開機時去問
+    # 一次得到，然後就固定在這裡不再變。
+    slept_sec: float | None = None
 
 
 class WorkerHeartbeat:
@@ -69,6 +79,8 @@ class WorkerHeartbeat:
         self._blocked_since: dict[int, float] = {}
         # "代號 週期" -> 它從什麼時候開始抓不到 K 棒（monotonic）。
         self._bar_gap_since: dict[str, float] = {}
+        # 開機時回頭看到的那段空白（秒）。算一次，之後不變。
+        self._slept_sec: float | None = None
 
     def mark_loop(self) -> None:
         """The loop reached the top of an iteration, so it is not wedged."""
@@ -147,6 +159,15 @@ class WorkerHeartbeat:
             if series not in failed:
                 del self._bar_gap_since[series]
 
+    def mark_downtime(self, seconds: float) -> None:
+        """開機時回頭看：這個行程起來之前，有多久沒有任何行程在跑。
+
+        **只在開機時叫一次**，而且之後不會被清掉。那段空白已經過去了，但它照樣是一
+        段沒有人在盯盤的時間——而下一輪輪詢就會把資料庫裡唯一記得這件事的那個欄位蓋
+        掉，所以不在這裡留住就永遠問不到了。
+        """
+        self._slept_sec = seconds
+
     def snapshot(self) -> HeartbeatSnapshot:
         # The marks are written from the event loop thread and read from the
         # threadpool thread serving /healthz. Single float attribute reads and
@@ -162,6 +183,7 @@ class WorkerHeartbeat:
             symbol_gap_sec={s: now - since for s, since in self._priceless_since.items()},
             strategy_blocked_sec={sid: now - since for sid, since in self._blocked_since.items()},
             bar_gap_sec={s: now - since for s, since in self._bar_gap_since.items()},
+            slept_sec=self._slept_sec,
         )
 
 
