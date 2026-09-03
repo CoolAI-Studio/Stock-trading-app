@@ -347,6 +347,43 @@ DATABASE_URL="postgresql://..." python -m alembic downgrade -1
 1. Neon 的 **Restore**（免費方案只保留幾小時，過了就沒有）
 2. 或用第 7 節的加密備份還原：`python scripts/inspect_backup.py 檔案` 先看內容
 
+### 情況 D：部署失敗，而畫面看起來一切正常
+
+這一種最容易被漏掉，因為**它不會弄壞任何東西**。Render 只在建置成功之後才換版，所
+以建置失敗的時候，上一個版本繼續服務：提醒照發、圖照畫、什麼都沒壞。唯一的症狀是
+**你從此再也拿不到更新**，包括安全修補——而右下角那一格會一直寫著「有新版」。
+
+去 Render 該服務的 **Events** 看有沒有紅色的 failed deploy。如果 build log 裡有這一
+行：
+
+```
+"/backend/requirements.lock": not found
+```
+
+那是**建置設定的問題，不是程式的問題**，而且重試幾次都會一樣。
+
+原因是：平台上那個服務的建置設定，是**建立那一刻抄過去的一份**，之後不會再去讀
+`render.yaml`。所以我們後來把建置目錄改到專案根目錄的時候，新部署的人沒事，而你這
+一份還停在舊的設定上。
+
+**修法（兩格都要看，只對一格是這個問題最常見的卡點）：**
+
+Render → 該服務 → **Settings** → 往下找 **Build & Deploy**：
+
+| 欄位 | 應該是 |
+| --- | --- |
+| **Docker Build Context Directory** | `.` |
+| **Dockerfile Path** | `./backend/Dockerfile` |
+
+改完按 **Manual Deploy → Deploy latest commit**。
+
+> 為什麼要兩格都確認：這個專案自己踩過一次，而卡了很久的原因就是
+> `Dockerfile Path` 是對的、只有 `Docker Build Context Directory` 還是舊的。看的人
+> 對到一格就以為兩格都對了，於是往別的方向找了很久。
+
+確認真的好了：等 deploy 變成 live 之後打 `/healthz`，看 `version.commit` 有沒有變成
+最新那一個（見第 4 節）。**Events 上寫著 live 不代表換版成功**——那可能還是上一版。
+
 ### 事後
 
 要知道線上現在跑的是哪一版，問它就好：`/healthz` 的 `version.commit` 就是答案

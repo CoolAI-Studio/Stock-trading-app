@@ -266,6 +266,36 @@ def test_every_build_uses_the_repo_root_as_context():
     )
 
 
+def test_the_guide_tells_an_existing_deployment_how_to_fix_its_build():
+    """**第五個地方是一個人，而上面那條測試碰不到他。**
+
+    平台上那個服務的 dockerContext ／ dockerfilePath 是**建立當下抄過去的一份**，不是
+    每次去讀 render.yaml。所以這四個檔案改對了只保護到「之後才部署的人」；已經在跑的
+    那些，下一次 build 直接失敗，錯誤訊息是
+
+        "/backend/requirements.lock": not found
+
+    而症狀在我們這邊只看得到「部署沒送達」。#53 花了整整六輪，因為後台的
+    dockerfilePath 是對的、只有 context 不是——一個看起來已經排除掉的假設。
+
+    對使用者來說更糟：Render 會繼續服務上一個成功的版本，所以**提醒照發、什麼都沒
+    壞**，只是他從此再也拿不到更新，包括安全修補。那正是這個 repo 最不想要的失效形
+    狀——安靜的那一種。
+
+    他不是工程師，也不會來讀 render.yaml。所以修法只能是「在他會去的那一頁上，用他看
+    得到的那個錯誤訊息當索引，說出要改哪兩格」。
+    """
+    guide = (_root() / "DEPLOYMENT.md").read_text(encoding="utf-8")
+
+    assert "requirements.lock" in guide, (
+        "他在 build log 上看到的就是這串字，而那是他唯一能拿來搜尋的東西"
+    )
+    assert "dockerContext" in guide or "Docker Build Context" in guide
+    assert "Dockerfile Path" in guide or "dockerfilePath" in guide
+    # 兩格都要說。#53 卡住的原因正是只對到一格就以為兩格都對了。
+    assert "./backend/Dockerfile" in guide
+
+
 def test_no_path_in_the_guide_builds_from_the_backend_folder():
     """引導頁上**每一條**部署的路都要用專案根目錄當 build context。
 
