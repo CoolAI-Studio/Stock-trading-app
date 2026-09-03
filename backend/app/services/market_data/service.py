@@ -79,7 +79,10 @@ DEFAULT_BAR_LIMIT = 300
 # 從資料庫撈多深。比 DEFAULT_BAR_LIMIT 深，因為圖表往前拉會問到更深；但有上限，
 # 因為這是「抓不到時的底」，不是一份完整的歷史檔案——真的要幾千根的回測，值得為
 # 它去問一次上游。
-MAX_STORED_BARS = 1_000
+#
+# 現在同一個數字也是**存**的上限（bar_store 寫完就修剪到這個深度），所以它只有一
+# 份：讀得比存的深會拿到一段空的，存得比讀的深是在免費方案上白佔空間。
+MAX_STORED_BARS = bar_store.MAX_STORED_BARS
 
 
 logger = logging.getLogger("app.market_data")

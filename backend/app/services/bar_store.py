@@ -18,6 +18,33 @@ from app.enums import DataSource
 from app.models.market import MarketBar
 from app.services.market_data.base import Bar, Timeframe
 
+# 一段序列（來源＋代號＋週期）最多留幾根。
+#
+# 有上限，是因為這張表本來一根都不丟，而沒有任何端點、腳本或排程刪得掉它。
+#
+# 今天全 app 唯一的寫入者是圖表端點（`api/routers/market.py` 的 `GET /api/market/bars`，
+# 全部呼叫端裡只有它傳 `db=`）：使用者每看一次圖就寫一次，而每一個（來源、代
+# 號、週期）都是一段會一直往前滑的序列。盯盤迴圈現在**一列都不寫**（market_loop
+# 呼叫 `get_bars()` 沒有傳 `db=`）——但 #59 要補的正是那個 `db=`，一補上去一支 1
+# 分鐘的 on_bar 策略就是每個交易日約 390 根、一年十萬根。**所以這道上限必須先落
+# 地，那條寫入路徑才能打開。**
+#
+# 更關鍵的是**沒有人讀得到超過這個深度的東西**——`load()` 在整個 app 裡只有一個
+# 呼叫點（`market_data/service.py` 的 `_prime_from_storage`），而它固定問這麼深。所以第
+# 一千根以外的每一列，都是只佔空間、不會被任何一條路讀到的資料。
+#
+# 而空間用完先失敗的是**寫入**：免費方案是整個資料庫 0.5GB，塞滿之後通知紀錄、重
+# 送佇列、部位一起寫不進去。警告不能停擺是最高優先，一張「抓不到時用來墊底」的圖
+# 表資料不值得為它把整個 app 停掉。使用者也不是工程師：他手上沒有 psql，所以清理
+# 只能發生在他本來就會走到的路上（跟 strategy_versions 一樣，在寫的那一刻修剪）。
+#
+# 這道上限封的是**每一段序列的深度**，不是序列的數量：看過一次就不再更新的那些段依然
+# 永遠躺在那裡（#61）。不要把這行讀成「這張表有上限了」。
+#
+# 同一個數字兩邊用：service.py 的 `MAX_STORED_BARS` 就是它。存得比讀得回來的深是
+# 純粹的浪費，存得比讀的淺則是圖表少一段——一個數字，兩件事都不會發生。
+MAX_STORED_BARS = 1_000
+
 
 def _utc(moment: datetime) -> datetime:
     """一律帶 UTC 時區。
@@ -90,6 +117,35 @@ def _split_happened(existing: dict[datetime, Decimal], fresh: list[Bar]) -> bool
     return False
 
 
+def _trim(db: Session, data_source: DataSource, symbol: str, timeframe: Timeframe) -> None:
+    """超過上限就丟最舊的，而且一段序列各算各的。
+
+    刪的條件是「比第 MAX_STORED_BARS 新的那一根還舊」，不是 `DELETE ... LIMIT`——
+    後者 SQLite 和 Postgres 講的不是同一種話（`webhooks._prune_audit_log` 也是為了
+    同一個理由改成拿鍵比大小）。這張表沒有 id，但 `ts` 在同一段序列裡就是單調的。
+
+    三個條件缺一不可：漏掉任何一個，存台積電的分線就會順手把蘋果的日線刪掉，而那
+    是一個不會報錯、只會讓另一支的圖突然變空的錯。
+    """
+    where = (
+        MarketBar.data_source == data_source,
+        MarketBar.symbol == symbol,
+        MarketBar.timeframe == timeframe.value,
+    )
+    oldest_kept = db.execute(
+        select(MarketBar.ts)
+        .where(*where)
+        .order_by(MarketBar.ts.desc())
+        .offset(MAX_STORED_BARS - 1)
+        .limit(1)
+    ).scalar_one_or_none()
+    if oldest_kept is None:
+        # 還沒滿。空的也走這裡——沒有第 N 新的那一根，就沒有什麼可以丟。
+        return
+    db.execute(delete(MarketBar).where(*where, MarketBar.ts < oldest_kept))
+    db.flush()
+
+
 def save(
     db: Session,
     data_source: DataSource,
@@ -100,6 +156,19 @@ def save(
     """把抓到的存起來。空的就什麼都不做——「這次沒抓到」不可以洗掉已經存著的。"""
     if not bars:
         return
+
+    # **先切再寫，不是寫完再刪。** 圖表往前拉的深度是倍增的（PriceChart 的
+    # depth：300 → 600 → 1200 → 2400…），很容易就超過上限。全部寫進去再讓 `_trim`
+    # 刪掉的話，**每一次**拉深的請求都會插 1400 列再刪 1400 列，淨值永遠是零（量過：
+    # 深度 2400、冷快取，第二輪起 INSERT 1400 / DELETE 1400）——而那發生在使用者正在
+    # 等的那個 HTTP 請求裡，在免費 Postgres 上還一路產 dead tuple。為了省空間而換來永
+    # 久的寫入放大，方向是反的。切掉之後 INSERT 回到 0。
+    #
+    # 副作用只有一個：`_split_happened` 的比對窗口跟著縮到「抓回來的最新 1000 根」。
+    # 實務上不影響——`existing` 本來就只剩最新 ≤1000 根，兩邊重疊完全一樣；唯一沒有
+    # 重疊的情況是那段序列停擺超過 1000 根（日線約四年），而那種情況本來也偵測不
+    # 到分割。
+    bars = bars[-MAX_STORED_BARS:]
 
     where = (
         MarketBar.data_source == data_source,
@@ -135,3 +204,7 @@ def save(
             )
         )
     db.flush()
+    # 在寫完的當下修剪，不另外排一支排程：排程要有人去按、去設、去看它有沒有在
+    # 跑，而這個使用者不會做那三件事的任何一件。寫入這條路則是他每次看圖、每個盯
+    # 盤週期都會走到的。
+    _trim(db, data_source, symbol, timeframe)
