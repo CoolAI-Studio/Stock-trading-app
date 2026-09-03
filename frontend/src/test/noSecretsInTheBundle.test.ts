@@ -45,6 +45,49 @@ function sourceFiles(): string[] {
   return found
 }
 
+/** vite.config.ts 的 `define` 裡宣告了哪些名字。**全部**，不是只有 `__XXX__` 那種。
+ *
+ * 原本的寫法是 `/__([A-Z0-9_]+)__\s*:/g`，只認得被底線包起來的名字。而 `define` 接受
+ * 任何名字——`define: { AI_API_KEY: ... }` 一樣會被替換進 bundle，只是那個守衛看不見
+ * 它。慣例不是防線：會把秘密放進 define 的那個人，正是不會照慣例命名的那個人。
+ *
+ * 用數大括號的方式框出 `define` 那個區塊，再抓它第一層的鍵。這裡刻意不 import
+ * vite.config.ts 去讀真正的物件——那會執行設定檔（連帶跑 plugin），而這條測試要問的
+ * 是「原始碼裡寫了什麼」，不是「跑起來變成什麼」。
+ */
+function definedConstants(config: string): string[] {
+  const start = config.indexOf('define:')
+  if (start === -1) return []
+  const open = config.indexOf('{', start)
+  if (open === -1) return []
+
+  let depth = 0
+  let end = open
+  for (let i = open; i < config.length; i += 1) {
+    if (config[i] === '{') depth += 1
+    else if (config[i] === '}') {
+      depth -= 1
+      if (depth === 0) {
+        end = i
+        break
+      }
+    }
+  }
+
+  const block = config.slice(open + 1, end)
+  const keys: string[] = []
+  // 只取第一層：巢狀物件的內層鍵不是 define 的名字。
+  let nested = 0
+  for (const line of block.split('\n')) {
+    if (nested === 0) {
+      const match = /^\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_$][\w$]*))\s*:/.exec(line)
+      if (match) keys.push(match[1] ?? match[2] ?? match[3])
+    }
+    nested += (line.match(/[{[]/g) ?? []).length - (line.match(/[}\]]/g) ?? []).length
+  }
+  return keys
+}
+
 describe('bundle 裡不可以有秘密', () => {
   it('沒有任何一個 VITE_ 變數的名字長得像秘密', () => {
     const offenders: string[] = []
@@ -68,8 +111,28 @@ describe('bundle 裡不可以有秘密', () => {
     // vite.config.ts 的 `define` 是另一條同樣公開的管道，而且它更容易被忽略：那裡
     // 塞進去的東西連 VITE_ 前綴都沒有，看不出它會出現在 bundle 裡。
     const config = readFileSync(resolve(ROOT, 'vite.config.ts'), 'utf-8')
-    const defined = [...config.matchAll(/__([A-Z0-9_]+)__\s*:/g)].map((m) => m[1])
 
-    expect(defined).toEqual(['APP_COMMIT'])
+    expect(definedConstants(config)).toEqual(['__APP_COMMIT__'])
+  })
+
+  it('define 裡一個沒有被底線包起來的名字，也要被看見', () => {
+    // 這一條守的是守衛自己。原本的寫法是 `/__([A-Z0-9_]+)__\s*:/g`——它只看得見
+    // `__XXX__` 那種名字，所以 `define: { AI_API_KEY: ... }` 對它來說等於不存在，
+    // 清單仍然只有版本編號，測試照樣綠，而金鑰已經在每一個訪客的原始碼裡。
+    //
+    // 慣例（Vite 文件建議 dunder）不是防線：能把秘密放進 define 的那個人，正是不會
+    // 照慣例命名的那個人。
+    const config = [
+      'export default defineConfig({',
+      '  define: {',
+      '    __APP_COMMIT__: JSON.stringify(APP_COMMIT),',
+      '    AI_API_KEY: JSON.stringify(process.env.AI_API_KEY),',
+      "    'quoted.name': JSON.stringify(1),",
+      '  },',
+      '  plugins: [react()],',
+      '})',
+    ].join('\n')
+
+    expect(definedConstants(config)).toEqual(['__APP_COMMIT__', 'AI_API_KEY', 'quoted.name'])
   })
 })
