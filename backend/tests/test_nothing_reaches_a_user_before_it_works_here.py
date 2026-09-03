@@ -125,3 +125,57 @@ def test_it_only_ever_runs_on_the_main_branch():
 
     assert "refs/heads/main" in guard
     assert "push" in guard
+
+
+# --- 那個開關是使用者拿得到更新的唯一原因 -------------------------------------
+
+RENDER_YAML = Path(__file__).resolve().parents[2] / "render.yaml"
+
+
+def test_autodeploy_stays_on_even_though_render_advises_against_it():
+    """`autoDeploy: true` 是刻意的，而且**跟 Render 自己的建議相反**。
+
+    Render 的文件對 Deploy to Render 按鈕寫著：
+
+        For a service that is meant to be deployed via a Deploy to Render
+        button, it is strongly advised to set `autoDeploy: false` … This
+        ensures that code pushes to the repo that contains the Deploy to
+        Render button don't trigger an automatic deploy of every instance
+        deployed via the Deploy to Render button.
+
+    他們擔心的事情，正是這個專案要的事情：按鈕部署出去的每一份，都會因為我們推的東西
+    而重新部署。#52 的整個理由就是「使用者拿不到我們的更新（含安全修補）」。
+
+    而他們警告的那個風險，我們用 `branch: stable` 換掉了：一次 push 不會送到任何人手
+    上，只有 `stable` 前進才會——而 `stable` 只在我們自己的實例跑起來而且健康之後才動
+    （見這個檔案上面那幾條）。
+
+    **這一條存在，是因為下一個讀 Render 文件的人會想「照著改成 false」。** 改下去不會
+    有任何東西變紅，而後果是每一個現有使用者從此拿不到任何更新，包括安全修補——完全
+    安靜。
+
+    Deploy to Render 按鈕不會 fork：Render 直接從原始的 repo 部署（同一份文件）。所以
+    那些服務追的是**我們這個 repo 的 stable**，這個開關關掉就真的是全部一起停。
+    """
+    spec = RENDER_YAML.read_text(encoding="utf-8")
+    body = "\n".join(line for line in spec.split("\n") if not line.lstrip().startswith("#"))
+
+    assert "autoDeploy: true" in body, (
+        "autoDeploy 被關掉了。Render 的文件確實建議這樣做，但這個專案靠它送出安全修補，"
+        "而風險是用 branch: stable 換掉的，不是用關掉它換掉的。"
+    )
+    assert "branch: stable" in body, (
+        "不追 stable 了。那樣 autoDeploy 就變成 Render 警告的那一種：一次 push 直接送到"
+        "每一個人的機器上，而那一版可能連測試都還沒跑完。"
+    )
+
+
+def test_the_reason_is_written_next_to_the_switch():
+    """理由要留在那個檔案裡，不是只在這條測試裡。
+
+    測試會擋下改動，但擋下來的人得知道為什麼——而他當下手上拿的是 Render 的文件。
+    """
+    spec = RENDER_YAML.read_text(encoding="utf-8")
+
+    assert "Deploy to Render" in spec or "autoDeploy" in spec
+    assert "stable" in spec

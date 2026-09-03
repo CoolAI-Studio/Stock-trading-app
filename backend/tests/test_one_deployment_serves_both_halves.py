@@ -464,3 +464,28 @@ def test_the_guide_warns_that_github_switches_the_schedules_off():
     assert "Actions" in guide and ("Enable" in guide or "啟用" in guide), "沒有說去哪裡打開"
     # 兩支都要提到：只講更新的話，他不會知道看門狗也一起沒了。
     assert "看門狗" in guide or "watchdog" in guide.lower()
+
+
+def test_the_guide_says_who_keeps_a_self_hosted_copy_updated():
+    """用自己的 repo 那條路，更新不會自己來——文件要說，而且要說怎麼辦。
+
+    兩條路的更新機制完全不同，而 DEPLOYMENT.md 原本把它們寫成同一件事：
+
+      **按鈕**：Render 的文件說得很清楚，Deploy to Render **不會 fork**，它直接從
+      原始的 repo 部署。所以那些服務追的是上游的 `stable`，而 `stable` 一前進他們就
+      重新部署——更新完全自動。
+
+      **自己的 repo**：Render 追的是**他自己那一份**的 `stable`。而 `git push` 預設
+      只推當下那個分支，所以他的 repo 多半根本沒有 `stable`；就算有，也不會有任何東
+      西讓它前進——`sync-from-upstream.yml` 快轉的是**預設分支**。
+
+    也就是說：走第二條路的人，會有一份看起來一切正常、但**永遠停在部署那一天**的副
+    本。而這個專案最不能接受的就是這種——什麼都沒壞，只是安靜地不再更新。
+
+    文件要說得出：分支要改成哪一個、以及那支同步工作流程要開起來。
+    """
+    guide = (_root() / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    own_repo = guide[guide.index("### 2a") : guide.index("### 2b")]
+
+    assert "stable" in own_repo, "沒有提到分支這件事，而 render.yaml 裡寫的是 stable"
+    assert "Actions" in own_repo or "同步" in own_repo, "沒有說更新要靠那支同步工作流程"

@@ -20,6 +20,25 @@ services:
     #    切到 stable。那會讓 CI 的「等它變成這個 commit」那一步逾時而紅——loud，
     #    不是 silent，而且那一步的錯誤訊息會提到這個可能。修法是在 Render 後台把
     #    我們那個服務的分支改回 main。
+    #
+    # ＊ autoDeploy: true 跟 Render 自己的建議相反，而那是刻意的。
+    #
+    # 他們的文件對 Deploy to Render 按鈕寫著：
+    #
+    #     For a service that is meant to be deployed via a Deploy to Render
+    #     button, it is strongly advised to set `autoDeploy: false` … This
+    #     ensures that code pushes to the repo … don't trigger an automatic
+    #     deploy of every instance deployed via the Deploy to Render button.
+    #
+    # 他們擔心的事情，正是這個專案要的事情：按鈕部署出去的每一份，都會因為我們推
+    # 的東西而重新部署。#52 的整個理由就是「使用者拿不到我們的更新（含安全修補）」。
+    #
+    # 而他們警告的那個風險，是用上面那個 `branch: stable` 換掉的——一次 push 不會送
+    # 到任何人手上，只有 stable 前進才會。**不要照著他們的文件把這裡改成 false**：
+    # 改下去不會有任何東西變紅，而每一個現有使用者從此拿不到任何更新。
+    #
+    # （Deploy to Render 不會 fork，Render 直接從原始的 repo 部署。所以那些服務追的
+    # 是這個 repo 的 stable，這個開關關掉就是全部一起停。）
     autoDeploy: true
     branch: stable
     runtime: docker
