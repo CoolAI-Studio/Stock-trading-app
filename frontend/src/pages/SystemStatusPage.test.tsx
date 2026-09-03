@@ -25,6 +25,12 @@ const HEALTHY: SystemStatus = {
   worker: { enabled: true, uptime_sec: 3600, last_loop_age_sec: 2, last_poll_age_sec: 3 },
   market_data: { consecutive_empty_polls: 0, stale_symbols: [], stale_bars: [] },
   assistant_available: false,
+  database: {
+    kind: 'postgres',
+    ephemeral: false,
+    status: 'ok',
+    detail: '資料存在 Postgres 裡。',
+  },
   notifications: {
     enabled: true,
     sent: 12,
@@ -102,6 +108,36 @@ describe('警告會不會停擺', () => {
     })
 
     expect(await screen.findByText('2330.TW')).toBeInTheDocument()
+  })
+
+  it('遷移沒跑成功的時候，這一頁要說得出來', async () => {
+    // scripts/start.py 在已經有帳號的部署上刻意不鎖住（一次跑不動的遷移不該讓提醒
+    // 全部停擺）。但「不鎖」不等於「不說」——而原本它就是不說：理由只留在容器的 log
+    // 裡，而他不會打開那個地方。他會打開的是這一頁。
+    //
+    // 原因要原樣帶出來：「資料庫有問題」不是一個他可以拿去做事的句子。
+    show({
+      overall: 'warn',
+      database: {
+        kind: 'postgres',
+        ephemeral: false,
+        status: 'warn',
+        detail: '上一次啟動時資料庫遷移沒有跑完…原因：column strategies.foo does not exist',
+      },
+    })
+
+    expect(await screen.findByText(/遷移沒有跑完/)).toBeInTheDocument()
+    expect(screen.getByText(/column strategies.foo does not exist/)).toBeInTheDocument()
+  })
+
+  it('資料庫好好的時候也要說一句，不然他不知道資料在哪裡', async () => {
+    // 那個值是他幾週前填進一張表單的，也可能從來沒填——而「從來沒填」會落在預設的檔案
+    // 資料庫上，看起來跟一個正常的 Postgres 一模一樣，直到重新部署把它清空。
+    show({
+      database: { kind: 'postgres', ephemeral: false, status: 'ok', detail: '資料存在 Postgres 裡。' },
+    })
+
+    expect(await screen.findByText(/資料存在 Postgres 裡/)).toBeInTheDocument()
   })
 
   it('抓不到 K 棒的那幾段也要列出來，而且跟報價分開講', async () => {

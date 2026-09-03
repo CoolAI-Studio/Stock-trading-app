@@ -201,7 +201,8 @@ export function SystemStatusPage() {
     return <p className="text-slate-500">載入中…</p>
   }
 
-  const { overall, worker, market_data, notifications, assistant_available, update } = query.data
+  const { overall, worker, market_data, notifications, assistant_available, update, database } =
+    query.data
   const headline = HEADLINE[overall]
 
   return (
@@ -329,6 +330,21 @@ export function SystemStatusPage() {
             </ul>
           </div>
         )}
+      </Section>
+
+      {/*
+        資料放在哪裡，以及上一次啟動時遷移有沒有跑完。
+
+        後者原本只留在容器的 log 裡。scripts/start.py 在已經有帳號的部署上刻意不鎖住
+        （一次跑不動的遷移不該讓提醒全部停擺），但「不鎖」不等於「不說」——而他會打開
+        的是這一頁，不是 log。
+
+        原因原樣印出來：「資料庫有問題」不是一個他可以拿去做事的句子。
+      */}
+      <Section title="資料庫">
+        <p className={database.status === 'ok' ? 'text-sm text-slate-400' : 'text-sm text-amber-300'}>
+          {database.detail}
+        </p>
       </Section>
 
       <Section title={`通知（最近 ${notifications.window_hours} 小時）`}>

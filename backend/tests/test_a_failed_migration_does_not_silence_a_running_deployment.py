@@ -173,3 +173,64 @@ def test_the_reason_is_not_thrown_away_just_because_it_no_longer_locks(tmp_path,
     start.main()
 
     assert os.environ["DATABASE_MIGRATION_STALE"] == _A_FAILED_MIGRATION
+
+
+# --- 不鎖住，但也要說得出來 ---------------------------------------------------
+#
+# 上面那幾條守的是「已經有帳號的部署不會因為一次遷移失敗被鎖進設定頁」。那是對的，而
+# 且是這個修法的重點。
+#
+# 但「不鎖」不等於「不說」，而原本它就是不說：`DATABASE_MIGRATION_STALE` 由
+# scripts/start.py 設下去之後，**整個 app 沒有任何一行讀它**。理由只留在容器的 log
+# 裡，而那是他不會打開的地方——他會打開的是系統狀態頁。
+#
+# 為什麼不讓 /healthz 變紅：schema 真的對不上的話，查詢會失敗、盯盤那一輪會停，而
+# worker 那一格本來就會紅、看門狗本來就會寄信。**後果已經有人抓了，這裡要補的是原
+# 因**——他收到信之後打開那一頁，要看得出「是這件事」，而不是自己猜。
+#
+# 反過來讓 /healthz 直接紅則會亂叫：遷移失敗也可能只是拿不到鎖，schema 其實好好的，
+# 而那種紅燈要等到下一次重啟才會消失。
+
+
+def test_the_status_page_says_the_schema_may_not_match(auth_client, monkeypatch):
+    """遷移沒跑成功，狀態頁上要看得見。
+
+    他打開這一頁的時機，就是懷疑出事的時候。那時候這一頁如果什麼都不說，他會從資料
+    庫一路猜到通知設定——而答案在一行他看不到的 log 裡。
+    """
+    monkeypatch.setenv("DATABASE_MIGRATION_STALE", 'relation "strategies" already exists')
+
+    body = auth_client.get("/api/system/status").json()
+
+    assert body["database"]["status"] != "ok", "遷移沒跑成功，資料庫那一格卻說一切正常"
+    assert "遷移" in body["database"]["detail"] or "結構" in body["database"]["detail"]
+    # 原因要帶出來：「有問題」不是一個他可以拿去做事的句子。
+    assert "already exists" in body["database"]["detail"]
+
+
+def test_a_healthy_deployment_does_not_say_it(auth_client, monkeypatch):
+    """沒有這件事的時候不要提它——平常就在講的東西，真的發生那一次也沒有人看。"""
+    monkeypatch.delenv("DATABASE_MIGRATION_STALE", raising=False)
+
+    body = auth_client.get("/api/system/status").json()
+
+    assert "遷移" not in body["database"]["detail"]
+
+
+def test_the_assistant_is_told_too(auth_client, db_session, monkeypatch):
+    """問 AI 的時候也要帶上去。
+
+    少了這一句，助手會看到一個到處都正常、卻又怪怪的部署，然後開始猜——這正是
+    system.py 裡「叫不動子行程的策略」那一行存在的理由，同一個道理。
+    """
+    monkeypatch.setenv("DATABASE_MIGRATION_STALE", "column strategies.foo does not exist")
+
+    # 助手接不接得上不是這裡的事（沒有金鑰就答不了）。那一段狀態文字是本地組出來
+    # 的，所以直接問那個函式。
+    from app.api.routers.system import _state_for_assistant
+    from app.models.user import User
+
+    user = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+    summary = _state_for_assistant(db_session, user)
+
+    assert "遷移" in summary or "結構" in summary

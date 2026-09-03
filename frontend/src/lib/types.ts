@@ -659,6 +659,16 @@ export interface SystemStatus {
    * error. AI_API_KEY is one more blank in a deploy form and is optional by
    * design, so the box is left out entirely rather than offered and broken. */
   assistant_available: boolean
+  /** 資料放在哪裡，以及上一次啟動時遷移有沒有跑完。
+   *
+   * `detail` 是給人看的一整句話，包含遷移失敗時的原因原文——那一串正是他要貼給別人
+   * 看、或貼進「問 AI」的那一段。 */
+  database: {
+    kind: 'sqlite' | 'postgres' | 'other'
+    ephemeral: boolean
+    status: 'ok' | 'warn' | 'fail'
+    detail: string
+  }
   worker: {
     enabled: boolean
     uptime_sec: number

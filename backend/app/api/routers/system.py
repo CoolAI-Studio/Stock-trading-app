@@ -22,6 +22,7 @@ deliberately terse: 「fail」 with no numbers, because anyone can read it. This
 one is behind a login and can therefore say how long, how many, and which.
 """
 
+import os
 from datetime import timedelta
 from typing import Annotated, Any
 
@@ -350,22 +351,45 @@ def system_status(
     host = hosting.detect()
     on_a_platform = host is not hosting.GENERIC
     ephemeral = kind == "sqlite" and on_a_platform
-    database = {
-        "kind": kind,
-        "ephemeral": ephemeral,
-        "status": _WARN if ephemeral else _OK,
-        "detail": (
+    # **遷移沒跑成功，但這個部署沒有被鎖住。**
+    #
+    # scripts/start.py 在「已經有帳號的部署」上刻意不鎖：一次跑不動的遷移不該讓一份跑
+    # 了三個月的部署所有提醒停擺。但「不鎖」不等於「不說」——而在這一段之前它就是不
+    # 說：那個環境變數被設下去之後，整個 app 沒有任何一行讀它，理由只留在容器的 log
+    # 裡，而那是他不會打開的地方。他會打開的是這一頁。
+    #
+    # 為什麼不讓 /healthz 跟著紅：schema 真的對不上的話，查詢會失敗、盯盤那一輪會停，
+    # 而 worker 那一格本來就會紅、看門狗本來就會寄信——**後果已經有人抓了，這裡補的是
+    # 原因**。反過來直接紅則會亂叫：遷移失敗也可能只是拿不到鎖，schema 其實好好的，而
+    # 那種紅燈要等到下一次重啟才會消失。
+    stale = (os.environ.get("DATABASE_MIGRATION_STALE") or "").strip()
+    if stale:
+        # 原因原樣帶出來。「資料庫有問題」不是一個他可以拿去做事的句子，而這一串正是
+        # 他要貼給別人看、或貼進「問 AI」的那一段。
+        detail = (
+            "上一次啟動時資料庫遷移沒有跑完，所以資料庫的結構可能跟現在這一版程式對不上。"
+            "提醒沒有因此停掉，但畫面上如果有東西怪怪的，多半是這件事。"
+            f"原因：{stale}"
+        )
+    elif ephemeral:
+        detail = (
             "資料存在容器裡的一個檔案，而這個平台每次重新部署都會換一個新的容器"
             "——帳號、策略、通知設定會一起不見，而且不會有任何提示。"
             "去開一個 Postgres（免費的例如 Neon、Supabase），把連線字串放進 DATABASE_URL。"
-            if ephemeral
-            else (
-                "資料存在本機的一個檔案裡。在自己的機器上這沒有問題，"
-                "但那是一個檔案——記得跟其他重要檔案一起備份，這個系統不會替你備份它。"
-                if kind == "sqlite"
-                else "資料存在 Postgres 裡。"
-            )
-        ),
+        )
+    elif kind == "sqlite":
+        detail = (
+            "資料存在本機的一個檔案裡。在自己的機器上這沒有問題，"
+            "但那是一個檔案——記得跟其他重要檔案一起備份，這個系統不會替你備份它。"
+        )
+    else:
+        detail = "資料存在 Postgres 裡。"
+
+    database = {
+        "kind": kind,
+        "ephemeral": ephemeral,
+        "status": _WARN if (ephemeral or stale) else _OK,
+        "detail": detail,
     }
 
     return {
@@ -443,6 +467,7 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"已送出 {notifications['sent']}、還在重試 {notifications['retrying']}、"
         f"等靜音 {notifications['deferred']}、已放棄 {notifications['given_up']}、"
         f"沒送到任何管道 {notifications['reached_nobody']}\n"
+        f"- 資料庫：{status['database']['detail']}\n"
         f"- 還沒填的設定項目（只列名稱，不含內容）：{', '.join(missing) or '無'}"
     )
 
