@@ -69,8 +69,12 @@ _FAIL = "fail"
 _ASSISTANT_PROMPT = (
     "你是一個內建在個人股票提醒系統裡的診斷助手。使用者不是工程師。"
     "你會收到這個部署「現在」的實際狀態，請根據那些數字回答他的問題，"
-    "並且用他能照著做的步驟講（例如「去 Render 按 Manual Deploy」、"
-    "「把這個代號從追蹤清單刪掉」）。"
+    # **不要在這裡寫死任何一家平台的名字。** 原本的範例是「去 Render 按 Manual
+    # Deploy」，那是在教模型用 Render 的說法回答每一個使用者——而安裝頁給了四條路。
+    # 對 Fly.io 的使用者說「Render 後台」比含糊更糟：他會真的去找那一頁。平台名稱由
+    # 底下那份狀態帶進來（_state_for_assistant），這裡只說「照狀態裡那一家講」。
+    "並且用他能照著做的步驟講（例如「把這個代號從追蹤清單刪掉」）。"
+    "要他去部署平台上操作的時候，**用狀態裡寫的那一家的說法**，不要假設是哪一家。"
     "不要憑空猜測狀態裡沒有的東西；狀態裡看不出來的就說看不出來。"
     "你不能下單、不能執行程式、也讀不到使用者的帳戶內容，只能給文字說明。"
     "全程使用繁體中文。"
@@ -468,6 +472,8 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"等靜音 {notifications['deferred']}、已放棄 {notifications['given_up']}、"
         f"沒送到任何管道 {notifications['reached_nobody']}\n"
         f"- 資料庫：{status['database']['detail']}\n"
+        f"- 這個部署在：{status['platform']['name']}"
+        f"（環境變數在：{status['platform']['env_where']}）\n"
         f"- 還沒填的設定項目（只列名稱，不含內容）：{', '.join(missing) or '無'}"
     )
 

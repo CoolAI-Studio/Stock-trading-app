@@ -211,3 +211,40 @@ def test_an_empty_question_is_refused(auth_client):
     resp = auth_client.post("/api/system/assist", json={"message": "   "})
 
     assert resp.status_code == 422
+
+
+def test_the_assistant_is_not_taught_to_say_render_to_everyone():
+    """助手的提示詞不可以把某一家平台當成範例講法。
+
+    原本那句是「例如『去 Render 按 Manual Deploy』」——那是在教模型用 Render 的說法回
+    答**每一個**使用者。而安裝頁給了四條路：Render、Railway、Fly.io、自己的機器。
+
+    這是這個 repo 已經立過的規則，只是漏了這一處：`/api/system/status` 會回
+    `platform.env_where`，用他實際所在平台的說法講話，而 system.py 自己的註解就寫著
+    「對 Fly.io 的使用者說『Render 後台』比含糊更糟——他會真的去找那一頁」。
+
+    而這一處比別處嚴重：助手正是他搞不懂的時候去問的東西。給他一個不存在的選單路徑，
+    等於在他最需要幫忙的那一刻把他推得更遠。
+    """
+    from app.api.routers.system import _ASSISTANT_PROMPT
+
+    for host in ("Render", "Railway", "Fly.io", "Vercel"):
+        assert host not in _ASSISTANT_PROMPT, (
+            f"提示詞裡把 {host} 當成範例講法，那會讓助手對每一個使用者都這樣講。"
+            "平台名稱要從狀態裡讀，不是寫死在提示詞裡。"
+        )
+
+
+def test_the_assistant_is_told_which_platform_this_is(auth_client, db_session):
+    """而且要把平台**告訴**它，不然它只能含糊。
+
+    拿掉範例還不夠：模型手上要有那個名字，才講得出他照著做得到的步驟。這一段本來就在
+    /api/system/status 的回應裡（platform.env_where），只是沒有帶進助手看的那份狀態。
+    """
+    from app.api.routers.system import _state_for_assistant
+    from app.models.user import User
+
+    user = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+    summary = _state_for_assistant(db_session, user)
+
+    assert "平台" in summary or "部署在" in summary
