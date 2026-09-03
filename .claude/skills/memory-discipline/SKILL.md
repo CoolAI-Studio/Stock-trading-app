@@ -27,12 +27,33 @@ reproduces when that file is run on its own.
 
 ## Before a heavy run
 
-```bash
-# free RAM, and who is holding it
-powershell -Command "$os=Get-CimInstance Win32_OperatingSystem; 'free: {0:N1} GB' -f ($os.FreePhysicalMemory/1MB)"
+Use the **PowerShell tool**, not `powershell -Command` through bash — bash eats the `$os`
+and you get a confusing parse error instead of a number.
+
+```powershell
+$os = Get-CimInstance Win32_OperatingSystem
+'free: {0:N1} GB' -f ($os.FreePhysicalMemory/1MB)
 ```
 
 Under ~6 GB free, clean up before starting rather than watching it die at 60%.
+
+**Anything that needs Docker gets this check first, and gets deferred if the answer is
+short.** Docker Desktop plus its WSL VM plus a container is 2-4 GB before the build even
+starts, so `docker compose up` / `docker build` is the single most likely thing here to
+take the machine down. If free memory is under ~8 GB, say so and hold the Docker step
+rather than starting it — the run that dies halfway costs more than the wait.
+
+`vmmemWSL` is worth checking on its own: it survives after Docker Desktop is closed and
+after every distro has stopped, still holding gigabytes. Measured on this machine with
+Docker not running and `wsl --list --running` empty, `wsl --shutdown` moved free memory
+from **5.7 GB to 10.9 GB**. It is the cheapest cleanup available and it costs nothing —
+the VM comes back on the next `docker` or `wsl` command.
+
+```powershell
+Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue   # is it even running?
+wsl.exe --list --running --quiet                                    # any distro alive?
+wsl.exe --shutdown                                                  # safe when both are empty
+```
 
 ## Run suites the cheap way
 
