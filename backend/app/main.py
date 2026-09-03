@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.staticfiles import NotModifiedResponse
 
 from app.api.router import api_router
 from app.api.routers.health import router as health_router
@@ -327,11 +328,12 @@ def _static(candidate: Path, request: Request) -> Response:
         candidate, stat_result=candidate.stat(), headers={"Cache-Control": cache}
     )
     etag = response.headers.get("etag")
+    # 只看 ETag，不看 If-Modified-Since。我們每一個回應都帶 ETag，而瀏覽器手上有
+    # ETag 的時候一定會送 If-None-Match，所以這一條涵蓋得到每一個真實情況。
     if etag and request.headers.get("if-none-match") == etag:
-        return Response(
-            status_code=status.HTTP_304_NOT_MODIFIED,
-            headers={"ETag": etag, "Cache-Control": cache},
-        )
+        # 用 Starlette 自己那一個，不要自己組：304 只准帶特定幾個標頭（RFC 9110
+        # §15.4.5），而它知道是哪幾個。
+        return NotModifiedResponse(response.headers)
     return response
 
 
