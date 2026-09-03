@@ -266,3 +266,63 @@ def test_the_email_does_not_tell_him_to_run_a_python_script():
 
     assert "python scripts/" not in body, "備份信還在叫他跑 Python 腳本"
     assert "帳號" in body or "還原" in body, "沒有告訴他這個檔案要怎麼用"
+
+
+def _email_body() -> str:
+    from pathlib import Path
+
+    from app.services import backup_schedule
+
+    source = Path(backup_schedule.__file__).read_text(encoding="utf-8")
+    start = source.index("附件是這個帳號的加密備份")
+    return source[start : source.index('f"trading-backup', start)]
+
+
+def test_the_email_does_not_promise_a_button_that_does_not_exist():
+    """信裡叫他去按的東西，app 裡要真的有。
+
+    上一條測試把「叫他跑 Python 腳本」擋掉了，而修法是改成「到 app 的『帳號』頁，備份
+    那一區有『從備份還原』」——**那顆按鈕從來沒有被做出來。** 沒有還原端點，也沒有還原
+    的畫面；整個 repo 裡只有策略「版本」的還原，那是另一件事。
+
+    所以那一版把「一個他做不到的指示」換成「一個不存在的指示」，而後者更糟：前者至少
+    對真的會用終端機的人是對的，後者對任何人都不成立。
+
+    而這封信會定期寄出，收信的人不是工程師，讀到它的時機是他已經弄丟東西的那一天。
+
+    這一條問的不是文案，是**那句承諾對得上程式碼**：信裡如果說 app 裡有還原，那就要有
+    一條還原的路由。
+    """
+    from app.main import app
+
+    body = _email_body()
+    promises_a_control = "還原" in body and ("頁" in body or "按" in body)
+    if not promises_a_control:
+        return
+
+    # 要遞迴走：FastAPI 把 include_router 進來的東西包在 `_IncludedRouter` 裡，所以
+    # `app.routes` 第一層看到的不是路由本身（scripts/audit.py 的 websocket_paths 也是
+    # 為了同一件事才那樣寫的）。少了這一段，這裡會看到一份空清單然後說「沒有還原路
+    # 由」——結論碰巧一樣，理由卻是錯的，而那種測試下一次就會騙人。
+    def walk(routes, seen=None):
+        seen = set() if seen is None else seen
+        for route in routes or []:
+            if id(route) in seen:
+                continue
+            seen.add(id(route))
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                yield from walk(getattr(inner, "routes", []), seen)
+                continue
+            sub = getattr(route, "routes", None)
+            if sub:
+                yield from walk(sub, seen)
+                continue
+            yield getattr(route, "path", "")
+
+    paths = set(walk(app.routes))
+
+    assert any("backup" in path and "restore" in path for path in paths), (
+        "備份信告訴他到 app 裡按「從備份還原」，而那條路由不存在。"
+        f"現在有的備份相關路由：{sorted(p for p in paths if 'backup' in p)}"
+    )
