@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -290,8 +290,53 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "di
 # 的。
 
 
+# Vite 把每一支 bundle 的內容雜湊寫進檔名（index-CNbqHiLX.js），所以那個網址的內容
+# 永遠不會變——改一個字檔名就變了。這些用力快取是安全的，而且是必要的：不快取的話他
+# 每次打開 app 都要用行動網路重新下載 660 KB。
+_HASHED_ASSETS_PREFIX = "/assets/"
+_KEEP_FOR_A_YEAR = "public, max-age=31536000, immutable"
+
+# 其他每一個檔案的網址都是固定的（index.html、sw.js、manifest、圖示），所以它的新版
+# 和舊版是同一個網址。
+#
+# **`no-cache` 不是「不要存」，是「存可以，但用之前要問一次」。** 少了這個標頭，
+# 瀏覽器會用 RFC 9111 §4.2.2 的啟發式快取：拿 Last-Modified 到現在的十分之一當新鮮
+# 期。而 Last-Modified 就是映像檔裡那個檔案的時間，也就是上一次建置的時間——所以
+# **我們愈久沒改東西，他卡在舊版的時間就愈長**（建置後 60 天 → 6 天不問伺服器）。
+#
+# 而卡住的後果不只是看到舊畫面：系統狀態頁會拿那份被快取住的 bundle 裡的
+# FRONTEND_COMMIT 去比對，然後告訴他「你看到的這個畫面是舊的，去重新部署一次」——一
+# 句真話配一個沒有用的辦法，因為伺服器上早就是新的了。
+_ASK_EVERY_TIME = "no-cache"
+
+
+def _static(candidate: Path, request: Request) -> Response:
+    """一個靜態檔，附上它該有的快取規則，而且答得出 304。
+
+    304 讓「每次問一次」真的便宜（幾十個位元組，不是整個檔案）。
+    `FileResponse` 自己不做這件事——那段條件式判斷在 Starlette 裡是 `StaticFiles`
+    的，而這裡是一個普通的路由函式，所以要自己接。
+    """
+    cache = (
+        _KEEP_FOR_A_YEAR if request.url.path.startswith(_HASHED_ASSETS_PREFIX) else _ASK_EVERY_TIME
+    )
+    # **`stat_result` 要自己給。** 不給的話 `FileResponse` 會等到真的開始送的時候才
+    # 去 stat，而 ETag 是那時候才算出來的——所以在這裡讀 `headers["etag"]` 會是空的，
+    # 底下那個比對就永遠不成立，304 從來不會發生（第一版就是這樣，測試抓到了）。
+    response = FileResponse(
+        candidate, stat_result=candidate.stat(), headers={"Cache-Control": cache}
+    )
+    etag = response.headers.get("etag")
+    if etag and request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED,
+            headers={"ETag": etag, "Cache-Control": cache},
+        )
+    return response
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
-async def serve_frontend(full_path: str) -> Response:
+async def serve_frontend(full_path: str, request: Request) -> Response:
     """真的存在的檔案照原樣送；其他都回 index.html。
 
     後者是單頁應用必須的：路由在瀏覽器裡，不在伺服器上。使用者按 F5 重新整理
@@ -318,9 +363,9 @@ async def serve_frontend(full_path: str) -> Response:
     # 個一路走到檔案系統根目錄的門。
     candidate = (FRONTEND_DIST / full_path).resolve()
     if candidate.is_file() and candidate.is_relative_to(FRONTEND_DIST.resolve()):
-        return FileResponse(candidate)
+        return _static(candidate, request)
 
     index = FRONTEND_DIST / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        return _static(index, request)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
