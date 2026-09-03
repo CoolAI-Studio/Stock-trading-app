@@ -28,8 +28,9 @@
 
 <section>
   <div class="wrap">
-    <div class="cards">
-      <div class="card">
+    <div class="cards path-choice" data-path-default="none" role="radiogroup" aria-label="資料放哪裡">
+      <label class="card">
+        <input class="path-radio" type="radio" name="where-data" data-path-choice="local">
         <p class="who">自己的電腦</p>
         <h3>硬碟上一個檔案</h3>
         <ul>
@@ -37,8 +38,9 @@
           <li><strong>關機就停止盯盤</strong></li>
           <li>要自己備份</li>
         </ul>
-      </div>
-      <div class="card">
+      </label>
+      <label class="card">
+        <input class="path-radio" type="radio" name="where-data" data-path-choice="cloud">
         <p class="who">雲端</p>
         <h3>你關電腦它照樣在跑</h3>
         <ul>
@@ -46,21 +48,21 @@
           <li>有免費方案，多數不用卡</li>
           <li>要開一個 Postgres（下面有手把手）</li>
         </ul>
-      </div>
+      </label>
     </div>
 
     <div class="note">
       <strong>不確定就選雲端。</strong>它的價值在你沒看盤的時候。之後改得掉。
     </div>
 
-    <div class="note">
-      <strong>選「自己的電腦」的話，這一頁不用做。</strong>不用申請、不用註冊。
+    <div class="note" data-path="local">
+      <strong>那這一頁不用做。</strong>不用申請、不用註冊。
       <a href="install.html">跳到第 3 步：安裝 →</a>
     </div>
   </div>
 </section>
 
-<section>
+<section data-path="cloud">
   <div class="wrap">
     <h2>你只需要拿到一串字</h2>
     <p class="lede">
@@ -145,7 +147,7 @@
   </div>
 </section>
 
-<section>
+<section data-path="cloud">
   <div class="wrap">
     <h2>其餘一樣</h2>
     <p class="lede">它要的是<strong>兩樣</strong>東西，不是三個品牌。每一格都能換。</p>
@@ -181,12 +183,16 @@
       </div>
     </details>
 
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
     <details class="assist" id="ai-ask" hidden
       data-context="使用者正在選這套系統要用的資料庫。選項是：跑在自己電腦上的 SQLite 檔案，或雲端的 Postgres（Neon、Supabase、付費方案、自架都可以）。他需要的是一串 postgresql:// 開頭的連線字串。">
       <summary>卡住了？問 AI（有金鑰就直接問，沒有也能問）</summary>
       <div class="detail-body" id="ai-ask-body"></div>
     </details>
-
   </div>
 </section>
 

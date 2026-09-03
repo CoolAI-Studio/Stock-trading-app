@@ -142,7 +142,15 @@ ol.steps .gotcha {
 details.assist { border-color: #115e59; }
 details.assist > summary { color: var(--good); }
 
-/* 「雲端還是本機」：兩張卡片就是兩顆按鈕，所以要拿掉按鈕的預設樣式並且對齊左邊。 */
-.path-choice .card { cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
+/* 兩選一：整張卡片就是一個選項。
+ *
+ * 用 <label> ＋ 藏起來的 radio，不用 <button>：卡片裡有 <h3> 和 <ul>，那些放進 button
+ * 是不合法的（button 只吃 phrasing content）。radio 是「二選一」本來的控制項，鍵盤和
+ * 讀螢幕的人也照樣用得到——只是看不見。 */
+.path-choice .card { cursor: pointer; display: block; }
 .path-choice .card:hover { border-color: var(--good); }
 .path-choice .card.chosen { border-color: var(--good); box-shadow: inset 0 0 0 1px var(--good); }
+/* 看不見，但還在：clip 而不是 display:none，不然它就不能被鍵盤選到了。 */
+.path-radio { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.path-choice .card:focus-within { border-color: var(--good); }

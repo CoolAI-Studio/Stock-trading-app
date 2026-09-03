@@ -328,22 +328,34 @@
     if (!buttons.length) return
 
     function show(path) {
-      var steps = document.querySelectorAll('[data-path]')
-      for (var i = 0; i < steps.length; i++) {
-        steps[i].hidden = steps[i].getAttribute('data-path') !== path
+      var blocks = document.querySelectorAll('[data-path]')
+      for (var i = 0; i < blocks.length; i++) {
+        blocks[i].hidden = blocks[i].getAttribute('data-path') !== path
       }
       for (var j = 0; j < buttons.length; j++) {
         var chosen = buttons[j].getAttribute('data-path-choice') === path
-        buttons[j].setAttribute('aria-pressed', chosen ? 'true' : 'false')
-        buttons[j].classList.toggle('chosen', chosen)
+        var card = buttons[j].closest ? buttons[j].closest('.card') : null
+        if (card) card.classList.toggle('chosen', chosen)
       }
     }
 
     for (var k = 0; k < buttons.length; k++) {
-      buttons[k].addEventListener('click', function (event) {
+      buttons[k].addEventListener('change', function (event) {
         show(event.currentTarget.getAttribute('data-path-choice'))
       })
     }
+
+    // 選之前看得到什麼，由那一頁自己說。
+    //
+    //   none  兩條路是互斥的說明（第一頁的「要不要用 AI」、第二頁的「資料放哪裡」）。
+    //         選了才看細節，正是「只顯示他要看的資訊」。
+    //   預設  兩條都攤開（第三頁）。那一頁的路是一個編號步驟清單，兩條都藏起來的話，
+    //         清單會從「打開你的網址」開始編號 1——一份缺了前兩步、而且看不出缺了的
+    //         步驟表，比多看幾行字糟得多。
+    //
+    // 兩種都只由 JS 做。原始檔裡不放 hidden：JS 掛掉的時候寧可全部攤開，也不要一片空白。
+    var group = buttons[0].closest ? buttons[0].closest('[data-path-default]') : null
+    if (group && group.getAttribute('data-path-default') === 'none') show(null)
   }
 
   document.addEventListener('DOMContentLoaded', function () {

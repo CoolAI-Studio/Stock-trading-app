@@ -32,28 +32,57 @@ const strip = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' 
 /** 收起來的時候看得到的字。展開的細節不算——那是他按了才出現的。 */
 const visible = (html: string) => strip(html.replace(/<details[\s\S]*?<\/details>/g, ' '))
 
-/** 把某一條路的步驟整段拿掉。
+/** 把整頁掛進 jsdom，並且真的跑 assist.js。
  *
- * `<li>` 會巢狀（步驟裡面還有步驟），所以要數開合，不能用非貪婪比對——那會停在第一個
- * 內層的 `</li>`，看起來有效、實際上什麼都沒拿掉。
+ * 問的是行為，不是文案裡有沒有那個字：這幾頁的「選了才看得到」是 JS 做的，而一條只
+ * 比對字串的測試會在 JS 根本沒接上的時候照樣綠。
+ */
+function mountPage(name: string): void {
+  const html = read(name)
+  const body = html.slice(html.indexOf('<body'), html.indexOf('</body>'))
+  document.body.innerHTML = body
+    .slice(body.indexOf('>') + 1)
+    .replace(/<script[\s\S]*?<\/script>/g, '')
+  new Function(read('assist.js'))()
+  document.dispatchEvent(new Event('DOMContentLoaded'))
+}
+
+const pathBlocks = (path: string) =>
+  Array.from(document.querySelectorAll<HTMLElement>(`[data-path="${path}"]`))
+const pathChoice = (path: string) =>
+  document.querySelector<HTMLElement>(`[data-path-choice="${path}"]`)
+/** 這一頁上有哪幾條路。 */
+const pathsIn = (html: string) => [
+  ...new Set([...html.matchAll(/data-path="([^"]+)"/g)].map((m) => m[1])),
+]
+
+/** 把某一條路的內容整段拿掉。
+ *
+ * 標籤會巢狀（步驟裡面還有步驟、區塊裡面還有區塊），所以要數開合，不能用非貪婪比對
+ * ——那會停在第一個內層的結束標籤，看起來有效、實際上什麼都沒拿掉。（我先寫了那一
+ * 版，量出來的字數一個都沒少才發現。）
  */
 function withoutPath(html: string, path: string): string {
   let out = html
   for (;;) {
-    const start = out.indexOf(`<li data-path="${path}"`)
-    if (start === -1) return out
+    const found = new RegExp(`<([a-z]+)[^>]*?data-path="${path}"`).exec(out)
+    if (!found) return out
+    const tag = found[1]
+    const start = found.index
+    const open = `<${tag}`
+    const close = `</${tag}>`
     let depth = 0
     let i = start
     for (;;) {
-      const open = out.indexOf('<li', i)
-      const close = out.indexOf('</li>', i)
-      if (close === -1) return out
-      if (open !== -1 && open < close) {
+      const nextOpen = out.indexOf(open, i)
+      const nextClose = out.indexOf(close, i)
+      if (nextClose === -1) return out
+      if (nextOpen !== -1 && nextOpen < nextClose) {
         depth += 1
-        i = open + 3
+        i = nextOpen + open.length
       } else {
         depth -= 1
-        i = close + 5
+        i = nextClose + close.length
         if (depth === 0) break
       }
     }
@@ -420,9 +449,14 @@ describe('引導：預設看起來短，展開之後做得完', () => {
     // 就收起來。所以那一頁量的是「選擇 ＋ 其中一條路」，兩條各量一次，兩次都要在
     // 預算內。這比原本的算法**嚴格**：原本只要總和過關，現在是每一條路各自過關。
     for (const name of PAGES) {
-      for (const other of ['local', 'cloud']) {
-        const size = visible(withoutPath(read(name), other)).replace(/\s/g, '').length
-        expect(size, `${name}（收起 ${other}）還有 ${size} 個字元，太長了`).toBeLessThan(520)
+      const page = read(name)
+      const paths = pathsIn(page)
+      const views = paths.length
+        ? paths.map((keep) => paths.filter((p) => p !== keep).reduce(withoutPath, page))
+        : [page]
+      for (const view of views) {
+        const size = visible(view).replace(/\s/g, '').length
+        expect(size, `${name} 收起來還有 ${size} 個字元，太長了`).toBeLessThan(520)
       }
     }
   })
@@ -515,19 +549,10 @@ describe('引導：#47 的驗收條件，逐項守住', () => {
  * 層：選擇還在，只是排在他做完決定之後。
  */
 describe('第三頁：雲端還是本機，一開始就選', () => {
-  /** 把整頁掛進 jsdom，並且真的跑 assist.js——問的是行為，不是文案裡有沒有那個字。 */
-  function mount(): void {
-    const html = read('install.html')
-    const body = html.slice(html.indexOf('<body'), html.indexOf('</body>'))
-    document.body.innerHTML = body.slice(body.indexOf('>') + 1).replace(/<script[\s\S]*?<\/script>/g, '')
-    new Function(read('assist.js'))()
-    document.dispatchEvent(new Event('DOMContentLoaded'))
-  }
+  const mount = () => mountPage('install.html')
 
-  const stepsFor = (path: string) =>
-    Array.from(document.querySelectorAll<HTMLElement>(`[data-path="${path}"]`))
-  const choice = (path: string) =>
-    document.querySelector<HTMLElement>(`[data-path-choice="${path}"]`)
+  const stepsFor = pathBlocks
+  const choice = pathChoice
 
   it('選擇排在步驟之前', () => {
     const page = read('install.html')
@@ -585,6 +610,23 @@ describe('第三頁：雲端還是本機，一開始就選', () => {
     expect(both.some((step) => step.hidden)).toBe(false)
   })
 
+  it('叫他下載，就要給得出下載的連結', () => {
+    // 使用者：「我沒有看到哪裡可以下載，應該多一個連結去下載。」原本寫的是「GitHub
+    // 頁面上綠色的 Code → Download ZIP」——那是一段路線指示，不是一個連結，而他要
+    // 先自己找到那個 GitHub 頁面。
+    //
+    // CLAUDE.md：**永遠不要叫他去別的地方拿一個值。** 拿得到的就直接給。
+    //
+    // 指向 stable 不是 main：那是 CI 綠燈、部署送達、線上健康之後才前進的那一個分支，
+    // 也就是我們自己的實例已經跑起來而且活著的那一版。
+    mountPage('install.html')
+
+    const link = document.querySelector<HTMLAnchorElement>('a[href$=".zip"]')
+    expect(link, '本機那條路沒有可以按的下載連結').not.toBeNull()
+    expect(link?.getAttribute('href')).toContain('/archive/refs/heads/stable.zip')
+    expect(link?.closest('[data-path="local"]'), '下載連結不在本機那條路上').not.toBeNull()
+  })
+
   it('本機那條路上該有的字還在，而且不用展開就看得到', () => {
     mount()
 
@@ -596,4 +638,98 @@ describe('第三頁：雲端還是本機，一開始就選', () => {
     // 誠實的代價：電腦睡著，盯盤就停了。這句話不可以在改版時掉。
     expect(text).toMatch(/關機|睡著/)
   })
+})
+
+/**
+ * 第一頁和第二頁也要「選了才看細節」。
+ *
+ * 使用者看完第三頁的兩選一之後說的：「像要不要用 AI 這邊是可以點選的，選不要才跳不
+ * 要的描述及選項出來，選要的話，跳出 AI 相關的資訊及選項出來，當然若中間後悔可以回
+ * 來重選。資料頁面也是一樣，只顯示他要看的資訊就好，這樣更容易懂。」
+ *
+ * 原本兩頁都是「兩張卡片並排說明差別，然後把兩條路的細節一路往下攤開」——決定做完
+ * 了，可是螢幕上還有另一條路的每一個字。第一頁尤其明顯：選了「不用 AI」的人，底下
+ * 還是四家供應商的申請步驟。
+ *
+ * 這一組跟第三頁那一組守的是同一件事，只是預設不同（見底下 DEFAULT_VISIBLE 那段
+ * 註解），所以合起來跑同一份契約。
+ */
+describe('三頁都是「選了才看細節」', () => {
+  /**
+   * 選之前看得到什麼。
+   *
+   * 第一、二頁是 none：那兩頁的兩條路是**互斥的說明**，選了才看細節正是使用者要的。
+   *
+   * 第三頁是 both，而且是刻意的：那一頁的路是一個編號步驟清單，把兩條都藏起來的話，
+   * 清單會從「打開你的網址」開始編號 1——一份缺了前兩步、而且看不出缺了的步驟表，
+   * 比多看幾行字糟得多。
+   */
+  const CASES = [
+    { page: 'index.html', paths: ['no-ai', 'ai'], defaultVisible: 'none' },
+    { page: 'database.html', paths: ['local', 'cloud'], defaultVisible: 'none' },
+    { page: 'install.html', paths: ['cloud', 'local'], defaultVisible: 'both' },
+  ] as const
+
+  for (const { page, paths, defaultVisible } of CASES) {
+    describe(page, () => {
+      const [first, second] = paths
+
+      it('兩條路都選得動，而且細節真的在頁面上', () => {
+        mountPage(page)
+
+        for (const path of paths) {
+          expect(pathChoice(path), `${path} 沒有可以選的東西`).not.toBeNull()
+          expect(pathBlocks(path).length, `${path} 沒有任何細節`).toBeGreaterThan(0)
+        }
+      })
+
+      it(`選之前是「${defaultVisible}」`, () => {
+        mountPage(page)
+
+        const total = paths.flatMap(pathBlocks).length
+        // 沒有這一行，還沒實作的時候 `[]` 的長度是 0，`expect(0).toBe(0)` 就過了。
+        expect(total, '這一頁根本沒有任何一條路').toBeGreaterThan(0)
+        const shown = paths.flatMap(pathBlocks).filter((el) => !el.hidden).length
+        if (defaultVisible === 'none') expect(shown).toBe(0)
+        else expect(shown).toBe(total)
+      })
+
+      it('選了一條，另一條就收起來', () => {
+        mountPage(page)
+        expect(pathBlocks(second).length).toBeGreaterThan(0)
+
+        pathChoice(first)?.click()
+
+        expect(pathBlocks(first).every((el) => el.hidden)).toBe(false)
+        expect(pathBlocks(second).every((el) => el.hidden)).toBe(true)
+      })
+
+      it('後悔了可以回來重選', () => {
+        // 選擇的那兩張卡片不可以跟著被收走——不然他改變主意就只能重新整理。
+        mountPage(page)
+
+        pathChoice(first)?.click()
+        pathChoice(second)?.click()
+
+        expect(pathBlocks(second).every((el) => el.hidden)).toBe(false)
+        expect(pathBlocks(first).every((el) => el.hidden)).toBe(true)
+      })
+
+      it('選了哪一個，畫面上看得出來', () => {
+        // 不然回頭的時候他不知道自己現在在哪一條路上。
+        mountPage(page)
+
+        pathChoice(first)?.click()
+
+        expect(pathChoice(first)?.closest('.card')?.classList.contains('chosen')).toBe(true)
+        expect(pathChoice(second)?.closest('.card')?.classList.contains('chosen')).toBe(false)
+      })
+
+      it('沒有 JS 的時候什麼都不會不見', () => {
+        // 失敗的方向要選對：JS 掛掉的時候寧可全部攤開，也不要一片空白。藏起來這件事
+        // 只能由 JS 做，原始檔裡不可以先藏。
+        expect(read(page)).not.toMatch(/data-path="[^"]+"[^>]*\shidden/)
+      })
+    })
+  }
 })

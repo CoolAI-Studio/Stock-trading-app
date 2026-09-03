@@ -30,8 +30,9 @@
   <div class="wrap">
     <h2>要不要用 AI？</h2>
 
-    <div class="cards">
-      <div class="card">
+    <div class="cards path-choice" data-path-default="none" role="radiogroup" aria-label="要不要用 AI">
+      <label class="card">
+        <input class="path-radio" type="radio" name="use-ai" data-path-choice="no-ai">
         <p class="who">不用</p>
         <h3>主要功能照常</h3>
         <ul>
@@ -39,8 +40,9 @@
           <li>用表單設提醒</li>
           <li>不用註冊，不用付錢</li>
         </ul>
-      </div>
-      <div class="card">
+      </label>
+      <label class="card">
+        <input class="path-radio" type="radio" name="use-ai" data-path-choice="ai">
         <p class="who">用 AI</p>
         <h3>多兩件事</h3>
         <ul>
@@ -48,16 +50,20 @@
           <li>出問題時可以問它</li>
           <li>費用你自己的，有免費模型</li>
         </ul>
-      </div>
+      </label>
     </div>
 
-    <div class="note">先跳過也行。之後在系統裡貼一把金鑰就恢復。</div>
+    <div class="note" data-path="no-ai">
+      <strong>那這一頁就做完了。</strong>之後改變主意，在系統裡貼一把金鑰就恢復。
+      <a href="database.html">下一步：資料放哪裡 →</a>
+    </div>
+    <div class="note" data-path="ai">先跳過也行。之後在系統裡貼一把金鑰就恢復。</div>
   </div>
 </section>
 
-<section>
+<section data-path="ai">
   <div class="wrap">
-    <h2>要用的話：拿一把金鑰，先存著</h2>
+    <h2>拿一把金鑰，先存著</h2>
     <p class="lede">五分鐘。金鑰在第 3 步填進去。</p>
 
     <details>
