@@ -59,6 +59,17 @@ function show(status: Partial<SystemStatus> = {}) {
 }
 
 beforeEach(() => vi.clearAllMocks())
+afterEach(() => vi.unstubAllGlobals())
+
+/** 假裝這一份是從某個網域被送出來的。
+ *
+ * jsdom 預設是 localhost，也就是「在自己電腦上跑」那條路——而那條路上，叫他去外部
+ * 監控服務填一個 localhost 網址是一個永遠不會成功的設定。兩條路要分開測。
+ */
+function atHost(hostname: string) {
+  const origin = `https://${hostname}`
+  vi.stubGlobal('location', { ...window.location, hostname, origin, href: `${origin}/` })
+}
 
 // --- the one line that has to be readable without decoding the rest ---------
 
@@ -459,17 +470,38 @@ describe('這個行程起來之前的那段空白', () => {
   })
 
   it('要說得出可以怎麼辦，不然他讀完只會擔心', async () => {
+    atHost('alerts.onrender.com')
     show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
 
     expect(await screen.findByText(/休眠|保持喚醒|閒置/)).toBeInTheDocument()
   })
 
-  it('要貼去監控服務的那個網址就印在頁面上，不是叫他去文件裡找', async () => {
-    // CLAUDE.md：「永遠不要叫他去別的地方拿一個值」。而這個值只有這份部署自己
-    // 知道——每個人的網域都不一樣，寫死一個上游的網址就是給錯的答案。
+  it('本機跑的那一份不可以叫他去設外部監控 —— 那個網址從外面打不到', async () => {
+    // jsdom 的預設網址就是 localhost，所以這一條測的正是「在自己電腦上跑」那條路。
+    // 叫他去 UptimeRobot 填 http://localhost:8000/healthz，對方永遠連不上，而他會
+    // 花時間去弄一個不可能成功的設定。
+    //
+    // 本機那條路的真相不一樣，也更誠實：電腦關機或睡著的時候本來就沒有在盯盤，那
+    // 不是設定問題，是這條路的性質。
     show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
 
-    expect(await screen.findByText(`${window.location.origin}/healthz`)).toBeInTheDocument()
+    expect(await screen.findByText(/沒有在盯盤/)).toBeInTheDocument()
+    expect(screen.queryByText(/監控服務|UptimeRobot/)).not.toBeInTheDocument()
+    expect(screen.queryByText(new RegExp('localhost.*/healthz'))).not.toBeInTheDocument()
+    // 但要說得出這條路為什麼會這樣，以及想要 24 小時盯盤該怎麼辦。
+    expect(screen.getByText(/關機|睡著|自己的電腦/)).toBeInTheDocument()
+    // 而且說得出想要 24 小時盯盤該往哪走，不是只說「就是這樣」。
+    expect(screen.getByText(/雲端/)).toBeInTheDocument()
+  })
+
+  it('雲端那一份要把該貼去監控服務的網址印出來，不是叫他去文件裡找', async () => {
+    // CLAUDE.md：「永遠不要叫他去別的地方拿一個值」。而這個值只有這份部署自己
+    // 知道——每個人的網域都不一樣，寫死一個上游的網址就是給錯的答案。
+    atHost('alerts.onrender.com')
+    show({ worker: { ...HEALTHY.worker, slept_sec: 8 * 3600 } })
+
+    expect(await screen.findByText('https://alerts.onrender.com/healthz')).toBeInTheDocument()
+    expect(screen.getByText(/監控/)).toBeInTheDocument()
   })
 
   it('沒有那段空白的時候一個字都不要提', async () => {

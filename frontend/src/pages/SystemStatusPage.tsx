@@ -54,6 +54,21 @@ function age(seconds: number | null): string {
  *
  * 分開寫是因為單位要進位得更兇：一段空白的重點是「久到什麼程度」，而「28800.0 秒」
  * 和「8.0 小時前」都不會讓人立刻意識到那是**一整個交易日**。 */
+/** 這個網址是不是只有他自己那台機器（或那個區網）連得到。
+ *
+ * 判準要寬一點：他可能用 `localhost`、`127.0.0.1`、路由器給的 `192.168.x.x`，或
+ * mDNS 的 `something.local`。判錯成「雲端」的代價是給他一個永遠不會成功的設定，判錯
+ * 成「本機」的代價只是少一句建議——所以往寬的方向錯。
+ */
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host === '::1' || host.endsWith('.local')) return true
+  if (host === '127.0.0.1' || host.startsWith('127.')) return true
+  if (host.startsWith('192.168.') || host.startsWith('10.')) return true
+  const between16and31 = /^172\.(1[6-9]|2\d|3[01])\./
+  return between16and31.test(host)
+}
+
 function span(seconds: number): string {
   if (seconds < 5400) return `${Math.round(seconds / 60)} 分鐘`
   if (seconds < 172800) return `${Math.round(seconds / 3600)} 小時`
@@ -191,6 +206,15 @@ export function SystemStatusPage() {
   // 這個 app 自己的網址。**只有它知道**——每一份部署都是使用者自己的網域，而這正是
   // 他要貼進監控服務那一格裡的字串。寫死一個上游的網址等於給錯的答案。
   const keepAliveUrl = `${typeof window === 'undefined' ? '' : window.location.origin}/healthz`
+  // 在他自己的電腦上跑的那條路（README 上的第二條）。
+  //
+  // **兩條路的原因和辦法完全不同，而講錯的那一邊會浪費他的時間。** 叫本機那一份去
+  // 外部監控服務填 http://localhost:8000/healthz，對方永遠連不上——他會花時間去弄一
+  // 個不可能成功的設定，然後以為是自己弄錯了。
+  //
+  // 而本機那條路的真相更簡單也更誠實：電腦關機或睡著的時候本來就沒有在盯盤。那不是
+  // 設定問題，是這條路的性質，唯一的解法是換條路。
+  const runningOnHisOwnMachine = typeof window !== 'undefined' && isPrivateHost(window.location.hostname)
   const query = useQuery({
     queryKey: ['system-status'],
     queryFn: () => api.get<SystemStatus>('/api/system/status'),
@@ -336,15 +360,26 @@ export function SystemStatusPage() {
                 <strong>這個服務有 {span(worker.slept_sec)} 沒有在盯盤。</strong>
                 那段時間裡如果有策略該發提醒，它沒有發出來——現在已經恢復了，補不回來。
                 <br />
-                免費方案閒置一段時間就會休眠（沒有人打開它就等於閒置），這是最常見的
-                原因。
-                {/* **網址就印在這裡，不是叫他去文件裡找。** 這一條是 CLAUDE.md 的
-                    「永遠不要叫他去別的地方拿一個值」：他要貼進監控服務的那一格就
-                    是這個字串，而只有這個 app 知道自己的網址長什麼樣子。 */}
-                <br />
-                要避免的話，去任何一家免費的網站監控服務（例如 UptimeRobot），設一個每
-                5 分鐘檢查一次的監控，網址填：
+                {runningOnHisOwnMachine ? (
+                  <>
+                    這一份跑在你自己的電腦上，所以電腦關機、睡著，或者這個程式沒有開
+                    著的時候，它就不會盯盤——那不是設定弄錯了，是這條路本來的樣子。
+                    要它 24 小時都在，就得把它放到雲端（README 上的第一條路）。
+                  </>
+                ) : (
+                  <>
+                    免費方案閒置一段時間就會休眠（沒有人打開它就等於閒置），這是最常見
+                    的原因。
+                    {/* **網址就印在這裡，不是叫他去文件裡找。** 這一條是 CLAUDE.md 的
+                        「永遠不要叫他去別的地方拿一個值」：他要貼進監控服務的那一格就
+                        是這個字串，而只有這個 app 知道自己的網址長什麼樣子。 */}
+                    <br />
+                    要避免的話，去任何一家免費的網站監控服務（例如 UptimeRobot），設一
+                    個每 5 分鐘檢查一次的監控，網址填：
+                  </>
+                )}
                 </p>
+                {!runningOnHisOwnMachine && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <code className="break-all rounded bg-slate-900 px-2 py-1 text-xs text-slate-200">
                     {keepAliveUrl}
@@ -361,6 +396,7 @@ export function SystemStatusPage() {
                     {copied ? '已複製' : '複製'}
                   </button>
                 </div>
+                )}
               </div>
             )}
           </>
