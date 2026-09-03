@@ -129,25 +129,6 @@ def test_an_upstream_outage_does_not_restart_the_instance(client, watching):
     assert response.json()["checks"]["market_data"]["status"] == "fail"
 
 
-def test_a_wedged_loop_still_fails_the_probe(client, watching):
-    """這一格要留著：迴圈卡死正是重開機真的修得好的那一種。"""
-    beat, clock = watching
-    clock.now += settings.HEALTH_MAX_AGE_SEC + 1
-
-    assert client.get("/healthz").status_code == 503
-
-
-def test_a_database_that_went_away_still_fails_the_probe(client, monkeypatch):
-    """連線池壞掉也是重開機修得好的一種。"""
-
-    def boom(*args, **kwargs):
-        raise RuntimeError("connection refused")
-
-    monkeypatch.setattr("app.api.routers.health._check_database", lambda db: {"status": "fail"})
-
-    assert client.get("/healthz").status_code == 503
-
-
 def test_the_two_answers_carry_the_same_body(client, watching):
     """差的只有狀態碼。兩個讀者要做的事不一樣，看到的事實要一樣。"""
     beat, clock = watching
@@ -261,3 +242,60 @@ def test_the_watchdog_actually_uses_it():
 
     assert len(after_def) == 2, "watchdog.py 沒有 main()"
     assert "deep_url(" in after_def[1], "main() 沒有把網址換成深的那一條"
+
+
+# --- 「重開有機會修好」比第一版想的還要窄 ------------------------------------
+
+
+def test_a_database_that_is_gone_does_not_restart_the_instance(client, monkeypatch):
+    """第一版把資料庫算成「重開有機會修好」，那是錯的。
+
+    ＊ 為什麼一開始會那樣想。
+
+    連線池壞掉重開確實會重建。但那種故障是**幾秒**的事，根本撐不到六十秒的門檻——真
+    的會撐過門檻的，是連線字串打錯、Neon 專案被刪掉、或**免費方案的每月運算時數用完
+    了**。
+
+    最後那一個是這條路上會**每個月固定發生一次**的：Neon 免費方案給 100 CU-hours，
+    以 0.25 CU 算是 400 小時，而這個 app 每五分鐘就碰一次資料庫（關市時也是），所以
+    運算單元幾乎不會休眠——一個月 730 小時，大約第十七天就用完，然後「compute is
+    suspended until the next billing period」。
+
+    也就是說：每個月後半，他的資料庫是關的。而如果那也算「重開有機會修好」，那半個
+    月裡他的服務會每分鐘被重開一次——重開一萬次，Neon 的帳單週期還是不會提前到。
+    """
+    monkeypatch.setattr("app.api.routers.health._check_database", lambda db: {"status": "fail"})
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["checks"]["database"]["status"] == "fail"
+    assert client.get("/healthz", params={"deep": "1"}).status_code == 503
+
+
+def test_a_poll_that_never_succeeds_does_not_restart_the_instance(client, watching):
+    """輪詢做不完的原因幾乎都在外面：上游、資料庫、網路。
+
+    迴圈自己還在轉（那一格是分開的），所以重開這個行程換不到任何東西。
+    """
+    beat, clock = watching
+    clock.now += settings.HEALTH_MAX_AGE_SEC + 1
+    # 迴圈照轉，只有輪詢做不完。
+    beat.mark_loop()
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["checks"]["market_data"]["status"] == "fail"
+
+
+def test_the_only_thing_left_is_a_loop_that_stopped_turning(client, watching):
+    """而這一格要留著，因為它正是重開機唯一真的修得好的那一種：
+
+    行程還活著、還在回應 HTTP，但那條 while 迴圈不再往前——`tick_once` 卡在一個永遠
+    不會回答的 socket 上。除了重開沒有別的辦法。
+    """
+    beat, clock = watching
+    clock.now += settings.HEALTH_MAX_AGE_SEC + 1
+
+    assert client.get("/healthz").status_code == 503

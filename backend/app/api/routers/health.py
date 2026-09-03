@@ -80,8 +80,8 @@ def healthz(
 
     所以狀態碼分兩種，內容完全一樣：
 
-        沒有參數      503 只留給「重開這個行程有機會修好」的（資料庫連不上、迴圈卡
-                      死、輪詢沒完成）。
+        沒有參數      503 只留給「重開這個行程有機會修好」的，而那只剩一格：盯盤
+                      迴圈不再往前。
         ?deep=1       任何一格 fail 就 503。
 
     **預設是淺的，這一點是刻意的。** 已經在跑的那些服務，後台的 healthCheckPath 是
@@ -103,8 +103,9 @@ def healthz(
     touches a market-data provider.
     """
     checks: dict[str, dict[str, Any]] = {"database": _check_database(db)}
-    # 重開這個行程有沒有機會修好。只有這個決定沒帶參數的那一條要不要 503。
-    restart_might_help = checks["database"]["status"] == _FAIL
+    # 重開這個行程有沒有機會修好。只有這個決定沒帶參數的那一條要不要 503，而**它比
+    # 直覺窄得多**——窄到只剩一格，理由見底下 mark_loop 那一段。
+    restart_might_help = False
 
     if settings.WORKER_ENABLED:
         beat = worker_health.heartbeat.snapshot()
@@ -114,13 +115,24 @@ def healthz(
         checks["market_data"] = _check_age(
             "last_poll_age_sec", beat.last_poll_age_sec, beat.uptime_sec
         )
-        # **在下面那個覆寫之前記下來。** 這兩格失敗的意思是「這個行程的迴圈沒有在
-        # 轉」，那正是重開機修得好的一種；而底下的連續空輪詢會用同一個鍵覆寫掉它，
-        # 意思卻完全不同（上游掛了，重開我們這台不會讓 Yahoo 回來）。
-        restart_might_help = restart_might_help or _FAIL in (
-            checks["worker"]["status"],
-            checks["market_data"]["status"],
-        )
+        # **只有這一格。**
+        #
+        # `worker` 失敗的意思是那條 while 迴圈不再往前——行程還活著、還在回應 HTTP，
+        # 但 `tick_once` 卡在一個永遠不會回答的 socket 上。除了重開沒有別的辦法，所
+        # 以這正是「liveness」這個詞真正指的東西。
+        #
+        # 其他每一格都不是，而且第一版把兩格算錯了，值得寫下來：
+        #
+        # `database`：連線池壞掉重開確實會重建，但那種故障是幾秒的事，撐不到 60 秒的
+        # 門檻。真的撐得過門檻的是連線字串打錯、專案被刪掉、或**免費方案的每月運算時
+        # 數用完**——最後那個在這條路上每個月固定發生一次（Neon 免費方案 100 CU-hours
+        # ，以 0.25 CU 算是 400 小時，而這個 app 每五分鐘就碰一次資料庫，所以運算單
+        # 元幾乎不休眠，一個月 730 小時，大約第十七天用完）。重開一萬次，帳單週期也
+        # 不會提前。
+        #
+        # `market_data`：輪詢做不完的原因幾乎都在外面（上游、資料庫、網路），而迴圈
+        # 自己還在轉——那是分開的一格。
+        restart_might_help = restart_might_help or checks["worker"]["status"] == _FAIL
         # Age alone said healthy through a total outage: the providers catch
         # every exception and return {}, so the loop went on completing polls
         # on schedule while not a single price came back. A run of empty

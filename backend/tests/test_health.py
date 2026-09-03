@@ -81,7 +81,11 @@ def test_healthz_503s_when_the_database_is_unreachable(client, worker_clock, mon
     worker_health.heartbeat.mark_poll_success()
     monkeypatch.setitem(app.dependency_overrides, get_db, _UnreachableSession)
 
-    response = client.get("/healthz")
+    # **深的那一條。** 沒帶參數的 `/healthz` 是平台的健康檢查在看的，而它失敗 60 秒
+    # 就會把行程重開——資料庫不見了重開一萬次也回不來（免費方案運算時數用完的話，那
+    # 是半個月的事），所以那一格不算「重開有機會修好」。看門狗問的是另一件事。
+    # 見 test_the_probe_render_watches_cannot_restart_him_forever。
+    response = client.get("/healthz", params={"deep": "1"})
 
     assert response.status_code == 503
     body = response.json()
@@ -113,7 +117,11 @@ def test_healthz_503s_when_the_last_successful_poll_is_stale(client, worker_cloc
     # The loop itself is still turning -- every tick is just raising.
     worker_health.heartbeat.mark_loop()
 
-    response = client.get("/healthz")
+    # **深的那一條。** 沒帶參數的 `/healthz` 是平台的健康檢查在看的，而它失敗 60 秒
+    # 就會把行程重開——資料庫不見了重開一萬次也回不來（免費方案運算時數用完的話，那
+    # 是半個月的事），所以那一格不算「重開有機會修好」。看門狗問的是另一件事。
+    # 見 test_the_probe_render_watches_cannot_restart_him_forever。
+    response = client.get("/healthz", params={"deep": "1"})
 
     assert response.status_code == 503
     body = response.json()
