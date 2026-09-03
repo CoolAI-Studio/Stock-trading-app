@@ -310,7 +310,44 @@
     })
   }
 
+  /**
+   * 「雲端還是本機」：選了一個，另一條路的步驟就收起來。
+   *
+   * 使用者走過一遍之後說的：「那選擇本機，你這個就應該隱藏起來才是。」原本兩條路
+   * 混在同一份清單上，而本機那條還被收在最後面的折疊區塊裡。
+   *
+   * **沒有選之前兩條都看得到**，而且原始檔裡不放 hidden——JS 沒跑起來的時候，寧可兩
+   * 條路都攤開，也不要一步都不見。
+   *
+   * 刻意不記住他選過什麼。這個檔案有一條整檔的規則：金鑰只留在 sessionStorage，關掉
+   * 分頁就沒了，**任何會留在硬碟上的儲存都不准出現在這裡**（有一條測試整檔搜字串）。
+   * 「重新整理不用再選一次」這種方便，不值得在那條規則上開一個例外。
+   */
+  function mountPathChoice() {
+    var buttons = document.querySelectorAll('[data-path-choice]')
+    if (!buttons.length) return
+
+    function show(path) {
+      var steps = document.querySelectorAll('[data-path]')
+      for (var i = 0; i < steps.length; i++) {
+        steps[i].hidden = steps[i].getAttribute('data-path') !== path
+      }
+      for (var j = 0; j < buttons.length; j++) {
+        var chosen = buttons[j].getAttribute('data-path-choice') === path
+        buttons[j].setAttribute('aria-pressed', chosen ? 'true' : 'false')
+        buttons[j].classList.toggle('chosen', chosen)
+      }
+    }
+
+    for (var k = 0; k < buttons.length; k++) {
+      buttons[k].addEventListener('click', function (event) {
+        show(event.currentTarget.getAttribute('data-path-choice'))
+      })
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
+    mountPathChoice()
     var body = document.getElementById('ai-key-body')
     if (body) mountKeyForm(body)
 

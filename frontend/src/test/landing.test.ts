@@ -32,6 +32,35 @@ const strip = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' 
 /** 收起來的時候看得到的字。展開的細節不算——那是他按了才出現的。 */
 const visible = (html: string) => strip(html.replace(/<details[\s\S]*?<\/details>/g, ' '))
 
+/** 把某一條路的步驟整段拿掉。
+ *
+ * `<li>` 會巢狀（步驟裡面還有步驟），所以要數開合，不能用非貪婪比對——那會停在第一個
+ * 內層的 `</li>`，看起來有效、實際上什麼都沒拿掉。
+ */
+function withoutPath(html: string, path: string): string {
+  let out = html
+  for (;;) {
+    const start = out.indexOf(`<li data-path="${path}"`)
+    if (start === -1) return out
+    let depth = 0
+    let i = start
+    for (;;) {
+      const open = out.indexOf('<li', i)
+      const close = out.indexOf('</li>', i)
+      if (close === -1) return out
+      if (open !== -1 && open < close) {
+        depth += 1
+        i = open + 3
+      } else {
+        depth -= 1
+        i = close + 5
+        if (depth === 0) break
+      }
+    }
+    out = `${out.slice(0, start)} ${out.slice(i)}`
+  }
+}
+
 const PAGES = ['index.html', 'database.html', 'install.html'] as const
 
 describe('引導：預設看起來短，展開之後做得完', () => {
@@ -386,9 +415,15 @@ describe('引導：預設看起來短，展開之後做得完', () => {
   it('收起來的時候要短 —— 使用者說第一版讓人視覺疲勞', () => {
     // 只算預設看得到的字。展開的細節不算：那是他自己按開的，而且那些字正是他做得
     // 完的原因。兩件事都要，所以分開量。
+    //
+    // 第三頁現在有兩條路（雲端／本機），而**他一次只看得到一條**——選了之後另一條
+    // 就收起來。所以那一頁量的是「選擇 ＋ 其中一條路」，兩條各量一次，兩次都要在
+    // 預算內。這比原本的算法**嚴格**：原本只要總和過關，現在是每一條路各自過關。
     for (const name of PAGES) {
-      const size = visible(read(name)).replace(/\s/g, '').length
-      expect(size, `${name} 收起來還有 ${size} 個字元，太長了`).toBeLessThan(520)
+      for (const other of ['local', 'cloud']) {
+        const size = visible(withoutPath(read(name), other)).replace(/\s/g, '').length
+        expect(size, `${name}（收起 ${other}）還有 ${size} 個字元，太長了`).toBeLessThan(520)
+      }
     }
   })
 
@@ -462,5 +497,103 @@ describe('引導：#47 的驗收條件，逐項守住', () => {
 
     expect(text, '沒說少掉的是哪些功能').toMatch(/產生策略|幫你寫|問它|問 AI/)
     expect(text, '沒說提醒本身照常 —— 而那才是他來的原因').toMatch(/照常|不受影響|一樣/)
+  })
+})
+
+/**
+ * 「雲端還是本機」要在第一步之前問，不是收在最後面。
+ *
+ * 使用者實際走了一遍之後說的：「使用本機端還是需要這個嗎？沒有不需要真的只在本機
+ * 跑的版本？」——有，而且完全不用雲端。可是頁面把五個雲端步驟從上到下排好，「我要
+ * 跑在自己的電腦上」是最後一個折疊區塊。
+ *
+ * 決定發生在第 1 步，選項卻在最底下：想跑本機的人要嘛找不到，要嘛照著 Render 那幾
+ * 步做完才發現自己不需要。他接著說的就是這一條測試要守的東西——「那選擇本機，你這
+ * 個就應該隱藏起來才是」。
+ *
+ * 這跟 #46（「部署你自己的一份」直接跳 Render，把選擇拿走了）是同一類問題，往下一
+ * 層：選擇還在，只是排在他做完決定之後。
+ */
+describe('第三頁：雲端還是本機，一開始就選', () => {
+  /** 把整頁掛進 jsdom，並且真的跑 assist.js——問的是行為，不是文案裡有沒有那個字。 */
+  function mount(): void {
+    const html = read('install.html')
+    const body = html.slice(html.indexOf('<body'), html.indexOf('</body>'))
+    document.body.innerHTML = body.slice(body.indexOf('>') + 1).replace(/<script[\s\S]*?<\/script>/g, '')
+    new Function(read('assist.js'))()
+    document.dispatchEvent(new Event('DOMContentLoaded'))
+  }
+
+  const stepsFor = (path: string) =>
+    Array.from(document.querySelectorAll<HTMLElement>(`[data-path="${path}"]`))
+  const choice = (path: string) =>
+    document.querySelector<HTMLElement>(`[data-path-choice="${path}"]`)
+
+  it('選擇排在步驟之前', () => {
+    const page = read('install.html')
+
+    expect(page.indexOf('data-path-choice')).toBeGreaterThan(-1)
+    expect(page.indexOf('data-path-choice')).toBeLessThan(page.indexOf('<ol class="steps"'))
+  })
+
+  it('兩條路都是真的步驟，不是折疊起來的附註', () => {
+    // 收在 <details> 裡的東西，等於他要先知道有這個選項才會去按開。
+    mount()
+
+    expect(stepsFor('cloud').length).toBeGreaterThan(0)
+    expect(stepsFor('local').length).toBeGreaterThan(0)
+    for (const step of [...stepsFor('cloud'), ...stepsFor('local')]) {
+      expect(step.closest('details')).toBeNull()
+    }
+  })
+
+  it('選了本機，雲端那幾步就不見', () => {
+    mount()
+
+    // 先確認東西真的在。少了這兩行，選擇鈕不存在時 `?.click()` 什麼都不做、
+    // `[].every(...)` 又是 true，整條測試會在「還沒實作」的狀態下就通過。
+    expect(choice('local')).not.toBeNull()
+    expect(stepsFor('cloud').length).toBeGreaterThan(0)
+
+    choice('local')?.click()
+
+    expect(stepsFor('cloud').every((step) => step.hidden)).toBe(true)
+    expect(stepsFor('local').some((step) => step.hidden)).toBe(false)
+  })
+
+  it('選了雲端，本機那幾步就不見', () => {
+    mount()
+
+    expect(choice('cloud')).not.toBeNull()
+    expect(stepsFor('local').length).toBeGreaterThan(0)
+
+    choice('cloud')?.click()
+
+    expect(stepsFor('local').every((step) => step.hidden)).toBe(true)
+    expect(stepsFor('cloud').some((step) => step.hidden)).toBe(false)
+  })
+
+  it('還沒選之前兩條都看得到，JS 沒跑起來也是', () => {
+    // 失敗的方向要選對：JS 掛掉的時候寧可兩條路都攤開，也不要一步都看不到。原始檔
+    // 裡不可以先把任何一條藏起來——藏起來的話，沒有 JS 的瀏覽器上那條路就消失了。
+    const page = read('install.html')
+    expect(page).not.toMatch(/data-path="(cloud|local)"[^>]*\shidden/)
+
+    mount()
+    const both = [...stepsFor('cloud'), ...stepsFor('local')]
+    expect(both.length).toBeGreaterThan(1)
+    expect(both.some((step) => step.hidden)).toBe(false)
+  })
+
+  it('本機那條路上該有的字還在，而且不用展開就看得到', () => {
+    mount()
+
+    const text = stepsFor('local')
+      .map((step) => step.textContent ?? '')
+      .join(' ')
+    expect(text).toMatch(/docker compose up/)
+    expect(text).toMatch(/localhost:8000/)
+    // 誠實的代價：電腦睡著，盯盤就停了。這句話不可以在改版時掉。
+    expect(text).toMatch(/關機|睡著/)
   })
 })

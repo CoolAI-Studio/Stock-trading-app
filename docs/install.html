@@ -31,12 +31,33 @@
 
 <section>
   <div class="wrap">
+    <!--
+      「雲端還是本機」要在第一步之前問。
+
+      原本五個雲端步驟從上到下排好，而「我要跑在自己的電腦上」是頁面最後一個折疊
+      區塊——決定發生在第 1 步，選項卻在最底下。想跑本機的人要嘛找不到，要嘛照著
+      Render 那幾步做完才發現自己不需要。
+
+      沒有 JS 的時候兩條都攤開（原始檔裡不放 hidden）：失敗的方向要選對，寧可兩條
+      路都看得到，也不要一步都沒有。
+    -->
+    <div class="cards path-choice">
+      <button type="button" class="card" data-path-choice="cloud">
+        <p class="who">一直開著</p>
+        <h3>放在雲端</h3>
+        <p>要一個免費資料庫，十五分鐘。</p>
+      </button>
+      <button type="button" class="card" data-path-choice="local">
+        <p class="who">關機就停</p>
+        <h3>跑在自己的電腦上</h3>
+        <p>不用雲端，什麼都不用填。</p>
+      </button>
+    </div>
+
     <ol class="steps">
-      <li>
+      <li data-path="cloud">
         <h3>建立服務</h3>
-        <p>
-          按這顆按鈕，用 GitHub 帳號登入 Render，它會照著設定檔幫你建好。
-        </p>
+        <p>用 GitHub 登入 Render，它會照著設定檔建好。</p>
         <p class="step-action">
           <a class="btn" href="https://render.com/deploy?repo=https://github.com/CoolAI-Studio/Stock-trading-app" target="_blank" rel="noreferrer noopener">在 Render 建立後端</a>
         </p>
@@ -107,7 +128,7 @@
         </details>
       </li>
 
-      <li>
+      <li data-path="cloud">
         <h3>抄下你的網址</h3>
         <p>
           建好之後 Render 會給你一個
@@ -116,6 +137,30 @@
         <p class="gotcha">
           第一次啟動要等三到五分鐘。中間看到錯誤畫面是正常的。
         </p>
+      </li>
+
+      <li data-path="local">
+        <h3>在你的電腦上跑起來</h3>
+        <ol>
+          <li>裝 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer noopener">Docker Desktop</a>。</li>
+          <li>下載這個專案（GitHub 頁面上綠色的 <strong>Code</strong> → <strong>Download ZIP</strong>），解壓縮。</li>
+          <li>在那個資料夾裡開終端機，輸入 <code>docker compose up</code>。</li>
+          <li>你的網址就是 <code>http://localhost:8000</code>。</li>
+        </ol>
+        <p class="gotcha"><strong>電腦關機或睡著，盯盤就停了。</strong></p>
+        <details>
+          <summary>要填什麼嗎？</summary>
+          <div class="detail-body">
+            <p>
+              <strong>什麼都不用填。</strong>資料庫是你電腦上的一個檔案，
+              加密金鑰、登入密鑰、webhook 密鑰在第一次啟動時自己產生、之後每次讀同一份。
+            </p>
+            <p class="gotcha">
+              只有<strong>手機推播</strong>用不到（那需要一對公開網址上的金鑰）。
+              Email 和 Telegram 在本機一樣會通。
+            </p>
+          </div>
+        </details>
       </li>
 
       <li>
@@ -183,20 +228,6 @@
       </li>
     </ol>
 
-    <details>
-      <summary>我要跑在自己的電腦上，不用雲端</summary>
-      <div class="detail-body">
-        <ol>
-          <li>裝 <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer noopener">Docker Desktop</a>。</li>
-          <li>下載這個專案（GitHub 頁面上綠色的 <strong>Code</strong> → <strong>Download ZIP</strong>），解壓縮。</li>
-          <li>在那個資料夾裡開終端機，輸入 <code>docker compose up</code>。</li>
-          <li>瀏覽器開 <code>http://localhost:8000</code>，從上面第 4 步繼續。</li>
-        </ol>
-        <p class="gotcha">
-          資料會存在你電腦上的一個檔案裡。<strong>電腦關機或睡著，盯盤就停了。</strong>
-        </p>
-      </div>
-    </details>
   </div>
 </section>
 
