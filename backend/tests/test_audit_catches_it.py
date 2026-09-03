@@ -22,6 +22,12 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from starlette.routing import WebSocketRoute
+
+
+async def _nothing(websocket) -> None:  # pragma: no cover -- 只是給路由一個端點
+    return None
+
 
 AUDIT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "audit.py"
 
@@ -49,8 +55,11 @@ def auditor():
 
 
 class _FakeApp:
-    def __init__(self, paths: dict) -> None:
+    def __init__(self, paths: dict, websockets: list[str] | None = None) -> None:
         self._paths = paths
+        # 真的 starlette WebSocketRoute，不是替身：稽查員要靠 isinstance 認它們，而
+        # 「認不認得出來」正是這一組要守的東西。
+        self.routes = [WebSocketRoute(path, endpoint=_nothing) for path in (websockets or [])]
 
     def openapi(self) -> dict:
         return {"paths": self._paths}
@@ -112,6 +121,51 @@ def test_a_permission_for_something_that_no_longer_exists_is_pointed_out(auditor
     auditor.census(_FakeApp({"/healthz": {"get": {}}}))
 
     assert any("已經不存在" in note for note in auditor.notes)
+
+
+def test_a_new_websocket_is_a_finding(auditor):
+    """WebSocket 端點**不在 OpenAPI 裡**，所以清冊完全看不到它們。
+
+    這個 app 的 `/ws` 就是一個：它會把部位、掛單和報價推給連線的人。它今天有閘門
+    （一次性 ticket），但那是人記得寫的，不是稽查員檢查出來的——CLAUDE.md 說「新增一
+    個沒有帳號閘門的端點會直接紅燈」，而對 WebSocket 那句話原本是假的。
+    """
+    app = _FakeApp({}, websockets=["/ws/brand-new"])
+
+    auditor.census(app)
+
+    assert any("brand-new" in f.what for f in auditor.findings)
+
+
+def test_a_websocket_that_is_known_to_have_a_gate_is_not(auditor):
+    """否則紅燈的解法就變成把檢查刪掉。"""
+    app = _FakeApp({"/healthz": {"get": {}}}, websockets=["/ws"])
+
+    auditor.census(app)
+
+    assert auditor.findings == []
+
+
+def test_a_gate_recorded_for_a_websocket_that_no_longer_exists_is_pointed_out(auditor):
+    """過期的許可會被下一個讀的人算成覆蓋率。"""
+    auditor.census(_FakeApp({"/healthz": {"get": {}}}, websockets=[]))
+
+    assert any("/ws" in note and "已經不存在" in note for note in auditor.notes)
+
+
+def test_the_census_really_finds_the_websocket_on_the_real_app(auditor):
+    """走真正的那個 app，不是替身。
+
+    FastAPI 0.141 把 include_router 進來的東西包在 `_IncludedRouter` 裡，所以
+    `app.routes` 第一層看到的不是路由本身——要遞迴走進去才找得到 `/ws`。那是一個內部
+    型別：哪天它換了，走訪就會安靜地一個都找不到，而清冊會回到「沒有 WebSocket」這個
+    看起來很乾淨的答案。
+
+    這條就是為了讓那件事變紅。替身測試永遠不會發現它，因為替身的 routes 是平的。
+    """
+    from app.main import app as real_app
+
+    assert audit_module.websocket_paths(real_app) == ["/ws"]
 
 
 # --- 二、三：誘餌 --------------------------------------------------------------------

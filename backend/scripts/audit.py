@@ -14,6 +14,8 @@ in another:
 
   一、清冊       每一個操作都要有帳號閘門。沒有的必須出現在下面 PUBLIC_ON_PURPOSE
                  名單上並附理由。新增一個公開端點就會紅燈，除非你說出為什麼。
+                 WebSocket 另外算（WEBSOCKETS_WITH_A_GATE）：它們不在 OpenAPI 裡，
+                 所以 openapi() 那一份清冊永遠看不到一條把別人的部位推出去的連線。
   二、誘餌（匿名）把每一個操作在沒有登入的情況下打一次，回應裡不准出現任何誘餌。
   三、誘餌（別人）用第二個帳號打遍所有操作，包含把擁有者的資源 id 代進網址。
   四、覆蓋       每一張帶 user_id 的表都要真的被植入過誘餌，否則前兩項掃得再乾淨
@@ -84,6 +86,55 @@ PUBLIC_ON_PURPOSE: dict[str, str] = {
         "而且它一律回 204，不會變成猜 token 的神諭。"
     ),
 }
+
+# WebSocket **不在 OpenAPI 裡**，所以上面那份清冊一個都看不到。
+#
+# 這不是理論：`/ws` 會把使用者的部位、掛單和最新報價推過去。它今天有閘門（一次性
+# ticket，見 app/ws/tickets.py），但那是人記得寫的，不是稽查員檢查出來的——而
+# CLAUDE.md 說「新增一個沒有帳號閘門的端點會直接紅燈」，對 WebSocket 那句話原本是假的。
+#
+# 閘門長得跟 HTTP 那邊不一樣（沒有 Depends(get_current_user)，是連線之後自己 redeem），
+# 所以這裡記的是「這條路的閘門是什麼」，不是自動判斷。多一條沒登記的就紅燈。
+WEBSOCKETS_WITH_A_GATE: dict[str, str] = {
+    "/ws": (
+        "查詢字串帶一次性 ticket，由 redeem_ticket 兌換成 user_id；兌不出來就用 4401 "
+        "關掉連線。ticket 由登入後的 HTTP 端點發，所以瀏覽器不必把 JWT 放進網址。"
+    ),
+}
+
+
+def websocket_paths(app: Any) -> list[str]:
+    """這個 app 上所有的 WebSocket 路徑。
+
+    要遞迴走：FastAPI 0.141 把 `include_router` 進來的東西包在 `_IncludedRouter` 裡，
+    所以 `app.routes` 第一層看到的不是路由本身。那是一個內部型別，換掉的話這裡就會安靜
+    地一個都找不到——而「一個都找不到」看起來跟「這個 app 沒有 WebSocket」一模一樣。
+    tests/test_audit_catches_it.py 有一條專門對著真的 app 問這件事。
+    """
+    from starlette.routing import WebSocketRoute
+
+    found: list[str] = []
+    seen: set[int] = set()
+
+    def walk(routes: Any) -> None:
+        for route in routes or []:
+            if id(route) in seen:
+                continue
+            seen.add(id(route))
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                walk(getattr(inner, "routes", []))
+                continue
+            if isinstance(route, WebSocketRoute):
+                found.append(route.path)
+                continue
+            sub = getattr(route, "routes", None)
+            if sub:
+                walk(sub)
+
+    walk(getattr(app, "routes", []))
+    return sorted(set(found))
+
 
 # The sandbox is the other way out: strategy code runs on the server, so an
 # escape reads the deployment's secrets directly instead of one account's rows.
@@ -244,6 +295,24 @@ class Audit:
         for entry in PUBLIC_ON_PURPOSE:
             if entry not in live:
                 self.note(f"名單上的 {entry} 已經不存在，可以刪掉（不是漏洞，是過期的許可）")
+
+        # WebSocket 走另一條路，因為 OpenAPI 裡沒有它們。上面那個迴圈再嚴格，也永遠
+        # 看不到一條把別人的部位推出去的連線。
+        sockets = websocket_paths(app)
+        self.counts["websockets"] = len(sockets)
+        for path in sockets:
+            if path in WEBSOCKETS_WITH_A_GATE:
+                continue
+            self.fail(
+                "一、清冊",
+                f"WS {path} 是一個沒有登記過閘門的 WebSocket",
+                "WebSocket 不會出現在 OpenAPI 裡，所以上面那份清冊看不到它。把它加進 "
+                "scripts/audit.py 的 WEBSOCKETS_WITH_A_GATE 並寫下它靠什麼認人；"
+                "如果它根本沒有認人，那它現在對全世界推送。",
+            )
+        for path in WEBSOCKETS_WITH_A_GATE:
+            if path not in sockets:
+                self.note(f"名單上的 WS {path} 已經不存在，可以刪掉（不是漏洞，是過期的許可）")
         return operations
 
     # -- 方法四：覆蓋（先做，因為二和三要靠它植入的資料）------------------
