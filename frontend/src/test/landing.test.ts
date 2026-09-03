@@ -831,6 +831,25 @@ describe('第三頁：雲端那條路會睡著，而睡著的時候提醒不會�
     expect(text).toMatch(/5 分鐘|五分鐘/)
   })
 
+  it('保活本身也有代價，而那個代價要跟辦法寫在一起', () => {
+    /**
+     * Render 的文件（2026-09 讀的）：免費方案一個月 750 instance hours，**整個帳號
+     * 共用**，用完「Render suspends all of your Free web services until the start
+     * of the next month」。而「spun-down services don't consume Free instance
+     * hours」——也就是說，**保活正是讓它開始計時的那個動作**。
+     *
+     * 一個服務整月不睡大約 744 小時（31 天），剛好在裡面，只剩六小時的餘裕。所以他
+     * 如果在同一個帳號下還有別的免費服務，就會超過——然後**全部**被停到下個月。
+     *
+     * 只給辦法不給代價，等於推他去踩另一個坑。
+     */
+    const text = cloudOnly()
+
+    expect(text).toMatch(/750/)
+    // 「整個帳號共用」是這件事真正會咬人的地方，不是那個數字本身。
+    expect(text).toMatch(/同一個帳號|帳號.{0,6}共用|其他免費服務/)
+  })
+
   it('本機那條路不用聽這一段', () => {
     // 他自己的電腦不會因為沒人連就把程式關掉。講了只是多一個他做不到也不用做的
     // 步驟，而這一頁的預算是有限的。
@@ -843,5 +862,25 @@ describe('第三頁：雲端那條路會睡著，而睡著的時候提醒不會�
       .join(' ')
 
     expect(visibleText).not.toMatch(/healthz/)
+  })
+})
+
+describe('這三頁上不可以有沒被渲染的 markdown', () => {
+  /**
+   * 這個 repo 已經被同一件事咬過一次：全新使用者第一次打開的時候，登入頁的第一句話
+   * 印出來的是「你現在建立的是**第一個…**帳號」——星號原封不動地在畫面上
+   * （`firstrun.browser.test.ts` 的第 1 條）。
+   *
+   * 那次是 React 元件裡的字串，這裡是手寫的 HTML。在一份大量用 `<strong>` 的檔案裡
+   * 順手打成 `**…**` 太容易了，而它不會壞掉任何東西——只是每一個讀者都看到星號。
+   * 我自己就在加「750 小時」那一段的時候打成 markdown。
+   */
+  it('沒有一頁把星號當粗體用', () => {
+    for (const name of PAGES) {
+      const withoutComments = read(name).replace(/<!--[\s\S]*?-->/g, ' ')
+      const text = strip(withoutComments)
+
+      expect(text, `${name} 裡有沒被渲染的 markdown 粗體`).not.toMatch(/\*\*\S/)
+    }
   })
 })

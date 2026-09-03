@@ -143,6 +143,15 @@ Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控
 3. 存檔後就會開始每 5 分鐘自動 ping 一次，讓服務保持清醒。
 4. **記得在 monitor 的 Alert Contacts 加上你的 Email**，否則就算後端壞掉也不會通知你。
 
+> ⚠️ **保活本身也有代價。** Render 免費方案一個月給 **750 instance hours**，而且是
+> **整個 workspace 下所有免費服務共用**；休眠中的服務不計時（「spun-down services
+> don't consume Free instance hours」），所以保活正是讓它開始一直計時的那個動作。
+>
+> 一個服務整月不睡大約 744 小時（31 天的月份），剛好在 750 裡面——只剩六小時的餘裕。
+> 所以同一個帳號下**不要再開第二個免費服務**：超過之後
+> 「Render suspends all of your Free web services until the start of the next month」，
+> 是**全部**一起停。
+
 ### `?deep=1` 那個參數是幹嘛的
 
 **同一個網址，兩個讀者，他們拿狀態碼去做的事完全不同。**
