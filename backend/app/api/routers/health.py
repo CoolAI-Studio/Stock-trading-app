@@ -120,6 +120,19 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         checks["strategies"] = (
             {"status": _FAIL, "blocked_count": len(blind)} if blind else {"status": _OK}
         )
+
+        # 報價回得來、K 棒回不來——上游是不同的端點，所以這是一個真的組合，而上面每
+        # 一項都看不到它：迴圈在轉、輪詢有價、子行程好好的，而每一支 on_bar 策略一則
+        # 提醒都沒發出。
+        #
+        # 門檻沿用代號那一格的，因為問的是同一件事：這個代號多久沒有拿到資料了。
+        stuck = sorted(
+            series
+            for series, gap in beat.bar_gap_sec.items()
+            if gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC
+        )
+        # 數量，不是名字——這支端點沒有憑證也打得到。
+        checks["bars"] = {"status": _FAIL, "stale_count": len(stuck)} if stuck else {"status": _OK}
     else:
         # An intentionally idle worker (local runs, the test suite) is a
         # configuration choice, not something to wake the owner over.
@@ -129,6 +142,7 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
         # already says that; a second failure repeating it is noise.
         checks["symbols"] = {"status": _DISABLED}
         checks["strategies"] = {"status": _DISABLED}
+        checks["bars"] = {"status": _DISABLED}
 
     # A muted notifier is not a healthy one FOR THIS PRODUCT. WORKER_ENABLED
     # off is a configuration choice somebody makes to run the app locally;

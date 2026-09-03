@@ -670,6 +670,14 @@ def tick_once(
                         else "上游沒有這個代號的 K 棒"
                     )
 
+        # 抓不到 K 棒也要看得見。走 _record_feed_problem 是對的（抓不到資料不是使用
+        # 者的錯，不累積、不停用），但那條路原本不進任何計數器——於是「報價回得來、
+        # K 棒回不來」這個組合在 /healthz 上是全綠的，而每一支 on_bar 策略一則提醒都
+        # 沒發出。整組重寫，理由跟心跳那邊一樣：沒被列出來的就是這一輪沒事。
+        worker_health.heartbeat.mark_bar_gaps(
+            {f"{symbol} {timeframe.value}" for _, symbol, timeframe in bar_failures}
+        )
+
         for strategy in strategies:
             loaded = loaded_by_id.get(strategy.id)
             if loaded is None:

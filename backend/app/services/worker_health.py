@@ -45,6 +45,15 @@ class HeartbeatSnapshot:
     # 有預設值，所以舊的測試用關鍵字自己組這張快照仍然可以跑：空的就是「沒有東西
     # 卡住」，而那是誠實的讀法。
     strategy_blocked_sec: dict[int, float] = field(default_factory=dict)
+    # 哪幾段（代號＋週期）的 K 棒抓不到，抓不到多久了。
+    #
+    # **這張快照上沒有別的東西看得到這件事。** 報價和 K 棒走的是上游不同的端點，所以
+    # 「報價回得來、K 棒回不來」是一個真的組合：consecutive_empty_polls 是 0、
+    # symbol_gap_sec 是空的、strategy_blocked_sec 也是空的——而每一支 on_bar 策略一則
+    # 提醒都沒發出。
+    #
+    # 鍵是 "代號 週期"，因為同一個代號的日線好好的、週線抓不到是常見的形狀。
+    bar_gap_sec: dict[str, float] = field(default_factory=dict)
 
 
 class WorkerHeartbeat:
@@ -58,6 +67,8 @@ class WorkerHeartbeat:
         self._priceless_since: dict[str, float] = {}
         # 策略 id -> 它從什麼時候開始叫不動子行程（monotonic）。
         self._blocked_since: dict[int, float] = {}
+        # "代號 週期" -> 它從什麼時候開始抓不到 K 棒（monotonic）。
+        self._bar_gap_since: dict[str, float] = {}
 
     def mark_loop(self) -> None:
         """The loop reached the top of an iteration, so it is not wedged."""
@@ -119,6 +130,23 @@ class WorkerHeartbeat:
             if strategy_id not in blocked:
                 del self._blocked_since[strategy_id]
 
+    def mark_bar_gaps(self, failed: set[str]) -> None:
+        """這一輪有哪幾段（代號＋週期）的 K 棒抓不到。
+
+        跟 mark_blocked_strategies 一樣是**整組重寫**，理由也一樣：沒被列出來的就是這
+        一輪沒有這個問題（抓成功了，或者根本沒輪到它）。「沒有被問」不等於「壞掉」，
+        不然使用者把那支策略停掉之後那一格永遠不會消失，而一個按不掉的紅燈會被學會忽
+        略——然後真的停擺那一次的信長得一模一樣。
+        """
+        now = self._clock()
+        for series in failed:
+            # setdefault：持續中的故障留著它**開始**的時間。每一輪重新計時的話，五秒
+            # 一輪的迴圈永遠跨不過十五分鐘的門檻。
+            self._bar_gap_since.setdefault(series, now)
+        for series in list(self._bar_gap_since):
+            if series not in failed:
+                del self._bar_gap_since[series]
+
     def snapshot(self) -> HeartbeatSnapshot:
         # The marks are written from the event loop thread and read from the
         # threadpool thread serving /healthz. Single float attribute reads and
@@ -133,6 +161,7 @@ class WorkerHeartbeat:
             consecutive_empty_polls=self._consecutive_empty_polls,
             symbol_gap_sec={s: now - since for s, since in self._priceless_since.items()},
             strategy_blocked_sec={sid: now - since for sid, since in self._blocked_since.items()},
+            bar_gap_sec={s: now - since for s, since in self._bar_gap_since.items()},
         )
 
 

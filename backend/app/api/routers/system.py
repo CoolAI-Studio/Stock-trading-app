@@ -233,6 +233,11 @@ def system_status(
     own_gaps = {
         symbol: gap for symbol, gap in beat.symbol_gap_sec.items() if symbol in owned_symbols
     }
+    own_bar_gaps = {
+        series: gap
+        for series, gap in beat.bar_gap_sec.items()
+        if series.split(" ")[0] in owned_symbols
+    }
 
     market_data: dict[str, Any] = {
         "consecutive_empty_polls": beat.consecutive_empty_polls,
@@ -241,6 +246,15 @@ def system_status(
         # and it is fixed by correcting or deleting that one row.
         "stale_symbols": [
             {"symbol": symbol, "gap_sec": round(gap, 1)} for symbol, gap in sorted(own_gaps.items())
+        ],
+        # 同一個代號的日線好好的、週線抓不到，是常見的形狀，所以這一格跟上面那格分開。
+        # 一樣**只列你自己的**：心跳的表是跨全部帳號的聯集。
+        #
+        # 按代號濾（鍵的前半段），不按週期：週期活在編譯出來的策略上，不在資料列上，
+        # 而「這個代號是不是你的」已經足夠把別人的東西擋掉。
+        "stale_bars": [
+            {"series": series, "gap_sec": round(gap, 1)}
+            for series, gap in sorted(own_bar_gaps.items())
         ],
     }
     # 哪幾支策略叫不動它的子行程。**只列你自己的**，跟 stale_symbols 同一個理由：
@@ -262,6 +276,8 @@ def system_status(
     }
     if settings.WORKER_ENABLED:
         if any(sec > settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC for sec in own_blocked.values()):
+            overall = _worse(overall, _FAIL)
+        if any(gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC for gap in own_bar_gaps.values()):
             overall = _worse(overall, _FAIL)
         elif own_blocked:
             # 還沒跨過門檻是一次重生失敗，不是停擺——但那正是停擺開始的樣子。
@@ -409,6 +425,9 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"{row['name']}（已 {row['blocked_sec']:.0f} 秒叫不動子行程）"
         for row in status["strategies"]["blocked"]
     )
+    stuck_bars = "、".join(
+        f"{row['series']}（已 {row['gap_sec']:.0f} 秒抓不到 K 棒）" for row in market["stale_bars"]
+    )
     return (
         f"這個部署目前的狀態：\n"
         f"- 整體：{status['overall']}\n"
@@ -418,6 +437,7 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"- 連續抓不到任何價格的次數：{market['consecutive_empty_polls']}\n"
         f"- 抓不到報價的代號：{stale or '無'}\n"
         f"- 叫不動子行程的策略：{blind or '無'}\n"
+        f"- 抓不到 K 棒的：{stuck_bars or '無'}\n"
         f"- 通知功能啟用：{notifications['enabled']}\n"
         f"- 最近 {notifications['window_hours']} 小時的通知："
         f"已送出 {notifications['sent']}、還在重試 {notifications['retrying']}、"
