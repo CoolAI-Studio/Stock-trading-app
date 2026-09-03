@@ -125,6 +125,13 @@ class MarketDataService:
         # when the bucket was last refreshed as a whole and therefore says
         # nothing about the one symbol inside it that stopped coming back.
         self._answered_at: dict[tuple[DataSource, str], float] = {}
+        # (來源, 代號) -> 最後一次「問了但它沒出現在回答裡」是什麼時候（monotonic）。
+        #
+        # 上游解不出來的代號不會拋例外，它只是不出現在回答裡。所以它永遠留在「還沒拿
+        # 到」那一堆，而下面的補抓看到的就是「這個代號還缺著」——於是每一次 TTL 還沒過
+        # 的請求，都額外送出一次只為了它的抓取。量過：20 次請求換來 20 次上游呼叫，其
+        # 中 16 次是只為了那一個打錯的代號。
+        self._unanswered_at: dict[tuple[DataSource, str], float] = {}
         self._cache: dict[DataSource, tuple[float, dict[str, Quote]]] = {}
         # Keyed per symbol and per timeframe, unlike the quote cache's single
         # per-source bucket. That is what keeps one symbol's fetch schedule
@@ -168,7 +175,20 @@ class MarketDataService:
         now = self._clock()
         cached_at, cached_quotes = self._cache.get(data_source, (0.0, {}))
         stale = (now - cached_at) > self._ttl_sec.get(data_source, 5.0)
-        missing = [s for s in symbols if s not in cached_quotes]
+        # 補抓的是「這一輪還缺、而且最近沒有問過而落空」的那些。
+        #
+        # 少了後半句，一個上游解不出來的代號（打錯的字、台股少打 .TW——service 自己的
+        # 註解就列著這兩種）會在每一次 TTL 內的請求上各換來一次專程的抓取，而那條路的
+        # 盡頭是 429 或整個 IP 被擋。到那一刻**每一個代號**都抓不到，不只那個打錯的：
+        # 警告全面停擺，起因是一個錯字，而使用者不是工程師。
+        #
+        # 這不是放棄它：完整刷新那條路（TTL 過了就問全部）每次都會再問它一次，所以代
+        # 號恢復了——上市了、改名了、或者他把 .TW 補上去了——下一次刷新就拿得到。
+        missing = [
+            s
+            for s in symbols
+            if s not in cached_quotes and not self._recently_unanswered(data_source, s, now)
+        ]
 
         if stale or missing:
             provider = self._providers[data_source]
@@ -182,6 +202,13 @@ class MarketDataService:
                 quote.fetched_at = answered_at
             for symbol in fresh:
                 self._answered_at[(data_source, symbol)] = now
+            # 誰答了、誰沒答，兩邊都要記：沒答的那個要開始退避，答了的那個要立刻恢復
+            # （不然一次上游抖動會讓一個正常的代號被冷落一分鐘）。
+            for symbol in fetch_list:
+                if symbol in fresh:
+                    self._unanswered_at.pop((data_source, symbol), None)
+                else:
+                    self._unanswered_at[(data_source, symbol)] = now
             cached_quotes = {**cached_quotes, **fresh}
 
             # Withdraw what the provider has now gone too long without
@@ -224,6 +251,15 @@ class MarketDataService:
                 )
 
         return {s: cached_quotes[s] for s in symbols if s in cached_quotes}
+
+    def _recently_unanswered(self, data_source: DataSource, symbol: str, now: float) -> bool:
+        """剛才問過這個代號、而它沒有出現在回答裡。
+
+        時間窗沿用 FAILED_FETCH_RETRY_SEC，跟 K 棒那邊的失敗退避同一個數字：兩邊擋的
+        是同一件事——把一次解不開的請求變成每一次請求都重來一遍。
+        """
+        asked_at = self._unanswered_at.get((data_source, symbol))
+        return asked_at is not None and (now - asked_at) <= FAILED_FETCH_RETRY_SEC
 
     def get_bars(
         self,
