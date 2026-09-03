@@ -370,7 +370,11 @@ describe('這一版之後改了什麼', () => {
       frozenAt2026_09_03()
       withChanges([{ sha: 'ccc1111', title: '很久以前的', at: at(187) }])
 
-      expect(await screen.findByText(/自動更新/)).toBeInTheDocument()
+      const hint = await screen.findByText(/自動更新/)
+      // 兩個成因都要指得出來。只講一個，他就會去看一個其實沒有問題的地方，然後以為
+      // 自己弄錯了——而真正關掉開關的那一個從頭到尾沒有被提起。
+      expect(hint).toHaveTextContent(/情況 D|build/)
+      expect(hint).toHaveTextContent(/情況 E|GitHub/)
     })
 
     it('只落後幾天的時候不要嚇他', async () => {

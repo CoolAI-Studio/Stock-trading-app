@@ -432,3 +432,35 @@ def test_both_halves_get_a_dependency_vulnerability_check():
             assert step.get("continue-on-error") is True, (
                 f"{tool} 是硬性關卡——別人家的 CVE 會擋住修通知路徑的 hotfix"
             )
+
+
+def test_the_guide_warns_that_github_switches_the_schedules_off():
+    """GitHub 會自己把排程停掉，而那會同時關掉更新和看門狗——文件要說。
+
+    GitHub 自己的文件寫著（Events that trigger workflows）：
+
+        In a public repository, scheduled workflows are automatically disabled
+        when no repository activity has occurred in 60 days.
+
+    這個部署有**兩支**排程工作流程，而它們正好是「沒有人在看的時候替他看著」的那兩
+    支：
+
+      sync-from-upstream  他的前端從上游拿更新（含安全修補）
+      watchdog            提醒停擺的時候寄信給他
+
+    一起被關掉的話，畫面上什麼都不會變：app 照跑、圖照畫，只是**再也不會更新，而且
+    真的出事的時候也不會有人通知他**。這是這個 repo 一直在修的同一種失效——安靜的那
+    一種——只是這一次關掉開關的是 GitHub，不是我們。
+
+    觸發條件是「repo 沒有動靜」，而上游只要有在推，同步就會推進他的 repo，那就是動
+    靜。所以真正會踩到的形狀是：**這個專案自己安靜了兩個月。** 那時候他不會知道，而
+    重新開始更新的時候，他的排程已經停了。
+
+    文件要說得出三件事：多久、會怎樣、去哪裡打開。
+    """
+    guide = (_root() / "DEPLOYMENT.md").read_text(encoding="utf-8")
+
+    assert "60 天" in guide, "沒有說多久"
+    assert "Actions" in guide and ("Enable" in guide or "啟用" in guide), "沒有說去哪裡打開"
+    # 兩支都要提到：只講更新的話，他不會知道看門狗也一起沒了。
+    assert "看門狗" in guide or "watchdog" in guide.lower()

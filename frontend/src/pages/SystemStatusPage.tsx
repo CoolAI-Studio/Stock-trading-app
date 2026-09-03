@@ -159,8 +159,9 @@ function ChangeList() {
           你已經落後 {behindDays} 天
           {behindDays >= 30 && (
             <span className="ml-1">
-              —— 這麼久通常不是「還沒去按」，而是自動更新那條路斷了。去部署平台看有沒有失敗的
-              deploy（DEPLOYMENT.md 第 8 節「情況 D」）。
+              —— 這麼久通常不是「還沒去按」，而是自動更新那條路斷了。兩個常見的原因：部署平台上
+              有一直失敗的 build（DEPLOYMENT.md 第 8 節「情況 D」），或者 GitHub 把你的排程工作
+              流程停掉了（「情況 E」——公開的 repo 連續 60 天沒動靜就會這樣，連看門狗也一起）。
             </span>
           )}
         </li>
