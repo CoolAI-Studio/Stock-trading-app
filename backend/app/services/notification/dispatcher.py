@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import secrets
 from dataclasses import dataclass
@@ -126,7 +127,7 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
 
     # Imported here rather than at module scope: retry.py reads SENDERS from
     # this module, so a top-level import in both directions is a cycle.
-    from app.services.notification import quiet_hours, retry
+    from app.services.notification import quiet_hours
 
     result = DispatchResult()
     owns_session = db is None
@@ -159,6 +160,13 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
             if sender is None:
                 continue
 
+            # **趁 session 還好的時候把 id 抄下來。** expire_on_commit 是預設的 True，
+            # 所以上一個管道那次 commit 已經把這個物件過期掉了，`channel.id` 是一次
+            # 會真的送 SELECT 的讀取。底下的 except 如果在 session 已經進不去的時候
+            # 才去讀它，連 `logger.exception(..., channel.id)` 那一行都會拋——那是這
+            # 個 except 存在的意義整個被繞過去。
+            channel_id = channel.id
+
             # Everything from here to the commit is wrapped. Only sender.send
             # used to be, so a raise anywhere else -- the quiet-hours
             # calculation, schedule_first_retry, either commit -- escaped the
@@ -170,25 +178,16 @@ def handle_event(event: Event, db: Session | None = None) -> DispatchResult:
                     session, channel, event, message, order_id, user_id, owner_timezone
                 )
             except Exception as exc:
-                logger.exception("dispatch to channel %s crashed", channel.id)
+                logger.exception("dispatch to channel %s crashed", channel_id)
+                # 先記在結果上，再去寫那一列：寫不進去的時候，這一輪至少還說得出
+                # 「有一個管道失敗了」。
+                result.failed += 1
+                result.error = str(exc)
                 # Recorded rather than swallowed: an invisible failure is the
                 # worse trade for this product. Queued for retry too, because
                 # this event fires once and a code fault is no reason to lose
                 # it for good.
-                log = NotificationLog(
-                    user_id=user_id,
-                    channel_id=channel.id,
-                    order_id=order_id,
-                    event=event.type,
-                    status=NotificationStatus.FAILED,
-                    error=f"送出時發生未預期的錯誤：{exc}"[:500],
-                    message=message,
-                )
-                retry.schedule_first_retry(log)
-                session.add(log)
-                session.commit()
-                result.failed += 1
-                result.error = str(exc)
+                _record_crash(session, channel_id, event, message, order_id, user_id, exc)
                 continue
 
             if outcome == "deferred":
@@ -275,6 +274,66 @@ def _record_reaching_nobody(
         )
     )
     session.commit()
+
+
+def _record_crash(
+    session,
+    channel_id: int,
+    event: Event,
+    message: str,
+    order_id: int | None,
+    user_id: int,
+    exc: Exception,
+) -> None:
+    """把「這個管道整個炸了」寫成一列，而且**這件事本身不可以失敗**。
+
+    上面那個 try 存在的理由，是有好幾個管道就該讓其中一個壞掉還活得下去。可是原本的
+    except 第一件事就是 `session.add(log)` ＋ `session.commit()`——如果剛才那個例外發生
+    在 session 已經進不去之後（一次 flush 失敗會把它標成必須 rollback；Postgres 上一句
+    失敗的語句會讓整個交易中止，接下來每一句都失敗直到 rollback），這次 commit 自己就是
+    `PendingRollbackError`，直接穿出 except、穿出迴圈：
+
+      * 後面的管道一個都不會被試——多管道換來的韌性剛好在最需要的那一刻消失
+      * 連那一列 FAILED 都寫不下去，所以重送佇列裡也沒有它
+      * 這則提醒就這樣不見了，而畫面上什麼都沒有
+
+    所以：先照常寫；失敗了才 rollback 再寫一次。**不先發制人地 rollback**——這個
+    session 可能是呼叫端借給我們的（盯盤迴圈就是這樣傳進來的），沒事就 rollback 會把它
+    手上還沒送出去的東西一起丟掉。連第二次都寫不進去的話，也只能是「這一個管道記不下
+    來」，不可以是「其他管道不用試了」。
+    """
+
+    # 跟 handle_event 同一個理由在這裡 import：retry.py 在模組層讀 SENDERS。
+    from app.services.notification import retry
+
+    def write() -> None:
+        log = NotificationLog(
+            user_id=user_id,
+            channel_id=channel_id,
+            order_id=order_id,
+            event=event.type,
+            status=NotificationStatus.FAILED,
+            error=f"送出時發生未預期的錯誤：{exc}"[:500],
+            message=message,
+        )
+        retry.schedule_first_retry(log)
+        session.add(log)
+        session.commit()
+
+    try:
+        write()
+    except Exception:
+        logger.exception("could not record the crash for channel %s; retrying once", channel_id)
+        try:
+            # rollback 之後那個 log 物件已經被踢出 session 了，所以第二次要重新做一個。
+            session.rollback()
+            write()
+        except Exception:
+            # 記不下來就記不下來。這裡再拋出去的話，後面的管道就一個都不會被試——
+            # 而通知送不到是這個產品的重大失效。
+            logger.exception("could not record the crash for channel %s at all", channel_id)
+            with contextlib.suppress(Exception):
+                session.rollback()
 
 
 def _deliver_to_channel(
