@@ -18,7 +18,7 @@ LINE/Telegram/Email 通知。後端 FastAPI + SQLAlchemy，前端 Vite + React +
 **只要部署一次。** 同一個服務同時供應 API 和畫面，所以沒有「前端」「後端」兩份要管、
 也沒有兩個網址要對起來。
 
-這是**最短的一條路**，不是唯一的一條：Render 和 Neon 都有免費方案而且不用信用卡，
+這是**最短的一條路**，不是唯一的一條：Render 和 Supabase 都有免費方案而且不用信用卡，
 所以按鈕指向它們。要用別家（或自己的機器）完全可以，往下看「不想用這三家？」。
 
 想把畫面另外放在 Vercel／Netlify／Cloudflare 也照樣可以——把 `frontend/` 部署過去，
@@ -28,8 +28,14 @@ LINE/Telegram/Email 通知。後端 FastAPI + SQLAlchemy，前端 Vite + React +
 **步驟：**
 
 1. **先開資料庫。** 你需要一個 Postgres 連線字串（`postgresql://` 開頭）。免費的例如
-   [Neon](https://neon.tech)、[Supabase](https://supabase.com)，註冊後建一個資料庫、把它給你的
+   [Supabase](https://supabase.com)、[Neon](https://neon.tech)，註冊後建一個資料庫、把它給你的
    連線字串複製起來。這是唯一沒辦法幫你自動產生的東西，因為它是別人家的服務。
+
+   > **要長期一直跑的話用 Supabase。** Neon 的免費方案給的是每月的運算時數額度
+   > （100 CU-hours ≈ 400 小時），而這個系統為了盯盤收盤後也每五分鐘碰一次資料庫，所以
+   > 那顆運算單元幾乎不休眠——一個月 730 小時，大概第十七天就用完，然後停到下一個帳單
+   > 週期，那半個月一則提醒都不會送出。Supabase 沒有這種額度（只有「一整週沒人用就暫
+   > 停」，而這個系統永遠不會閒置一週）。Neon 設定比較快，適合先試試看。
 
    > **不想再註冊一家？** Render 這些平台自己也有 Postgres，開下去會自動接上，這一格
    > 完全不用填。代價是免費的那一種**有期限，到期是連同資料一起刪掉**，不是停用——某
