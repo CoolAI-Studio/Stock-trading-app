@@ -180,6 +180,15 @@ def test_waiting_for_warmup_is_not_an_error_that_deactivates_the_strategy(db_ses
 
 
 def test_a_symbol_with_no_history_at_all_is_reported_not_crashed(db_session):
+    """一根都沒有的時候說的是「抓不到」，不是「還在暖身」。
+
+    這句話改過（原本是「warming up: 0/3」），因為空清單現在擋在抓取端就不讓它
+    進 `_run_bar_strategy`了。暖身是一句會自己過去的話，而一個上游根本沒有歷史的代
+    號不會自己過去；更重要的是同一份空清單對 warmup 為 0 的策略是 `bars[-1]` 的
+    IndexError，二十五秒後永久停用。
+
+    斷言跟著變強：除了沒有下單、有話說，還要確認它**沒有被當成策略的錯**。
+    """
     user = _make_user(db_session)
     strategy = _make_strategy(db_session, user, ALWAYS_BUY_ON_BAR)
     harness = _Harness([])
@@ -188,7 +197,10 @@ def test_a_symbol_with_no_history_at_all_is_reported_not_crashed(db_session):
 
     db_session.refresh(strategy)
     assert db_session.query(Order).count() == 0
-    assert "0/3" in strategy.last_error
+    assert "抓不到" in strategy.last_error
+    assert "warming up" not in strategy.last_error
+    assert strategy.consecutive_errors == 0
+    assert strategy.is_active is True
 
 
 def test_it_falls_back_to_the_stored_warmup_when_the_code_declares_none(db_session):

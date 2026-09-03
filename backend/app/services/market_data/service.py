@@ -400,7 +400,19 @@ class MarketDataService:
         # 次成功的抓取。
         if db is not None and fetched:
             try:
+                # **先把呼叫端手上還沒送出去的送出去。** 下面那個 `db.rollback()`
+                # 回滾的是**整個 session**，不只是這一次存檔。盯盤迴圈把自己的
+                # session 傳進來之後，「存不進 K 棒」就有機會連帶把那一輪的訊號、
+                # Order、通知紀錄一起丟掉——而警告不能停擺，優先於一根 K 棒存不
+                # 存得下來。先 commit 之後，回滾最多只丟得掉這一次存檔自己。
+                #
+                # 圖表那條路這一句是空的（`/bars` 在這之前唯讀）。
+                db.commit()
                 bar_store.save(db, data_source, symbol, timeframe, fetched)
+                # save() 只 flush，而 `get_db` 在請求結束時 close，close 會把沒 commit
+                # 的東西丟掉——少了這一行，資料庫裡永遠一根都沒有，而「重開機
+                # 之後還畫得出來」是一個不會有任何東西變紅的空承諾。
+                db.commit()
             except Exception:  # noqa: BLE001 -- 存不進去不該讓這次請求失敗
                 logger.warning("could not store bars for %s", symbol, exc_info=True)
                 db.rollback()

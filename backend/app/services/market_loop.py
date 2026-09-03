@@ -278,6 +278,8 @@ def _run_bar_strategy(
     bars: list[Bar],
     events: list[Event],
     blocked: set[int],
+    *,
+    feed_failed: bool = False,
 ) -> None:
     """Feeds closed candles to on_bar: at most one call per candle, and never
     for a candle the strategy has already been shown."""
@@ -289,10 +291,17 @@ def _run_bar_strategy(
         # number, and that number is garbage. Say so where the owner can read
         # it, and leave consecutive_errors alone: waiting for history is not
         # a fault, and must never retire the strategy.
-        strategy.last_error = (
-            f"warming up: {len(bars)}/{warmup} closed {loaded.timeframe.value} candles "
-            "available so far -- no signals until then"
-        )
+        progress = f"{len(bars)}/{warmup} closed {loaded.timeframe.value} candles"
+        if feed_failed:
+            # 「warming up: 2/3」是一句會自己過去的話：再收一根就好了。上游斷
+            # 著的時候那一根不會來，所以同一句話變成謊——他會坐在那裡等一個永遠
+            # 不會到的提醒，而畫面上一切正常。手上有幾根還是要講，不然他不知道
+            # 恢復之後還要等多久。
+            strategy.last_error = f"抓不到 K 棒：上游沒有回應。手上只有 {progress}"
+        else:
+            strategy.last_error = (
+                f"warming up: {progress} available so far -- no signals until then"
+            )
         db.commit()
         return
 
@@ -616,14 +625,50 @@ def tick_once(
             if key in bars_by_key or key in bar_failures:
                 continue
             try:
-                bars_by_key[key] = service.get_bars(
-                    strategy.symbol, loaded.timeframe, strategy.data_source
+                fetched = service.get_bars(
+                    strategy.symbol,
+                    loaded.timeframe,
+                    strategy.data_source,
+                    # 帶 db 才有存量可以退，也才會把抓到的存回去。少了它，
+                    # `_prime_from_storage` 第一行就 return——休眠醒來、上游不通的
+                    # 那一刻，盯盤這條路拿到的是空清單，而圖表那條路明明有底可以
+                    # 垫。反過來，策略用的週期（1wk、1h…）可能從來沒有人看過圖，
+                    # 不自己存就永遠沒有底。
+                    db=session,
                 )
             except Exception as exc:  # noqa: BLE001 -- 一個代號不能拖垮整輪
                 bar_failures[key] = f"{type(exc).__name__}: {exc}"
                 logger.exception(
                     "bar fetch failed for %s %s", strategy.symbol, loaded.timeframe.value
                 )
+            else:
+                if fetched:
+                    bars_by_key[key] = fetched
+                else:
+                    # **一根都沒有的時候，擋在這裡，不要讓它進到
+                    # `_run_bar_strategy`。** 那裡面只看 `len(bars) < warmup`，所以空
+                    # 清單會變成兩種結果，兩種都錯：
+                    #
+                    #   warmup ≥ 1：寫「warming up: 0/3」——一句會讓人以為再等一下
+                    #     就好的話，而實際上是行情斷了。
+                    #   warmup = 0：`len([]) < 0` 是 False，所以連那句謊話都到不了——
+                    #     直接掉進 `bars[-1]` 的 IndexError，走 `_record_strategy_error`，
+                    #     連續五次、輪詢五秒一次，**二十五秒後永久停用**，而沒有
+                    #     任何東西會把它打開。而「不用寫 Python 就能設定的簡單價格提
+                    #     醒」正是這個產品的核心功能，那種策略的 warmup 就是 0。
+                    #
+                    # 擋在抓取端而不是擋在下游，是因為來源就是「一份空清單被當成答案
+                    # 送進去」；在這裡擋，對每一個分支都成立。
+                    #
+                    # BarFetchError 在服務層就被吞掉換成 stale cache，所以它不會走到
+                    # 上面那個 except——要問服務才知道剛才那次抓取成不成功。
+                    bar_failures[key] = (
+                        "上游沒有回應"
+                        if service.bar_fetch_failed(
+                            strategy.symbol, loaded.timeframe, strategy.data_source
+                        )
+                        else "上游沒有這個代號的 K 棒"
+                    )
 
         for strategy in strategies:
             loaded = loaded_by_id.get(strategy.id)
@@ -638,7 +683,17 @@ def tick_once(
                     _record_feed_problem(session, strategy, f"抓不到 K 棒：{problem}")
                     continue
                 _run_bar_strategy(
-                    session, strategy, loaded, bars_by_key.get(key, []), events, blocked
+                    session,
+                    strategy,
+                    loaded,
+                    bars_by_key.get(key, []),
+                    events,
+                    blocked,
+                    # 手上有幾根、但不夠暖身，而上游同時斷線——那不是「再等一下就
+                    # 好」。空清單那一種已經擋在上面的抓取端了，這是剩下的那一半。
+                    feed_failed=service.bar_fetch_failed(
+                        strategy.symbol, loaded.timeframe, strategy.data_source
+                    ),
                 )
                 continue
             quote = quotes.get(strategy.symbol)
