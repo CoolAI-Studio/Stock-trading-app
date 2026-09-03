@@ -237,7 +237,14 @@ docker build -f backend/Dockerfile --build-arg APP_GIT_COMMIT=$(git rev-parse HE
 
 兩邊都沒有時，這一格是 `null`——**寧可說不知道，也不會編一個版本號給你看**。
 
-另外注意：`render.yaml` 的 `healthCheckPath` 也指向 `/healthz`，所以持續 503 時 Render 也會判定服務不健康。worker 卡死的情況下重啟本來就是正確處置，但如果之後不想要這個連動，把 `healthCheckPath` 改成別的路徑即可。
+另外注意：`render.yaml` 的 `healthCheckPath` 也指向 `/healthz`（**沒有帶 `?deep=1`**），
+所以持續 503 時 Render 會重開這個服務。那正是設計要的：沒帶參數的那一條只在「盯盤迴圈
+卡死」的時候回 503，而那種情況重啟本來就是唯一的處置。
+
+**不要把 `healthCheckPath` 改成帶 `?deep=1` 的網址。** 深的那一條把「一顆下架的代號」
+「上游掛了」「通知被關掉」也算進去，而那些重開一萬次都修不好——指過去的話，其中任何一個
+成立就會讓你的服務每十幾分鐘被重開一次、永遠，而且新版永遠等不到一次通過的健康檢查，
+你會從此收不到更新。理由完整寫在 `render.yaml` 那一格的註解裡。
 
 ---
 
