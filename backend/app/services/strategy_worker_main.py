@@ -106,14 +106,66 @@ def _sandbox():
     return compile_strategy
 
 
+# 協定管線的真身。
+#
+# 這條一行一個 JSON 的管線就是這個行程的 stdout ／ stdin，而**使用者的策略也寫得到
+# 它**：沙箱的安全 builtins 白名單裡有 print。策略印一行字，父行程讀到的那一行就不是
+# JSON，_read_line 判成 WorkerUnavailable 並殺掉整個子行程——同一格上其他策略累積的暖
+# 身狀態一起歸零，而 WorkerUnavailable 被歸類成基礎設施問題（不累積、不停用），所以這
+# 件事每五秒重演一次。
+#
+# 不把 print 從白名單拿掉：那又是一次列舉式的拒絕（strategy_runtime 的檔頭自己就把兩
+# 層叫做 "denial by enumeration"，而這個缺口存在的原因正是那份列舉漏了 print 一個名
+# 字），而且會讓一支 print 過的策略變成 NameError——使用者的程式碼沒有錯，錯的是我們把
+# 協定放在他寫得到的地方。所以換掉問題的形狀，讓路的盡頭沒有管線。
+_pipe = sys.stdout
+_commands = sys.stdin
+
+
+def _take_the_protocol_pipe() -> None:
+    """把協定的兩端從 sys.stdout ／ sys.stdin 手上接管過來。
+
+    **要在回報 ready 之前做完**：ready 之後的下一行就可能是一支會 print 的策略，而
+    「編譯就是執行」——類別主體和 __init__ 也是使用者的程式碼。
+
+    stdout 交出去之後指到 stderr，而父行程把 stderr 接到 DEVNULL（見
+    strategy_worker.py 的 Popen），所以策略印再多都只是掉進地上的洞：不阻塞、不漲記憶
+    體、更不會撞壞協定。指到 stderr 而不是丟進 os.devnull，是因為手動跑這個模組除錯的
+    時候那些字還看得到。
+
+    stdin 一併接管，因為協定有兩端：只接管 stdout 的話，「路的盡頭沒有管線」只成立一
+    半，另一半仍然靠列舉式的拒絕撐著。input 和 open 今天兩層都擋（AST 黑名單 ＋ 不在
+    安全 builtins 裡），所以這不是現行漏洞；但將來萬一 input 又回到白名單，它拿到的會
+    是 RuntimeError("input(): lost sys.stdin")——一個乾淨的策略錯誤，而不是協定被吃掉一
+    行指令（那個症狀比 print 更難查，因為壞掉的是父行程剛送出去的那個指令，看起來像子
+    行程無故沉默）。
+
+    這一句不可以拋，跟 apply_limits 同一條規則：子行程起不來等於那一格上的策略全面停
+    擺，比一支策略印不出東西糟得多。所以連 stderr 都沒有（被關掉的執行環境）也不用另外
+    處理——sys.stdout 變成 None 的時候 print 是一個安靜的 no-op，那正是要的結果。
+    """
+    global _pipe, _commands
+    if sys.stdout is sys.stderr:
+        # 已經接管過了。再做一次會讓 _pipe 指到 stderr，協定整條寫進 DEVNULL——子行程
+        # 從此一句話都不回，而那是這張票要修掉的全面停擺換了個入口。
+        return
+    _pipe = sys.stdout
+    _commands = sys.stdin
+    sys.stdout = sys.stderr
+    sys.stdin = None
+
+
 def _reply(ok: bool, **fields) -> None:
     """回一行。
 
     每一個回覆都要送得出去，包括「我失敗了」——父行程在等一行，讀不到就會把這裡當
     成死掉並殺掉重建，而那要花三百毫秒。一個講得出原因的失敗便宜得多。
+
+    寫的是 _pipe 不是 sys.stdout：那條管線已經在 main() 裡被接管走了，因為使用者的策略
+    print 得到 sys.stdout。
     """
-    sys.stdout.write(json.dumps({"ok": ok, **fields}) + "\n")
-    sys.stdout.flush()
+    _pipe.write(json.dumps({"ok": ok, **fields}) + "\n")
+    _pipe.flush()
 
 
 # 這個行程裡活著的策略，key -> LoadedStrategy。
@@ -406,6 +458,9 @@ def _handle(message: dict) -> dict:
 
 def main() -> int:
     global _limits
+    # 第一件事，比上限還早：使用者的策略跟這條協定管線共用一個 stdout，而 ready 之後
+    # 的下一行就可能是一支會 print 的策略。見 _take_the_protocol_pipe。
+    _take_the_protocol_pipe()
     # 在回報 ready **之前**設下去，所以父行程一收到 ready，這個行程就已經被限制
     # 住了。晚一步的話，中間那個縫裡跑的第一支策略是沒有上限的。
     limit_mb = int(os.environ.get("STRATEGY_MEMORY_LIMIT_MB") or 0)
@@ -414,7 +469,7 @@ def main() -> int:
 
     _reply(True, ready=True)
 
-    for line in sys.stdin:
+    for line in _commands:
         line = line.strip()
         if not line:
             continue
