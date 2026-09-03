@@ -252,6 +252,39 @@
           <strong>每一格都要按到「通了」為止</strong>，填了不算。
         </p>
       </li>
+
+      <li data-path="cloud">
+        <h3>讓它不要睡著</h3>
+        <p>
+          沒人打開它 15 分鐘，雲端就讓它休眠——而休眠的時候不盯盤，
+          <strong>提醒不會送出</strong>。
+        </p>
+        <details>
+          <summary>怎麼讓它一直醒著（三分鐘，免費）</summary>
+          <p>
+            找一家免費的網站監控服務註冊，例如
+            <a href="https://uptimerobot.com/" target="_blank" rel="noreferrer">UptimeRobot</a>
+            （找不到的話搜尋「free uptime monitoring」）。註冊完新增一個監控：
+          </p>
+          <ul>
+            <li>類型選 <strong>HTTP(s)</strong>。</li>
+            <li>
+              網址填你剛剛抄下來那個，後面加上 <code>/healthz</code>——
+              像 <code>https://你的服務.onrender.com/healthz</code>。
+            </li>
+            <li>檢查間隔選 <strong>5 分鐘</strong>（比 15 分鐘短就行）。</li>
+          </ul>
+          <p>
+            這樣它每五分鐘就被叫一次，永遠不會閒到被休眠。順帶還有一個好處：那個網址
+            會實際去測資料庫、盯盤迴圈、行情抓取，任何一項壞掉就回 503，而監控服務會
+            寄信給你——所以它同時是你的看門狗。
+          </p>
+          <p>
+            忘了做也不會怎樣，app 自己看得出來：真的睡過一段時間之後，系統狀態頁會寫
+            「這個服務有 N 小時沒有在盯盤」，並且把要貼的網址印在那裡。
+          </p>
+        </details>
+      </li>
     </ol>
 
   </div>

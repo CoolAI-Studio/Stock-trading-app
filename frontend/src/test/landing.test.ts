@@ -783,3 +783,65 @@ describe('三頁都是「選了才看細節」', () => {
     })
   }
 })
+
+describe('第三頁：雲端那條路會睡著，而睡著的時候提醒不會送出', () => {
+  /**
+   * Render 的免費方案，**沒有外來流量 15 分鐘就休眠**。休眠 = 行程結束 = 盯盤迴圈停
+   * 掉 = 那段時間裡穿價、跌破均線、觸發停損，一則提醒都不會送出。
+   *
+   * 而這件事在他真的會讀的那一頁上，原本只寫成一句「等一下重新整理」——講的是冷啟動
+   * 慢，不是**提醒停擺**。照著這一頁走完的人，會有一份看起來完全正常、實際上一天大
+   * 部分時間都沒在盯盤的部署。
+   *
+   * 這是這個產品唯一那句承諾（「想在手機上收到股票提醒」）失效得最徹底的一種，而它
+   * 不在流程裡。DEPLOYMENT.md 第 4 節早就寫著怎麼做——但那份文件目標使用者不會打開，
+   * 他打開的是這一頁。
+   *
+   * app 裡也有一半的答案（系統狀態頁偵測得到「這個服務有 N 小時沒有在盯盤」），但那
+   * 是**事後**：他已經漏掉那幾個小時的提醒了。這一頁是事前。
+   */
+  /** 選了雲端之後看得到的步驟文字。`collapsed` 代表只算不用點開就看得到的。 */
+  const cloudOnly = ({ collapsed = false } = {}) => {
+    mountPage('install.html')
+    pathChoice('cloud')?.click()
+    const steps = Array.from(document.querySelectorAll<HTMLElement>('li')).filter(
+      (li) => !li.hidden && !li.closest('[hidden]'),
+    )
+    if (collapsed) {
+      for (const drawer of document.querySelectorAll('details')) drawer.remove()
+    }
+    return steps.map((li) => li.textContent ?? '').join(' ')
+  }
+
+  it('後果要在他不用點開就看得到的地方', () => {
+    // 收在抽屜裡等於他要先知道有這回事才會去按開，而這件事的重點正是他不知道。
+    const text = cloudOnly({ collapsed: true })
+
+    expect(text).toMatch(/休眠|睡著/)
+    // 重點是提醒停擺，不是開啟變慢——原本那句「等一下重新整理」講的是後者。
+    expect(text).toMatch(/提醒.{0,12}(不會|收不到|送不出|停)/)
+  })
+
+  it('說得出怎麼辦，而且那個辦法是照著按就好的', () => {
+    // 這一段可以收在抽屜裡：他讀到後果之後才需要它，而這一頁的預算是有限的
+    // （「收起來的時候要短」那條測試）。
+    const text = cloudOnly()
+
+    expect(text).toMatch(/healthz/)
+    expect(text).toMatch(/5 分鐘|五分鐘/)
+  })
+
+  it('本機那條路不用聽這一段', () => {
+    // 他自己的電腦不會因為沒人連就把程式關掉。講了只是多一個他做不到也不用做的
+    // 步驟，而這一頁的預算是有限的。
+    mountPage('install.html')
+    pathChoice('local')?.click()
+
+    const visibleText = Array.from(document.querySelectorAll<HTMLElement>('li'))
+      .filter((li) => !li.hidden && !li.closest('[hidden]'))
+      .map((li) => li.textContent ?? '')
+      .join(' ')
+
+    expect(visibleText).not.toMatch(/healthz/)
+  })
+})
