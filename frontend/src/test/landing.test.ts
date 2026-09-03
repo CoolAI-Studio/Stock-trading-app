@@ -884,3 +884,55 @@ describe('這三頁上不可以有沒被渲染的 markdown', () => {
     }
   })
 })
+
+describe('第二頁：兩家免費 Postgres 的差別，要寫在他選的那個地方', () => {
+  /**
+   * 量出來的（兩家自己的文件，2026-09）：
+   *
+   *   Neon 免費方案      100 CU-hours/月（官方換算：0.25 CU 跑 400 小時），
+   *                      閒置 5 分鐘休眠而且關不掉，用完「compute is suspended
+   *                      until the next billing period」。
+   *   Supabase 免費方案  500 MB、共用 CPU，**沒有**每月運算時數的計費，
+   *                      只有「Free projects are paused after 1 week of inactivity」。
+   *
+   * 而這個系統為了盯盤，收盤後也每五分鐘碰一次資料庫——所以 Neon 那顆運算單元幾乎不
+   * 休眠（一個月 730 小時，額度 400 小時，大約第 17 天用完），而 Supabase 那條「一週
+   * 沒人用就暫停」永遠不會被踩到。
+   *
+   * 這一頁原本把 Neon 標成「推薦第一次用」，而那個推薦會讓他每個月後半收不到提醒。
+   * 差別要寫在他做選擇的那個地方——寫在別的檔案裡等於沒寫。
+   */
+  const drawerFor = (label: string) => {
+    const page = read('database.html')
+    const drawers = page.split('<details').slice(1)
+    const found = drawers.find((d) => d.slice(0, d.indexOf('</summary>')).includes(label))
+    expect(found, `找不到 ${label} 那個抽屜`).toBeTruthy()
+    return strip(found as string)
+  }
+
+  it('Neon 那一格說得出它每個月會停', () => {
+    const text = drawerFor('Neon')
+
+    expect(text).toMatch(/時數|額度/)
+    expect(text).toMatch(/用完|停/)
+  })
+
+  it('Supabase 那一格說得出它為什麼不會', () => {
+    const text = drawerFor('Supabase')
+
+    expect(text).toMatch(/時數|額度|一直跑|長期/)
+  })
+
+  it('不要再把會停的那一家標成推薦', () => {
+    const page = read('database.html')
+    const summaries = page
+      .split('<details')
+      .slice(1)
+      .map((d) => strip(d.slice(0, d.indexOf('</summary>'))))
+    const recommended = summaries.filter((s) => s.includes('推薦'))
+
+    for (const summary of recommended) {
+      expect(summary, `被標成推薦的是：${summary}`).not.toMatch(/Neon/)
+    }
+  })
+})

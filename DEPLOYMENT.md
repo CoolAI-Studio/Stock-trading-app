@@ -56,9 +56,13 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 > 「compute is suspended until the next billing period」——**剩下的半個月資料庫是關的，
 > 一則提醒都不會送出。**
 >
-> 這件事目前沒有一個免費又沒有代價的解法（取捨列在 issue #95）。你會知道它發生了：
-> UptimeRobot 會寄信給你，而信裡那一句「連不上資料庫」後面就寫著這個原因。要它整個月
-> 都在，就得升級 Neon 的方案，或換一家不是用運算時數計費的。
+> **Supabase 的免費方案沒有這個限制**（500 MB、共用 CPU，只有「Free projects are
+> paused after 1 week of inactivity」——而這個 app 每五分鐘就碰一次資料庫，所以那條永遠
+> 不會踩到）。要長期一直跑的話用它，設定步驟一樣是複製一串連線字串，只多一個「把
+> `[YOUR-PASSWORD]` 換成你設的密碼」。
+>
+> 留在 Neon 也沒關係，你會知道它發生了：UptimeRobot 會寄信給你，而信裡那一句「連不上
+> 資料庫」後面就寫著這個原因。（其他取捨列在 issue #95。）
 
 
 ---
