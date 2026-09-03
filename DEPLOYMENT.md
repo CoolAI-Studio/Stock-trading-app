@@ -146,6 +146,7 @@ Render 免費方案閒置 15 分鐘會自動休眠（休眠時背景策略監控
    - Monitoring Interval：5 分鐘
 3. 存檔後就會開始每 5 分鐘自動 ping 一次，讓服務保持清醒。
 4. **記得在 monitor 的 Alert Contacts 加上你的 Email**，否則就算後端壞掉也不會通知你。
+5. **它顯示 Down 的時候不要按暫停。** 暫停不會修好那件事，只會讓服務重新開始休眠——變成兩個問題。去 app 的系統狀態頁看是哪一格紅的。
 
 > ⚠️ **保活本身也有代價。** Render 免費方案一個月給 **750 instance hours**，而且是
 > **整個 workspace 下所有免費服務共用**；休眠中的服務不計時（「spun-down services
