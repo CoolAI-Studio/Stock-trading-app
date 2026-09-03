@@ -13,7 +13,9 @@ is_cached），所以 market_loop 換過來的時候，呼叫端幾乎不用動�
 
 代價是同一個 worker 上的策略會互相影響：一支卡住被殺掉，同一格的其他策略狀態也
 跟著沒了。它們下一次呼叫會自動重建（見 _Slot.ensure），所以**不會瞎掉**，只是要
-重新暖身。用 id 取餘數分配，所以那個代價不會集中在某一支身上。
+重新暖身（而重新暖身是 PooledStrategy.last_bar_ts 觸發的：實例不在了它就回
+None，market_loop 那一輪就拿手上的完整 K 棒重暖一次——沒有它的話，這句承諾沒有任
+何程式碼兌現得了）。用 id 取餘數分配，所以那個代價不會集中在某一支身上。
 
 ＊ 逾時是怎麼做到的。
 
@@ -167,7 +169,39 @@ class PooledStrategy:
         self.timeframe: Timeframe = Timeframe(info["timeframe"])
         self.warmup_bars: int | None = info["warmup_bars"]
         self.declared_params: dict = info["declared_params"]
-        self.last_bar_ts: datetime | None = None
+        self._last_bar_ts: datetime | None = None
+
+    @property
+    def last_bar_ts(self) -> datetime | None:
+        """我們餵到哪一根了——**只有在被餵的那個實例還活著的時候才算數。**
+
+        這筆記帳放在父行程，所以子行程被殺掉不會清掉它；但那一格上的實例已經沒
+        了，下一次呼叫拿到的是 _Slot.ensure 重建出來的一個全新的空實例。兩件事兜
+        起來，market_loop 會走「只餵新 K 棒」那條路，於是一支已經在發訊號的 20 日
+        均線策略會安靜地退回 HOLD，直到它自己重新累積 20 個交易日——而那期間每一輪
+        last_error 都是 None，畫面上完全看不出來它已經瞎了。
+
+        檔頭承諾的是「不會瞎掉，只是要重新暖身」。暖身要有人做，而 K 棒在父行程手
+        上（market_loop 每一輪都重抓），所以這裡只要老實回答「沒餵過」，那一輪就會用完
+        整的歷史重新暖一次。
+
+        **讀一次就要存起來。** 這個答案會在任兩次讀取之間翻面（release_strategy 跑在請
+        求執行緒上、沒拿 slot.lock），所以把它留在一個逐根 K 棒重讀的條件裡，中途
+        翻面就是 `bar.timestamp > None` → TypeError——而 TypeError 不是 WorkerUnavailable，
+        會被算成使用者的錯。market_loop._run_bar_strategy 把它拉成區域變數就是為了
+        這件事，有一條測試守著。
+        """
+        try:
+            live = self._pool._instance_is_live(self._key)
+        except Exception:  # noqa: BLE001 -- 問不出來就當它不在：多暖一次身是安全方向，拋例外會被算成策略的錯
+            live = False
+        if not live:
+            return None
+        return self._last_bar_ts
+
+    @last_bar_ts.setter
+    def last_bar_ts(self, value: datetime | None) -> None:
+        self._last_bar_ts = value
 
     def on_tick(self, price: float) -> str:
         return self._pool._call(self._key, "on_tick", price)
@@ -225,6 +259,20 @@ class StrategyPool:
 
     def _slot_for(self, strategy_id: int) -> _Slot:
         return self._slots[strategy_id % len(self._slots)]
+
+    def _instance_is_live(self, key: str) -> bool:
+        """那個子行程裡現在真的有這支策略的實例嗎。
+
+        問的條件跟 _Slot.ensure 決定要不要重建的條件是同一個，這是刻意的：ensure
+        會重建的每一種情況，都表示上一個實例的累積狀態已經不在了。
+
+        刻意不拿 slot.lock：`_call` 拿的是同一把鎖，在盯盤執行緒的一次屬性讀取裡
+        搶它，等於多開一條卡住迴圈的路。沒鎖的最壞情況是多暖一次身，或者拋一個
+        AttributeError（`alive` 讀兩次 `self._process`，而 shutdown／ prewarm 會在沒鎖的
+        情況下把它設成 None）——後者由呼叫端的 try 接住。
+        """
+        slot = self._slot_for(int(key))
+        return slot.worker.alive and key in slot.loaded
 
     def _drop(self, strategy_id: int) -> None:
         key = str(strategy_id)

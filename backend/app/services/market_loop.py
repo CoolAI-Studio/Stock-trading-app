@@ -297,7 +297,15 @@ def _run_bar_strategy(
         return
 
     try:
-        if loaded.last_bar_ts is None:
+        # **讀一次，存起來。** 跑在子行程上的策略（PooledStrategy）把這個屬性當成
+        # 問句：實例不在了就回 None，好讓這裡重新暖一次身。而那個答案會在任兩次讀
+        # 取之間翻面（release_strategy 跑在請求執行緒上：使用者按了儲存／暫停／刪
+        # 除；也可能是子行程被 OOM 殺掉）。把它留在下面那句 list comprehension 的條件裡
+        # 就是每一根 K 棒重讀一次（線上一輪 300 根），中途翻面則 `bar.timestamp > None`
+        # → TypeError。TypeError 不是 WorkerUnavailable，所以 _record_strategy_error 會把「我
+        # 們的子行程沒了」寫成「你的程式壞了」，累積五次永久停用。
+        last_bar_ts = loaded.last_bar_ts
+        if last_bar_ts is None:
             # Every candle in hand closed before this instance existed, so
             # replay fills its memory and its signals are thrown away: a BUY
             # from three weeks ago is an observation, not an instruction.
@@ -305,7 +313,7 @@ def _run_bar_strategy(
             loaded.last_bar_ts = bars[-1].timestamp
             signal_bar, signal_str = bars[-1], "HOLD"
         else:
-            new_bars = [bar for bar in bars if bar.timestamp > loaded.last_bar_ts]
+            new_bars = [bar for bar in bars if bar.timestamp > last_bar_ts]
             if not new_bars:
                 db.commit()  # mid-candle poll: nothing has closed since last time
                 return

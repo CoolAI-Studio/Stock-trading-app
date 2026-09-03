@@ -19,7 +19,7 @@ try 只有 finally 沒有 except，所以任何漏接的例外都會直接走出
 子行程帶進來的失效模式比那個多得多，所以這裡逐一擺出來，每一種都問同樣三個問題。
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -504,3 +504,211 @@ def test_the_pool_does_not_grow_with_the_number_of_strategies():
         assert len(pool._slots) == strategy_pool.DEFAULT_POOL_SIZE
     finally:
         pool.shutdown()
+
+
+BAR_SOURCE_THAT_NEEDS_HISTORY = """
+class Strategy:
+    def __init__(self):
+        self.name = "已經暖好的那支"
+        self.symbol = "AAPL"
+        self.timeframe = "1d"
+        self.warmup_bars = 0
+        self.closes = []
+
+    def on_bar(self, bar) -> str:
+        self.closes.append(bar.close)
+        # 看得到六根才敢說話。這是 MA20 的縮小版：狀態沒了就等於閉嘴，而閉嘴不會
+        # 有任何東西變紅。
+        return "BUY" if len(self.closes) >= 6 else "HOLD"
+"""
+
+STUCK_BAR_SOURCE = """
+class Strategy:
+    def __init__(self):
+        self.name = "卡住的鄰居"
+        self.symbol = "AAPL"
+        self.timeframe = "1d"
+        self.warmup_bars = 0
+
+    def on_bar(self, bar) -> str:
+        while True:
+            pass
+"""
+
+
+def _seven_daily_bars() -> list[Bar]:
+    return [
+        Bar(
+            symbol="AAPL",
+            timeframe=market_loop.Timeframe.DAY_1,
+            timestamp=datetime(2024, 1, 2, tzinfo=UTC) + timedelta(days=i),
+            open=10.0,
+            high=10.0,
+            low=10.0,
+            close=10.0 + i,
+            volume=1.0,
+        )
+        for i in range(7)
+    ]
+
+
+def test_a_killed_neighbour_does_not_leave_a_warmed_up_strategy_cold(
+    db_session, monkeypatch, mock_market_service
+):
+    """鄰居逾時一次，不可以讓一支已經在發訊號的策略安靜地退回 HOLD。
+
+    strategy_pool 的檔頭承諾「一支被殺掉，同格其他策略下次呼叫自動重建，不會瞎
+    掉，只是要重新暖身」。重建有人做（_Slot.ensure），**重新暖身沒有**：重建出來
+    的是一個全新的空實例，而決定要不要暖身的 `last_bar_ts` 活在父行程、不會被殺
+    行程清掉。於是 market_loop 走「只餵新 K 棒」那條，一支 20 日均線的策略要重新
+    累積 20 個交易日才會再說一句話——而那幾輪 last_error 每一輪都是 None，畫面上
+    完全看不出來它已經瞎了。**警告停擺而且不出聲**，是這個產品最不能有的失效。
+
+    這條測試不靠迴圈跑策略的順序：鄰居壞掉的那一輪剛好沒有新的 K 棒收盤，所以那
+    支健康的策略在那一輪本來就沒事做，誰先誰後都一樣。
+    """
+    from app.services import strategy_pool
+
+    # 一格，所以這兩支一定是鄰居——「同一個子行程」正是這條測試的前提。
+    pool = strategy_pool.StrategyPool(size=1)
+    monkeypatch.setattr(market_loop, "_registry", pool)
+
+    bars = _seven_daily_bars()
+    # K 棒從哪裡來不是這條測試的變數，「這一輪有沒有多收一根」才是。
+    closed = [5]
+    monkeypatch.setattr(mock_market_service, "get_bars", lambda *a, **k: list(bars[: closed[0]]))
+
+    user = User(email="rewarm@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    healthy = Strategy(
+        user_id=user.id,
+        name="已經暖好的那支",
+        symbol="AAPL",
+        source_code=BAR_SOURCE_THAT_NEEDS_HISTORY,
+        code_hash="irrelevant-for-tests",
+        is_active=True,
+    )
+    neighbour = Strategy(
+        user_id=user.id,
+        name="卡住的鄰居",
+        symbol="AAPL",
+        source_code=STUCK_BAR_SOURCE,
+        code_hash="irrelevant-for-tests",
+        is_active=False,
+    )
+    db_session.add_all([healthy, neighbour])
+    db_session.commit()
+    db_session.refresh(healthy)
+
+    try:
+        # 第一輪：只有它自己，五根 K 棒進到子行程裡，暖身完成。
+        market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+
+        # 第二輪：鄰居醒過來，卡在 on_bar 上，逾時把整個子行程殺掉——連帶清掉上面
+        # 那支的累積狀態。這一輪沒有新的 K 棒收盤。
+        neighbour.is_active = True
+        db_session.commit()
+        market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+
+        # 鄰居只壞這一次。真的一直壞下去的話，_record_strategy_error 連續五次就會
+        # 把它關掉，所以「壞一次然後不在了」才是使用者真的會遇到的樣子。
+        neighbour.is_active = False
+        db_session.commit()
+
+        # 再收兩根 K 棒。狀態還在（或者有人重新暖過身）的話，第二根就足夠讓它喊
+        # BUY；沒有的話它只累積得到兩根，繼續沉默。
+        for so_far in (6, 7):
+            closed[0] = so_far
+            market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+    finally:
+        pool.shutdown()
+
+    buys = (
+        db_session.query(Order)
+        .filter(Order.strategy_id == healthy.id, Order.side == OrderSide.BUY)
+        .count()
+    )
+    assert buys >= 1, (
+        "鄰居逾時一次，這支策略就安靜地退回 HOLD 了：子行程被殺掉，它的累積狀態跟著沒了，"
+        "而『我們餵到哪一根』的記帳活在父行程、沒有人清掉——於是迴圈只餵新的 K 棒，"
+        "它得重新累積夠長的歷史才會再說話，而這中間每一輪 last_error 都是 None。"
+    )
+
+
+def test_a_strategy_saved_mid_round_is_not_blamed_for_it(
+    db_session, monkeypatch, mock_market_service
+):
+    """使用者在迴圈跑到一半按下「儲存」，不可以被算成這支策略的錯。
+
+    `release_strategy()`（strategies.py 四個端點都會呼叫）跑在請求執行緒上，會把 key
+    從 slot.loaded 拿掉。而 `last_bar_ts` 一旦變成「實例不在了就回 None」的 property，
+    只要 `_run_bar_strategy` 在同一個邏輯判斷裡讀它兩次以上（例如把它留在 list
+    comprehension 的條件裡逐根 K 棒重讀），那次 discard 落在兩次讀取之間，後面拿到的
+    就是 None，`bar.timestamp > None` 直接 TypeError。
+
+    TypeError 不是 WorkerUnavailable，於是 `_record_strategy_error` 把「我們的子行程沒
+    了」寫成「你的程式碼壞了」，累積五次永久停用、沒有東西會打開。子行程／池子壞掉
+    不可以走停用那條路——CLAUDE.md 子行程五條的第三條。
+
+    所以斷言的是 consecutive_errors 沒有動，不是「有沒有訊號」：這裡要守的是那道分流，
+    不是那一輪的結果。
+    """
+    from app.services import strategy_pool
+
+    pool = strategy_pool.StrategyPool(size=1)
+    monkeypatch.setattr(market_loop, "_registry", pool)
+
+    bars = _seven_daily_bars()
+    closed = [5]
+    monkeypatch.setattr(mock_market_service, "get_bars", lambda *a, **k: list(bars[: closed[0]]))
+
+    user = User(email="midsave@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    strategy = Strategy(
+        user_id=user.id,
+        name="被存到的那支",
+        symbol="AAPL",
+        source_code=BAR_SOURCE_THAT_NEEDS_HISTORY,
+        code_hash="irrelevant-for-tests",
+        is_active=True,
+    )
+    db_session.add(strategy)
+    db_session.commit()
+    db_session.refresh(strategy)
+
+    try:
+        market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+
+        # 把「第一次讀完之後、第二次讀之前」那個瞬間釘死。真的競爭跑不出穩定的測試，
+        # 但翻面的動作是真的：這裡呼叫的就是四個端點在用的那個 release_strategy。
+        real = strategy_pool.StrategyPool._instance_is_live
+        reads = [0]
+
+        def saved_right_after_the_first_read(self, key):
+            reads[0] += 1
+            answer = real(self, key)
+            if reads[0] == 1:
+                # 第一次讀取拿到的是真的答案（實例還在），而之後的每一次都在翻面的
+                # 另一邊。只讀一次的呼叫端不會看見翻面；逐根 K 棒重讀的那種會。
+                market_loop.release_strategy(int(key))
+            return answer
+
+        monkeypatch.setattr(
+            strategy_pool.StrategyPool, "_instance_is_live", saved_right_after_the_first_read
+        )
+        closed[0] = 6
+        market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+    finally:
+        pool.shutdown()
+
+    db_session.refresh(strategy)
+    assert strategy.consecutive_errors == 0, (
+        f"子行程沒了被算成策略的錯：last_error = {strategy.last_error!r}。"
+        "連續五次就永久停用，而且沒有東西會把它打開。"
+    )
+    assert strategy.is_active
