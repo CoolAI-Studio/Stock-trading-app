@@ -84,6 +84,21 @@ DEFAULT_BAR_LIMIT = 300
 # 份：讀得比存的深會拿到一段空的，存得比讀的深是在免費方案上白佔空間。
 MAX_STORED_BARS = bar_store.MAX_STORED_BARS
 
+# 記憶體裡的快取一次最多握著幾根 K 棒（所有代號、所有週期加起來）。
+#
+# 有上限，是因為 `_bar_cache` 本來沒有任何東西會把它拿掉：TTL 只決定「這一筆還算不算
+# 新鮮」，過期的照樣佔著記憶體等下一次同樣的請求把它蓋掉；沒有下一次的就永遠躺著。而
+# 深度是使用者決定的——圖表往前拉會問到 MAX_CHART_BARS（3500）根。
+#
+# 量過：一筆滿的（3500 根 Bar）是 **687 KB**。看過 100 個代號 × 5 個週期就是 344 MB，
+# 而免費方案整台 512 MB，策略池自己還佔 60 MB。行程被 OOM 殺掉的意思是每一則提醒都停
+# 了，而這只是一份「少問一次上游」的快取。
+#
+# 上限用**總根數**不是筆數：那才是真正花掉的東西。用筆數的話，同一個數字對盯盤迴圈
+# （一筆 300 根）和對深拉的圖表（一筆 3500 根）差了十倍。60,000 根約 12 MB，容得下
+# 200 支盯盤策略的序列，或十七張拉到底的圖。
+MAX_CACHED_BARS = 60_000
+
 
 logger = logging.getLogger("app.market_data")
 
@@ -279,6 +294,34 @@ class MarketDataService:
             return
         if stored:
             self._bar_cache[key] = (None, 0, stored)
+            self._evict_until_within_budget(key)
+
+    def cached_bar_count(self) -> int:
+        """記憶體裡現在總共握著幾根 K 棒。"""
+        return sum(len(bars) for _, _, bars in self._bar_cache.values())
+
+    def _evict_until_within_budget(self, keep: tuple[DataSource, str, Timeframe]) -> None:
+        """把快取壓回 MAX_CACHED_BARS 以下，最舊寫入的先丟。
+
+        `keep` 是這一次剛寫進去的那一筆，永遠不丟：丟掉它的話，同一個請求連問兩次就會
+        打上游兩次——快取變成負擔而不是幫忙，而且那正好發生在快取滿了、也就是最忙的時
+        候。一筆自己就超過預算的也留著（丟掉換不到任何東西：下一次同樣的請求還是會把它
+        抓回來，而那一次的答案還是得在記憶體裡存在過）。
+
+        丟的是最舊寫入的，不是最少用到的。盯盤迴圈的那幾筆每個 TTL 就重寫一次，所以它
+        們一直是年輕的；被看過一次就再也沒人問的圖表序列會自己老掉。真正要追蹤讀取時間
+        的話，每一次快取命中都得改動這個 dict，而那換到的只是更精準地丟掉一筆「再抓回
+        來就好」的東西。
+        """
+        total = self.cached_bar_count()
+        if total <= MAX_CACHED_BARS:
+            return
+        for key in list(self._bar_cache):
+            if total <= MAX_CACHED_BARS:
+                break
+            if key == keep:
+                continue
+            total -= len(self._bar_cache.pop(key)[2])
 
     def bars_are_stored(self, symbol: str, timeframe: Timeframe, data_source: DataSource) -> bool:
         """這一批是硬碟上的存量，不是剛剛抓到的。
@@ -393,6 +436,7 @@ class MarketDataService:
         # it records what was requested, so a repeat of the same request is
         # served from cache rather than hammering a symbol that has nothing.
         self._bar_cache[key] = (now, limit, bars)
+        self._evict_until_within_budget(key)
         self._bar_failed_at.pop(key, None)
 
         # 只寫真的抓到的那些。`bars` 在空答案時會退回舊的快取內容，把它再寫一次
