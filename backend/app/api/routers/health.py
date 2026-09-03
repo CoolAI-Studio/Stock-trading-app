@@ -1,14 +1,22 @@
 import logging
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
+from app.enums import NotificationStatus
+from app.models.mixins import utcnow
+from app.models.notification import NotificationLog
 from app.services import build_info, worker_health
+
+# 只看最近這段時間的「放棄」。跟狀態頁的統計窗口同一個道理：半個月前沒送出去的那
+# 一則，今天已經不是一個他可以做什麼的東西，而一個永遠紅著的燈會被學會忽略。
+_UNDELIVERED_WINDOW_HOURS = 24
 
 logger = logging.getLogger("app.health")
 
@@ -151,11 +159,47 @@ def healthz(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]
     # perfectly well. Nothing anywhere surfaced it, and the 測試 button
     # positively reported success. The external watchdog is the only thing that
     # looks when nobody is looking, so this is what it needs to see.
-    checks["notifications"] = (
-        {"status": _OK}
-        if settings.NOTIFICATIONS_ENABLED
-        else {"status": _FAIL, "detail": "NOTIFICATIONS_ENABLED is off; no alert will be sent"}
-    )
+    # **一則沒有送到的提醒，是這個產品的重大失效**（CLAUDE.md 第一段）。而這一格原本
+    # 只問了「NOTIFICATIONS_ENABLED 有沒有被關掉」——也就是問「這個功能在不在」，不是
+    # 問「提醒有沒有送到」。
+    #
+    # 於是這個情境是全綠的：他的 bot token 被撤銷 → 每一則都失敗 → 重送到期、放棄 →
+    # /healthz 全綠 → 看門狗永遠不寄信 → 他什麼都不知道。跟子行程停擺、K 棒抓不到是
+    # 同一個形狀，只是輪到最重要的那一格。
+    #
+    # **算的是「放棄」，不是「失敗」。** 失敗會重送，而重送多半會成功——一次 Telegram
+    # 抖動不該把看門狗叫起來。放棄不一樣：重送已經用完，那一則永遠不會到了。
+    #
+    # 只看最近這段時間：半個月前放棄掉的那一則不該讓今天的探測是紅的，而一個永遠紅著
+    # 的燈會被學會忽略。
+    undelivered = 0
+    if settings.NOTIFICATIONS_ENABLED:
+        try:
+            since = utcnow() - timedelta(hours=_UNDELIVERED_WINDOW_HOURS)
+            undelivered = int(
+                db.execute(
+                    select(func.count(NotificationLog.id)).where(
+                        NotificationLog.status == NotificationStatus.FAILED,
+                        NotificationLog.next_retry_at.is_(None),
+                        NotificationLog.channel_id.is_not(None),
+                        NotificationLog.created_at >= since,
+                    )
+                ).scalar_one()
+                or 0
+            )
+        except Exception:  # noqa: BLE001 -- 資料庫那一格已經在報這件事了，不要報兩次
+            undelivered = 0
+
+    if not settings.NOTIFICATIONS_ENABLED:
+        checks["notifications"] = {
+            "status": _FAIL,
+            "detail": "NOTIFICATIONS_ENABLED is off; no alert will be sent",
+        }
+    elif undelivered:
+        # 幾則，不是哪一則。這支端點沒有憑證也打得到——跟代號和策略那兩格同一條規則。
+        checks["notifications"] = {"status": _FAIL, "undelivered": undelivered}
+    else:
+        checks["notifications"] = {"status": _OK}
 
     failing = any(check["status"] == _FAIL for check in checks.values())
     if failing:

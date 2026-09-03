@@ -118,6 +118,17 @@ def read_verdict(status_code: int | None, body: str | None) -> list[str]:
         if not isinstance(check, dict) or check.get("status") != "fail":
             continue
         sentence = _MEANING.get(name, f"{name} 檢查失敗。")
+        # 同一格現在有兩個成因，而它們要他做的事完全不同：「功能被關掉」是去打開一個
+        # 開關，「有提醒送不出去」是去修一個管道。用同一句話講，等於把他送去看一個沒
+        # 有問題的地方。
+        undelivered = check.get("undelivered")
+        if isinstance(undelivered, int) and undelivered:
+            sentence = (
+                f"有 {undelivered} 則提醒重送到最後還是沒送出去，已經放棄了 —— "
+                "那幾則永遠不會到。多半是通知管道壞了（Telegram 的 token 被撤銷、"
+                "Email 密碼改過、推播訂閱過期）。到 app 的「通知」頁看哪一個管道在報錯，"
+                "修好之後按一次「傳一則測試」確認。"
+            )
         # The symbols check names what is broken, and the whole point of this
         # email is that the owner should not have to open a dashboard at 3am
         # to find out which of their rows it was. Read defensively: an older
