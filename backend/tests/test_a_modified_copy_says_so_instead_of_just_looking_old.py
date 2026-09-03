@@ -406,3 +406,36 @@ def test_it_does_not_open_a_new_one_every_day():
 
     assert "gh pr list" in text
     assert "SYNC_BRANCH" in text
+
+
+def test_nothing_still_tells_him_that_updates_stopped_for_good():
+    """同步改成開 PR 之後，「自動更新就停了」這句話就不再是真的。
+
+    在那之前它是真的：`sync-from-upstream.yml` 遇到分岔會 `exit 1`，那份副本從此拿不
+    到任何東西。所以 README 和畫面上都寫著「那之後自動更新就停了」。
+
+    現在它會開一個 PR——**更新沒有停，它在等他按**。而舊的那句話比沒有更糟：它告訴一個
+    正在擔心安全修補的人「你已經沒救了」，於是他不會去看那個其實正等著他的 PR。
+
+    這一條掃的是整個 repo（文件和畫面），因為那句話當初就是同時寫在好幾個地方的。
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    checked = [
+        root / "README.md",
+        root / "frontend" / "src" / "components" / "VersionBadge.tsx",
+        root / "frontend" / "src" / "lib" / "types.ts",
+    ]
+
+    stale: list[str] = []
+    for path in checked:
+        text = path.read_text(encoding="utf-8")
+        if "自動更新就停了" in text or "所以它已經停了" in text:
+            stale.append(path.name)
+
+    assert not stale, (
+        f"這幾個地方還在說更新已經停了：{'、'.join(stale)}。"
+        "同步遇到分岔現在會開一個 PR——更新沒有停，它在等他按。"
+        "說成停了會讓一個正在擔心安全修補的人放棄去看那個 PR。"
+    )
