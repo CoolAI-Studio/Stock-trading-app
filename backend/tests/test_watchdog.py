@@ -408,3 +408,26 @@ def test_the_advice_does_not_assume_which_platform_he_used():
         f"信裡指名了某一家平台：{named}。看門狗不知道他部署在哪裡——"
         "安裝頁給了四條路，而對走另外三條的人來說，那句話會把他送去一個不存在的頁面。"
     )
+
+
+def test_the_database_advice_names_the_cause_that_comes_back_every_month():
+    """「連不上資料庫」對他來說不是一個可以拿去做事的東西。
+
+    這封信是資料庫掛掉的時候**唯一還到得了他手上的東西**——app 自己的每一頁都要資料
+    庫才畫得出來，所以那個時候畫面什麼都說不了。
+
+    而這條路上最可能的原因是一個會**每個月固定回來一次**的：免費方案的資料庫多半有
+    每月運算時數上限，而這個 app 每五分鐘就碰一次資料庫（關市時也是），所以那顆運算
+    單元幾乎不會休眠——額度會在月中前後用完，然後被停到下一個帳單週期。
+
+    少了這一句，他每個月看到同一封信、每個月重新查一次，然後每個月得到同一個結論：
+    「這個 app 壞了而我修不好。」
+
+    講法要對每一家都成立（不是每一家都用運算時數計費），所以是「先去看」而不是「就
+    是這個」。
+    """
+    from scripts.watchdog import _MEANING
+
+    advice = _MEANING["database"]
+
+    assert "額度" in advice or "時數" in advice or "用完" in advice, advice
