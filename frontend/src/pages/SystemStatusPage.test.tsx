@@ -23,7 +23,7 @@ vi.mock('../lib/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 const HEALTHY: SystemStatus = {
   overall: 'ok',
   worker: { enabled: true, uptime_sec: 3600, last_loop_age_sec: 2, last_poll_age_sec: 3 },
-  market_data: { consecutive_empty_polls: 0, stale_symbols: [] },
+  market_data: { consecutive_empty_polls: 0, stale_symbols: [], stale_bars: [] },
   assistant_available: false,
   notifications: {
     enabled: true,
@@ -97,10 +97,29 @@ describe('警告會不會停擺', () => {
       market_data: {
         consecutive_empty_polls: 0,
         stale_symbols: [{ symbol: '2330.TW', gap_sec: 1800 }],
+        stale_bars: [],
       },
     })
 
     expect(await screen.findByText('2330.TW')).toBeInTheDocument()
+  })
+
+  it('抓不到 K 棒的那幾段也要列出來，而且跟報價分開講', async () => {
+    // 報價和 K 棒走的是上游不同的端點，所以「報價正常、K 棒抓不到」是一個真的
+    // 組合。兩邊混在一起講的話，他會看到「抓不到報價：沒有」然後以為行情都好好
+    // 的，而他的週線策略一則提醒都發不出來。
+    //
+    // 具名，不是計數：要知道是哪一段，他才知道要去改哪一列。
+    show({
+      overall: 'fail',
+      market_data: {
+        consecutive_empty_polls: 0,
+        stale_symbols: [],
+        stale_bars: [{ series: 'AAPL 1wk', gap_sec: 1800 }],
+      },
+    })
+
+    expect(await screen.findByText('AAPL 1wk')).toBeInTheDocument()
   })
 
   it('worker 停了要看得出來', async () => {

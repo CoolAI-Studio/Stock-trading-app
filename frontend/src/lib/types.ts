@@ -670,6 +670,11 @@ export interface SystemStatus {
     /** Named and aged rather than counted: the fix is to correct or delete
      * that one watchlist row, and nobody can do either from a number. */
     stale_symbols: { symbol: string; gap_sec: number }[]
+    /** 抓不到 K 棒的那幾段（「代號 週期」）。
+     *
+     * 跟 stale_symbols 分開，因為報價和 K 棒走的是上游不同的端點：「報價正常、
+     * K 棒抓不到」是一個真的組合，而那時候看 K 線的策略一則提醒都發不出來。 */
+    stale_bars: { series: string; gap_sec: number }[]
   }
   notifications: {
     enabled: boolean

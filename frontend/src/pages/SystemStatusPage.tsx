@@ -283,6 +283,28 @@ export function SystemStatusPage() {
             </ul>
           </div>
         )}
+        {/*
+          跟上面那一格分開。報價和 K 棒走的是上游不同的端點，所以「報價回得
+          來、K 棒回不來」是一個真的組合——而兩邊混在一起講的話，他看到「抓不到報價：
+          沒有」就以為行情都好好的，而他的週線策略一則提醒都發不出來。
+        */}
+        {market_data.stale_bars.length === 0 ? (
+          <Row label="抓不到 K 棒的" value="沒有" />
+        ) : (
+          <div className="pt-2">
+            <p className="mb-1 text-sm text-red-400">
+              這幾段抓不到 K 棒，看這些 K 線的策略等於停擺：
+            </p>
+            <ul className="space-y-1">
+              {market_data.stale_bars.map((item) => (
+                <li key={item.series} className="flex justify-between text-sm">
+                  <span className="font-mono text-red-300">{item.series}</span>
+                  <span className="text-slate-400">已經 {age(item.gap_sec)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Section>
 
       <Section title={`通知（最近 ${notifications.window_hours} 小時）`}>
