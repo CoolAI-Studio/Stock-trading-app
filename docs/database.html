@@ -96,7 +96,7 @@
     </details>
 
     <details>
-      <summary>Neon — 免費，不用信用卡，設定最快</summary>
+      <summary>Neon — 免費，不用信用卡（推薦第一次用）</summary>
       <div class="detail-body">
         <ol>
           <li>開 <a href="https://neon.tech" target="_blank" rel="noreferrer noopener">neon.tech</a>，按 <strong>Sign up</strong>，用 Google 或 GitHub 登入。</li>
@@ -110,18 +110,17 @@
           畫面偶爾會改版，<strong>找不到就在頁面上找「Connection string」這個字</strong>。
         </p>
         <p class="gotcha">
-          <strong>先知道這件事：它每個月會停一次。</strong>Neon 免費方案給的是每月的
-          <strong>運算時數額度</strong>（100 CU-hours，官方換算是 400 小時），閒置五分鐘
-          才休眠而且關不掉——但這個系統為了盯盤，收盤後也每五分鐘碰一次資料庫，所以它幾乎
-          不會休眠。一個月 730 小時、額度 400 小時，<strong>大概第十七天就用完</strong>，
-          然後停到下一個帳單週期。停著的那半個月，一則提醒都不會送出。
-          長期一直跑的話，下面那個沒有這個限制。
+          <strong>它有每月的運算時數額度，而這個系統是照著那個數字調過的。</strong>
+          Neon 免費方案給 100 CU-hours（官方換算是 400 小時），閒置五分鐘才休眠而且關不
+          掉。所以這個系統收盤後把問價的間隔拉到半小時，讓那顆運算單元有得睡——這樣整個
+          月用得掉的會在額度以內。<strong>只看加密貨幣的人例外</strong>：那是 24 小時交
+          易，資料庫永遠不會閒置，額度大概月中就會用完，那種情況用下面那一個。
         </p>
       </div>
     </details>
 
     <details>
-      <summary>Supabase — 同樣免費，長期一直跑比較適合（推薦）</summary>
+      <summary>Supabase — 免費，同樣是 Postgres</summary>
       <div class="detail-body">
         <ol>
           <li>開 <a href="https://supabase.com" target="_blank" rel="noreferrer noopener">supabase.com</a>，按 <strong>Start your project</strong>。</li>
@@ -151,9 +150,10 @@
           畫面偶爾會改版，<strong>找不到就找「Connection string」或「URI」</strong>。
         </p>
         <p class="gotcha">
-          <strong>為什麼長期一直跑推薦這一個：</strong>它沒有每月的運算時數額度，只有
-          「一整個星期沒人用就暫停」——而這個系統每五分鐘就碰一次資料庫，所以那條永遠不
-          會踩到。比較麻煩的只有上面那個密碼要自己換。
+          <strong>它跟上面那個的差別：</strong>沒有每月的運算時數額度，只有「一整個星期
+          沒人用就暫停」——而這個系統一直在跑，所以那條永遠不會踩到。<strong>只看加密貨
+          幣的話選這一個</strong>（24 小時交易，資料庫不會有閒置的時候）。代價是多一個
+          步驟：上面那個密碼要自己換進去。
         </p>
       </div>
     </details>

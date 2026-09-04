@@ -40,7 +40,40 @@ def _check_database(db: Session) -> dict[str, Any]:
     return {"status": _OK}
 
 
-def _check_age(label: str, age_sec: float | None, uptime_sec: float) -> dict[str, Any]:
+def _max_age(expected_gap_sec: float | None) -> float:
+    """「多久沒動算不正常」——照迴圈自己剛剛決定要睡多久算。
+
+    ＊ 為什麼不是一個固定的數字。
+
+    輪詢間隔在開市和關市差了兩百倍（5 秒 vs 30 分鐘），而一個固定門檻只能對其中一邊
+    是對的：
+
+        訂成關市那一段容得下的（32 分鐘）→ 盤中一支卡死的迴圈要半小時才被發現，
+                                            而那正是最需要有人在看的時候。
+        訂成開市那一段容得下的（7 分鐘）  → 每天半夜一封「worker 沒有在跑」，
+                                            而 worker 好得很。
+
+    第二種是這個 repo 已經踩過的（`test_the_watchdog_does_not_cry_wolf` 的檔頭記著那
+    次），而修法當時是把門檻放大到蓋過關市的間隔——那等於選了第一種。
+
+    現在改成問迴圈：它剛剛決定要睡多久，門檻就照那個放寬。兩邊都對，而且以後改輪詢
+    間隔不用再連帶改這裡。
+
+    `HEALTH_MAX_AGE_SEC` 留著當**下限**：迴圈還沒說過話的時候（剛開機）要有一個答案，
+    而它也是一輪 tick 本身可以跑多久的餘裕。
+    """
+    floor = settings.HEALTH_MAX_AGE_SEC
+    if expected_gap_sec is None:
+        return floor
+    return max(floor, expected_gap_sec + settings.HEALTH_TICK_BUDGET_SEC)
+
+
+def _check_age(
+    label: str,
+    age_sec: float | None,
+    uptime_sec: float,
+    expected_gap_sec: float | None = None,
+) -> dict[str, Any]:
     if age_sec is None:
         # Nothing recorded yet. Render's free tier spins the whole process down
         # when idle, so the first probe after a cold start meets a worker that
@@ -49,7 +82,7 @@ def _check_age(label: str, age_sec: float | None, uptime_sec: float) -> dict[str
         in_grace = uptime_sec < settings.HEALTH_STARTUP_GRACE_SEC
         return {"status": _STARTING if in_grace else _FAIL}
 
-    status_ = _FAIL if age_sec > settings.HEALTH_MAX_AGE_SEC else _OK
+    status_ = _FAIL if age_sec > _max_age(expected_gap_sec) else _OK
     return {"status": status_, label: round(age_sec, 1)}
 
 
@@ -111,9 +144,11 @@ def healthz(
         beat = worker_health.heartbeat.snapshot()
         # Two independent signals: the loop can keep spinning while every tick
         # raises, so "wedged" and "erroring" have to be distinguishable here.
-        checks["worker"] = _check_age("last_loop_age_sec", beat.last_loop_age_sec, beat.uptime_sec)
+        checks["worker"] = _check_age(
+            "last_loop_age_sec", beat.last_loop_age_sec, beat.uptime_sec, beat.expected_gap_sec
+        )
         checks["market_data"] = _check_age(
-            "last_poll_age_sec", beat.last_poll_age_sec, beat.uptime_sec
+            "last_poll_age_sec", beat.last_poll_age_sec, beat.uptime_sec, beat.expected_gap_sec
         )
         # **只有這一格。**
         #
@@ -155,11 +190,9 @@ def healthz(
         #
         # Named, not merely counted: the owner's fix is to correct or delete
         # that row, and they cannot do either from 「something is wrong」.
-        stale = sorted(
-            symbol
-            for symbol, gap in beat.symbol_gap_sec.items()
-            if gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC
-        )
+        # 同一條理由：這幾格量的也是「跨了幾輪還沒好」，而一輪有多長是會變的。
+        gap_limit = max(settings.HEALTH_MAX_SYMBOL_GAP_SEC, _max_age(beat.expected_gap_sec))
+        stale = sorted(symbol for symbol, gap in beat.symbol_gap_sec.items() if gap > gap_limit)
         # A COUNT, never the names. This endpoint is public by necessity --
         # render.yaml points its health check here and the external watchdog
         # polls it with no credentials -- so naming them served the owner's
@@ -176,10 +209,13 @@ def healthz(
         # 上面每一項都看不到這件事：策略跑在子行程裡，而「子行程壞掉不是策略的錯」
         # （#18）刻意讓它不累積、不停用，於是它也不留下任何痕跡。那個狀態就是提醒
         # 全面停擺，而這支探測是唯一會在沒有人看的時候說話的東西。
+        blocked_limit = max(
+            settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC, _max_age(beat.expected_gap_sec)
+        )
         blind = sorted(
             strategy_id
             for strategy_id, blocked_sec in beat.strategy_blocked_sec.items()
-            if blocked_sec > settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC
+            if blocked_sec > blocked_limit
         )
         # 數量，不是 id——跟上面的代號同一條規則：這支端點沒有憑證也打得到。
         checks["strategies"] = (
@@ -191,11 +227,7 @@ def healthz(
         # 提醒都沒發出。
         #
         # 門檻沿用代號那一格的，因為問的是同一件事：這個代號多久沒有拿到資料了。
-        stuck = sorted(
-            series
-            for series, gap in beat.bar_gap_sec.items()
-            if gap > settings.HEALTH_MAX_SYMBOL_GAP_SEC
-        )
+        stuck = sorted(series for series, gap in beat.bar_gap_sec.items() if gap > gap_limit)
         # 數量，不是名字——這支端點沒有憑證也打得到。
         checks["bars"] = {"status": _FAIL, "stale_count": len(stuck)} if stuck else {"status": _OK}
     else:

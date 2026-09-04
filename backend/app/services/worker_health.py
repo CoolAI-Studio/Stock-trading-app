@@ -54,6 +54,15 @@ class HeartbeatSnapshot:
     #
     # 鍵是 "代號 週期"，因為同一個代號的日線好好的、週線抓不到是常見的形狀。
     bar_gap_sec: dict[str, float] = field(default_factory=dict)
+    # 迴圈自己說它下一輪大概多久之後會來（秒）。None 代表還沒說過。
+    #
+    # **有這一格，健康檢查的門檻才不用寫死。** 輪詢間隔在開市和關市差了兩百倍（5 秒
+    # vs 30 分鐘），而一個能容得下關市那一段的固定門檻，在開市時就慢得沒有意義——一支
+    # 卡死的迴圈要半小時才被發現，而那是盤中。反過來寫死成開市的數字，則是每天半夜一
+    # 封「worker 沒有在跑」，而 worker 好得很。
+    #
+    # 兩種寫法各壞一半，所以問迴圈本身：它剛剛決定要睡多久，健康檢查就照那個放寬。
+    expected_gap_sec: float | None = None
     # 這個行程起來之前，有多久沒有任何行程在跑。None 代表沒有這種空白。
     #
     # **這張快照上其他每一欄都看不到這件事，而且結構上不可能看得到**：它們全都是這
@@ -81,6 +90,8 @@ class WorkerHeartbeat:
         self._bar_gap_since: dict[str, float] = {}
         # 開機時回頭看到的那段空白（秒）。算一次，之後不變。
         self._slept_sec: float | None = None
+        # 迴圈上一次決定要睡多久。健康檢查照這個放寬門檻。
+        self._expected_gap: float | None = None
 
     def mark_loop(self) -> None:
         """The loop reached the top of an iteration, so it is not wedged."""
@@ -159,6 +170,13 @@ class WorkerHeartbeat:
             if series not in failed:
                 del self._bar_gap_since[series]
 
+    def expect_next_within(self, seconds: float) -> None:
+        """迴圈剛決定要睡多久——健康檢查照這個算「多久沒動算不正常」。
+
+        寫在睡之前，不是醒之後：探測最不巧的那一刻正好是在睡的中間。
+        """
+        self._expected_gap = seconds
+
     def mark_downtime(self, seconds: float) -> None:
         """開機時回頭看：這個行程起來之前，有多久沒有任何行程在跑。
 
@@ -184,6 +202,7 @@ class WorkerHeartbeat:
             strategy_blocked_sec={sid: now - since for sid, since in self._blocked_since.items()},
             bar_gap_sec={s: now - since for s, since in self._bar_gap_since.items()},
             slept_sec=self._slept_sec,
+            expected_gap_sec=self._expected_gap,
         )
 
 

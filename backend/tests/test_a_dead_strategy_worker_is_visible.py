@@ -129,16 +129,25 @@ def test_a_healthy_strategy_is_not_dragged_down_by_a_blind_one():
 # --- 門檻本身：半夜不要亂叫 --------------------------------------------------
 
 
-def test_the_threshold_clears_the_closed_market_interval():
-    """跟 HEALTH_MAX_AGE_SEC 同一條不變式。
+def test_the_threshold_clears_whatever_the_loop_is_sleeping():
+    """跟 HEALTH_MAX_AGE_SEC 同一條不變式，只是那個常數現在是**下限**不是門檻。
 
-    關市的時候輪詢間隔是 CLOSED_POLL_INTERVAL_SEC，所以一支真的持續壞掉的策略也
-    要等到**第二次**被問到才會累積超過一個週期。門檻小於一個週期加一輪 tick 的
-    話，一次失敗的重生就足以讓探測紅一次。
+    關市的時候輪詢間隔是 CLOSED_POLL_INTERVAL_SEC，所以一支真的持續壞掉的策略也要
+    等到**第二次**被問到才會累積超過一個週期。門檻小於一個週期加一輪 tick 的話，一
+    次失敗的重生就足以讓探測紅一次。
+
+    而輪詢間隔會變（開市 5 秒、關市半小時），所以門檻改成跟著迴圈自己說的那個數字
+    走——`_max_age` 就是那個換算，這裡問的是它有沒有真的蓋過去。
     """
-    floor = market_loop.CLOSED_POLL_INTERVAL_SEC + settings.HEALTH_TICK_BUDGET_SEC
+    from app.api.routers.health import _max_age
 
-    assert settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC > floor
+    floor = market_loop.CLOSED_POLL_INTERVAL_SEC + settings.HEALTH_TICK_BUDGET_SEC
+    limit = max(
+        settings.HEALTH_MAX_STRATEGY_BLOCKED_SEC,
+        _max_age(market_loop.CLOSED_POLL_INTERVAL_SEC),
+    )
+
+    assert limit >= floor
 
 
 # --- 盯盤迴圈有沒有記下來 ----------------------------------------------------

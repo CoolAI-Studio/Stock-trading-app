@@ -23,7 +23,7 @@ day of pointless requests and nothing worse.
 Stdlib only -- zoneinfo, no new dependency for what is a table of two markets.
 """
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.enums import DataSource
@@ -43,6 +43,25 @@ class _Session:
         if local.weekday() >= 5:  # Saturday, Sunday
             return False
         return self.opens <= local.time() <= self.closes
+
+    def next_open_after(self, moment: datetime) -> datetime:
+        """下一次這個市場開盤是什麼時候（當地時間）。
+
+        跟這個模組其他地方一樣，**假日當成有開**——多醒一次只是浪費一次請求，而少醒
+        一次是那一天的提醒沒有人在看。方向不對稱，所以往「多醒」錯。
+
+        用當地時間做加減（`aware + timedelta` 走的是牆上時鐘），所以夏令時間換算之後
+        開盤還是同一個鐘點，不會整段偏一小時。
+        """
+        local = moment.astimezone(self.tz)
+        candidate = local.replace(
+            hour=self.opens.hour, minute=self.opens.minute, second=0, microsecond=0
+        )
+        if candidate <= local or local.weekday() >= 5:
+            candidate += timedelta(days=1)
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=1)
+        return candidate
 
 
 # 09:00-13:30 for TWSE and TPEx alike. Deliberately the regular session only:
@@ -150,3 +169,29 @@ def any_open(
     notification retry sweep does not care what time it is.
     """
     return any(is_open(symbol, at, source) for symbol, source in watched)
+
+
+def seconds_until_next_open(
+    watched: list[tuple[str, DataSource]],
+    at: datetime | None = None,
+) -> float | None:
+    """最快多久之後會有一個被盯的市場開盤。全部都問不出來就回 None。
+
+    ＊ 為什麼需要它。
+
+    收盤後的輪詢放慢到半小時，是為了讓免費方案的資料庫睡得著（見
+    `market_loop.CLOSED_POLL_INTERVAL_SEC`）。但迴圈是睡滿一整段才醒的，所以單純
+    放慢會讓它可能睡過開盤——而開盤那一段正是跳最兇、停損最可能被穿過去的時候。
+
+    **回 None 而不是 0。** 0 會讓呼叫端立刻再跑一輪，也就是忙碌空轉；而「問不出來」
+    在這個模組裡一律讀成「有開」，那種情況根本不會走到這裡。
+    """
+    moment = at or datetime.now(UTC)
+    soonest: float | None = None
+    for symbol, source in watched:
+        session = _session_for(symbol, source)
+        if session is None:
+            continue
+        gap = (session.next_open_after(moment) - moment).total_seconds()
+        soonest = gap if soonest is None else min(soonest, gap)
+    return soonest

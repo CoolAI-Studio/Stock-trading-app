@@ -910,17 +910,28 @@ describe('第二頁：兩家免費 Postgres 的差別，要寫在他選的那個
     return strip(found as string)
   }
 
-  it('Neon 那一格說得出它每個月會停', () => {
+  it('Neon 那一格說得出它有每月的運算時數額度', () => {
+    // 這個系統把收盤後的問價間隔拉到半小時，就是為了待在那個額度裡（見
+    // market_loop.CLOSED_POLL_INTERVAL_SEC）。他不需要知道細節，但需要知道這件事存
+    // 在——不然哪天他把間隔調快、或加了一堆 24 小時的標的，會不知道資料庫為什麼停了。
     const text = drawerFor('Neon')
 
     expect(text).toMatch(/時數|額度/)
-    expect(text).toMatch(/用完|停/)
   })
 
-  it('Supabase 那一格說得出它為什麼不會', () => {
+  it('而且說得出唯一一種調間隔也救不了的情況', () => {
+    // 加密貨幣 24 小時交易 = 資料庫永遠不會閒置 = 額度月中就用完。要指名，而且要指出
+    // 往哪走，不然他會以為是自己弄錯了什麼。
+    const text = drawerFor('Neon')
+
+    expect(text).toMatch(/加密貨幣|24 小時/)
+  })
+
+  it('Supabase 那一格說得出它跟上面那個差在哪', () => {
     const text = drawerFor('Supabase')
 
-    expect(text).toMatch(/時數|額度|一直跑|長期/)
+    expect(text).toMatch(/時數|額度/)
+    expect(text).toMatch(/加密貨幣|一週|星期/)
   })
 
   it('Supabase 那一格要叫他選 Session pooler，不是預設那一串', () => {
@@ -939,7 +950,7 @@ describe('第二頁：兩家免費 Postgres 的差別，要寫在他選的那個
      * Transaction pooler（6543）也是 IPv4，但它「does not support prepared
      * statements」，而 SQLAlchemy + psycopg2 預設會用——所以要的是 Session pooler。
      *
-     * 這一頁把 Supabase 標成推薦（因為它沒有每月運算時數的問題），那就有義務讓他複製
+     * 這一頁把 Supabase 列成正式選項（只看加密貨幣的人只能用它），那就有義務讓他複製
      * 到對的那一串。
      */
     const text = drawerFor('Supabase')
@@ -948,7 +959,9 @@ describe('第二頁：兩家免費 Postgres 的差別，要寫在他選的那個
     expect(text).toMatch(/IPv6|IPv4/)
   })
 
-  it('不要再把會停的那一家標成推薦', () => {
+  it('只推薦一家 —— 兩家都標「推薦」等於沒有推薦', () => {
+    // 這一頁的工作是讓他能決定，不是把選擇丟回去給他。哪一家不是重點（那是維護者的
+    // 判斷，而且會變）；重點是同一時間只有一個答案。
     const page = read('database.html')
     const summaries = page
       .split('<details')
@@ -956,8 +969,6 @@ describe('第二頁：兩家免費 Postgres 的差別，要寫在他選的那個
       .map((d) => strip(d.slice(0, d.indexOf('</summary>'))))
     const recommended = summaries.filter((s) => s.includes('推薦'))
 
-    for (const summary of recommended) {
-      expect(summary, `被標成推薦的是：${summary}`).not.toMatch(/Neon/)
-    }
+    expect(recommended.length, `被標成推薦的有 ${recommended.length} 個`).toBe(1)
   })
 })

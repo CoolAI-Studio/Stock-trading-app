@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func
@@ -54,10 +54,26 @@ _SLOW_TICK_FACTOR = 3
 # Deliberately a slower poll rather than none at all: a daily-bar strategy's
 # candle only closes after the session, so stopping entirely would push its
 # signal to the next opening bell -- telling the owner at exactly the moment
-# they needed to have already decided. Five minutes still collects that,
-# while taking one symbol from ~17,000 requests a day to a few hundred
+# they needed to have already decided. Half an hour still collects that,
+# while taking one symbol from ~17,000 requests a day to a few dozen
 # against a scraper that blocks IPs for precisely that behaviour.
-CLOSED_POLL_INTERVAL_SEC = 300.0
+#
+# ＊ 為什麼是半小時而不是五分鐘。
+#
+# 這個數字直接決定使用者的資料庫活不活得過一個月。Neon 免費方案給 100 CU-hours
+# （官方換算 0.25 CU 跑 400 小時），而它**閒置五分鐘才休眠、免費方案關不掉**——五分
+# 鐘的輪詢剛好踩在那個門檻上，於是資料庫幾乎不休眠，一個月要 730 小時，大約第 17 天
+# 額度用完，然後停到下一個帳單週期。停著的那半個月，一則提醒都不會送出。
+#
+# 半小時讓它有 25 分鐘是睡著的，整個月用得掉的降到 400 小時以內。換來的代價是收盤後
+# 的日線訊號最多晚半小時——而那段時間市場是關的，他本來就要等到隔天才動得了。
+#
+# **改小之前先讀 CLAUDE.md 那一節。** 這一格看起來像一個效能參數，實際上是免費方案的
+# 額度預算，而它壞掉的樣子是「每個月後半完全沒有提醒」。
+#
+# 只看加密貨幣的人不適用：24 小時開盤 = 永遠走快的那條路 = 資料庫永遠不睡。那種情況
+# 只能換一家不用運算時數計費的（例如 Supabase）。
+CLOSED_POLL_INTERVAL_SEC = 1800.0
 
 # 開機時回頭看，多長的空白才算「這段時間沒有人在盯盤」。
 #
@@ -806,7 +822,7 @@ def tick_once(
     return events
 
 
-def next_poll_delay(db: Session | None = None) -> float:
+def next_poll_delay(db: Session | None = None, at: datetime | None = None) -> float:
     """Seconds to wait before the next poll.
 
     Reads the watch list rather than the clock alone, because "is the market
@@ -830,9 +846,16 @@ def next_poll_delay(db: Session | None = None) -> float:
             # Nothing to watch is not the same as everything being shut, but
             # it is equally not a reason to poll hard.
             return CLOSED_POLL_INTERVAL_SEC
-        if market_calendar.any_open(watched):
+        if market_calendar.any_open(watched, at):
             return settings.MARKET_DATA_POLL_INTERVAL_SEC
-        return CLOSED_POLL_INTERVAL_SEC
+        # **不可以睡過開盤。** 這個迴圈是睡滿一整段才醒的，所以放慢到半小時之後，最
+        # 壞情況是 08:35 決定睡 30 分鐘、09:05 才醒——開盤後前五分鐘沒有人在盯，而那
+        # 一段正是跳最兇、停損最可能被穿過去的時候。省額度不可以用開盤那幾分鐘去換。
+        until_open = market_calendar.seconds_until_next_open(watched, at)
+        if until_open is None:
+            return CLOSED_POLL_INTERVAL_SEC
+        # 下限：時鐘或時區換算有一點點誤差的時候，`max` 讓它不會變成忙碌空轉。
+        return max(1.0, min(CLOSED_POLL_INTERVAL_SEC, until_open))
     except Exception:
         logger.exception("could not work out the next poll delay; using the normal interval")
         return settings.MARKET_DATA_POLL_INTERVAL_SEC
@@ -956,10 +979,13 @@ async def run_forever(stop_event: asyncio.Event) -> None:
                     elapsed,
                     settings.MARKET_DATA_POLL_INTERVAL_SEC,
                 )
+        delay = await asyncio.to_thread(next_poll_delay)
+        # **在睡之前說，不是醒之後。** 探測最不巧的那一刻正好是在睡的中間，而健康檢查
+        # 的門檻是照這個數字放寬的（health.py 的 _max_age）——醒來才說的話，那一整段
+        # 睡眠都是拿舊的、短的門檻在量，於是每天半夜都會報一次假的停擺。
+        worker_health.heartbeat.expect_next_within(delay)
         try:
-            await asyncio.wait_for(
-                stop_event.wait(), timeout=await asyncio.to_thread(next_poll_delay)
-            )
+            await asyncio.wait_for(stop_event.wait(), timeout=delay)
         except TimeoutError:
             pass
     logger.info("market loop stopped")
