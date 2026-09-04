@@ -26,6 +26,8 @@ _OK = "ok"
 _FAIL = "fail"
 _DISABLED = "disabled"
 _STARTING = "starting"
+# 淺層探測沒有問這一格。**不是 ok**——「不知道」不可以顯示成「沒問題」。
+_SKIPPED = "skipped"
 
 
 def _check_database(db: Session) -> dict[str, Any]:
@@ -135,7 +137,30 @@ def healthz(
     Cheap on purpose: one `SELECT 1` plus in-memory timestamps, nothing that
     touches a market-data provider.
     """
-    checks: dict[str, dict[str, Any]] = {"database": _check_database(db)}
+    # ＊ 淺層探測**不碰資料庫**，而這是一個額度決定，不是效能微調。
+    #
+    # 這一格每被打一次就 `SELECT 1` 一次，而打它的東西比資料庫的休眠門檻密得多：平台
+    # 自己的健康檢查一直在打（那正是它的工作），前端只要開著就每 30 秒一次
+    # （WorkerHealthBanner）。Neon 免費方案閒置五分鐘才休眠、而且關不掉，所以那顆運算
+    # 單元被這支端點釘在醒著的狀態——一個月 730 小時、額度 400 小時，月中就用完，然後
+    # 停到下一個帳單週期。
+    #
+    # 量出來的：維護者的主控台 2026-09-04 顯示 24.12/100 CU-hrs，用量從 9/1 起算。三天
+    # 多用掉四分之一。把盯盤迴圈的輪詢從 5 分鐘拉到 30 分鐘（#95）救不了這一半——迴圈
+    # 睡著了，這支端點照樣每幾十秒把資料庫叫醒一次。
+    #
+    # 而淺層根本不需要這個答案：#94 之後它唯一會 503 的條件是「盯盤迴圈不再往前」，跟
+    # 資料庫沒有關係。深的那一條照舊查——看門狗和監控服務每 5 分鐘打一次，那個頻率是刻
+    # 意接受的代價，換來的是「有沒有人會被通知」唯一的外部觀測。
+    checks: dict[str, dict[str, Any]] = {
+        "database": _check_database(db)
+        if deep
+        else {
+            "status": _SKIPPED,
+            # 說得出去哪裡問得到真的答案。少了這一句，讀 body 的人只會看到一格空的。
+            "detail": "not checked on the shallow probe; ask /healthz?deep=1",
+        }
+    }
     # 重開這個行程有沒有機會修好。只有這個決定沒帶參數的那一條要不要 503，而**它比
     # 直覺窄得多**——窄到只剩一格，理由見底下 mark_loop 那一段。
     restart_might_help = False

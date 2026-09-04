@@ -71,7 +71,11 @@ def test_healthz_returns_ok_when_every_check_passes(client, worker_clock):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["checks"]["database"]["status"] == "ok"
+    # 資料庫那一格只有深的那一條會查——淺層不碰資料庫，因為平台的健康檢查一直在
+    # 打它，每打一次就把免費方案的運算單元叫醒一次
+    # （test_the_health_probe_does_not_keep_the_database_awake）。
+    deep = client.get("/healthz", params={"deep": "1"}).json()
+    assert deep["checks"]["database"]["status"] == "ok"
     assert body["checks"]["worker"]["status"] == "ok"
     assert body["checks"]["market_data"]["status"] == "ok"
 
@@ -108,7 +112,11 @@ def test_healthz_503s_when_the_worker_stopped_looping(client, worker_clock):
     body = response.json()
     assert body["status"] == "fail"
     assert body["checks"]["worker"]["status"] == "fail"
-    assert body["checks"]["database"]["status"] == "ok"
+    # 資料庫那一格只有深的那一條會查——淺層不碰資料庫，因為平台的健康檢查一直在
+    # 打它，每打一次就把免費方案的運算單元叫醒一次
+    # （test_the_health_probe_does_not_keep_the_database_awake）。
+    deep = client.get("/healthz", params={"deep": "1"}).json()
+    assert deep["checks"]["database"]["status"] == "ok"
 
 
 def test_healthz_503s_when_the_last_successful_poll_is_stale(client, worker_clock):

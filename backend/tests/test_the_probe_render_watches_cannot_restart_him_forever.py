@@ -129,18 +129,26 @@ def test_an_upstream_outage_does_not_restart_the_instance(client, watching):
     assert response.json()["checks"]["market_data"]["status"] == "fail"
 
 
-def test_the_two_answers_carry_the_same_body(client, watching):
-    """差的只有狀態碼。兩個讀者要做的事不一樣，看到的事實要一樣。"""
+def test_the_two_answers_agree_on_everything_the_shallow_one_measured(client, watching):
+    """兩個讀者要做的事不一樣，但看到的事實要一樣——**淺層真的量過的那幾格**。
+
+    唯一的例外是資料庫：淺層刻意不查它，因為平台的健康檢查一直在打這個網址，每打一次
+    就把免費方案的運算單元叫醒一次
+    （test_the_health_probe_does_not_keep_the_database_awake 有量出來的數字）。那一格
+    在淺層回的是 skipped 而不是 ok——「不知道」不可以顯示成「沒問題」。
+    """
     beat, clock = watching
     beat.mark_symbols(asked={"2330.TW"}, answered=set())
     clock.now += settings.HEALTH_MAX_SYMBOL_GAP_SEC + 1
     beat.mark_loop()
     beat.mark_poll_success()
 
-    shallow = client.get("/healthz").json()
-    deep = client.get("/healthz", params={"deep": "1"}).json()
+    shallow = client.get("/healthz").json()["checks"]
+    deep = client.get("/healthz", params={"deep": "1"}).json()["checks"]
 
-    assert shallow["checks"] == deep["checks"]
+    assert shallow.pop("database")["status"] == "skipped"
+    deep.pop("database")
+    assert shallow == deep
 
 
 def test_the_default_is_the_shallow_one(client, monkeypatch):
@@ -269,8 +277,10 @@ def test_a_database_that_is_gone_does_not_restart_the_instance(client, monkeypat
     response = client.get("/healthz")
 
     assert response.status_code == 200, response.json()
-    assert response.json()["checks"]["database"]["status"] == "fail"
-    assert client.get("/healthz", params={"deep": "1"}).status_code == 503
+    # 淺層連問都不問了（那一次查詢本身就是額度成本），所以事實在深的那一條上。
+    deep = client.get("/healthz", params={"deep": "1"})
+    assert deep.status_code == 503
+    assert deep.json()["checks"]["database"]["status"] == "fail"
 
 
 def test_a_poll_that_never_succeeds_does_not_restart_the_instance(client, watching):
