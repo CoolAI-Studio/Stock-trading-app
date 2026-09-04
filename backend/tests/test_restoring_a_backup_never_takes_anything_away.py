@@ -469,3 +469,38 @@ def test_an_old_created_at_is_kept_rather_than_stamped_now(db_session, owner, ot
 
     order = db_session.query(Order).filter(Order.user_id == owner.id).one()
     assert (datetime.now(UTC) - _aware(order.created_at)).days >= 89
+
+
+# --- 全有或全無 --------------------------------------------------------------
+
+
+def test_a_file_it_cannot_finish_leaves_nothing_behind(db_session, owner, other):
+    """半套的還原比沒有還原糟：他會看到一部分東西回來了，以為成功了，然後不知道少了
+    什麼。
+
+    而檔案是外面來的——放了三個月、可能被壓縮軟體動過、可能是別的版本寫的——所以「內
+    容讀得出來但放不回去」是一種要處理的正常狀況，不是一個可以讓端點回 500 的意外。
+    """
+    _fill(db_session, other)
+    snapshot = _snapshot_of(db_session, other)
+    # 策略先進去（它排在最前面），然後在訂單那一步炸掉。
+    snapshot["orders"][0]["side"] = "這不是一個買賣方向"
+
+    with pytest.raises(backup.BackupError):
+        backup.restore(db_session, owner, snapshot)
+
+    assert db_session.query(Strategy).filter(Strategy.user_id == owner.id).count() == 0
+
+
+def test_the_message_does_not_leak_what_was_in_the_file(db_session, owner, other):
+    """這份檔案裡有他的 token 和整份交易紀錄，而驅動的錯誤訊息會把它讀到的東西原封
+    不動帶出來。原因寫進 log，畫面上只說發生了什麼。
+    """
+    _fill(db_session, other)
+    snapshot = _snapshot_of(db_session, other)
+    snapshot["orders"][0]["side"] = "secret-token"
+
+    with pytest.raises(backup.BackupError) as caught:
+        backup.restore(db_session, owner, snapshot)
+
+    assert "secret-token" not in str(caught.value)

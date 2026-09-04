@@ -28,6 +28,7 @@ backups of identical data do not produce identical bytes.
 import base64
 import hashlib
 import json
+import logging
 import struct
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -64,6 +65,8 @@ _SCRYPT_R = 8
 _SCRYPT_P = 1
 
 MIN_PASSPHRASE_LENGTH = 8
+
+logger = logging.getLogger("app.backup")
 
 
 class BackupError(Exception):
@@ -327,6 +330,11 @@ def restore(db: Session, user: User, snapshot: dict) -> RestoreReport:
 
     回傳一份「做了什麼」的清單，因為「還原完成」四個字說不出他真正需要知道的那件事：
     策略和通知管道是停用的，等他自己打開。
+
+    **全有或全無。** 中途炸掉就整批回滾——半套的還原比沒有還原糟：他會看到一部分東西
+    回來了，以為成功了，然後不知道少了什麼。而檔案是外面來的（放了三個月、可能被壓縮
+    軟體動過、可能是別的版本寫的），所以「內容不合預期」是一種要處理的正常狀況，不是
+    一個可以讓端點回 500 的意外。
     """
     version = snapshot.get("format_version")
     if not isinstance(version, int) or version > FORMAT_VERSION:
@@ -336,131 +344,148 @@ def restore(db: Session, user: User, snapshot: dict) -> RestoreReport:
             f"這個備份是比較新的版本（{version}），這一份程式讀不懂。先把系統更新到最新，再試一次。"
         )
 
-    stamp = datetime.now(UTC).strftime("%m-%d %H:%M")
-    suffix = _RESTORED_SUFFIX.format(stamp=stamp)
-    report = RestoreReport()
+    try:
+        stamp = datetime.now(UTC).strftime("%m-%d %H:%M")
+        suffix = _RESTORED_SUFFIX.format(stamp=stamp)
+        report = RestoreReport()
 
-    # 策略：新增、停用、改名。舊 id → 新 id 的對應留著給訊號和提醒紀錄用。
-    strategy_ids: dict[int, int] = {}
-    coerce = _Coercer(Strategy)
-    for row in snapshot.get("strategies") or []:
-        source = row.get("source_code") or ""
-        wanted = str(row.get("name") or "未命名")
-        strategy = coerce.build(
-            Strategy,
-            row,
-            skip=("id", "is_active", "name", "code_hash"),
-            user_id=user.id,
-            name=_unique_name(db, user, wanted + suffix),
-            source_code=source,
-            code_hash=hashlib.sha256(source.encode("utf-8")).hexdigest(),
-            # **一律停用。** 兩份一樣的策略同時在跑 ＝ 同一件事通知兩次，而那是這個
-            # 產品最不能發生的事。他打開他要的那幾個。
-            is_active=False,
-        )
-        db.add(strategy)
-        db.flush()
-        if row.get("id") is not None:
-            strategy_ids[int(row["id"])] = strategy.id
-        report = replace(report, strategies=report.strategies + 1)
-
-    # 通知管道：同樣一律停用，理由一樣——它們是真的會把東西送出去的那一個。
-    coerce = _Coercer(NotificationChannel)
-    for row in snapshot.get("notification_channels") or []:
-        db.add(
-            coerce.build(
-                NotificationChannel,
+        # 策略：新增、停用、改名。舊 id → 新 id 的對應留著給訊號和提醒紀錄用。
+        strategy_ids: dict[int, int] = {}
+        coerce = _Coercer(Strategy)
+        for row in snapshot.get("strategies") or []:
+            source = row.get("source_code") or ""
+            wanted = str(row.get("name") or "未命名")
+            strategy = coerce.build(
+                Strategy,
                 row,
-                skip=("is_enabled",),
+                skip=("id", "is_active", "name", "code_hash"),
                 user_id=user.id,
-                is_enabled=False,
+                name=_unique_name(db, user, wanted + suffix),
+                source_code=source,
+                code_hash=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+                # **一律停用。** 兩份一樣的策略同時在跑 ＝ 同一件事通知兩次，而那是這個
+                # 產品最不能發生的事。他打開他要的那幾個。
+                is_active=False,
             )
-        )
-        report = replace(report, channels=report.channels + 1)
+            db.add(strategy)
+            db.flush()
+            if row.get("id") is not None:
+                strategy_ids[int(row["id"])] = strategy.id
+            report = replace(report, strategies=report.strategies + 1)
 
-    # 持股：UNIQUE(user, symbol)。重複的話系統會以為他部位加倍，停損和風控全部算錯，
-    # 所以「沒有的才加」——而已經有的那一筆是他現在真正持有的，比備份裡的新。
-    have = {symbol for (symbol,) in db.query(Position.symbol).filter(Position.user_id == user.id)}
-    coerce = _Coercer(Position)
-    for row in snapshot.get("positions") or []:
-        if row.get("symbol") in have:
-            report = replace(report, positions_skipped=report.positions_skipped + 1)
-            continue
-        db.add(
-            coerce.build(
-                Position,
-                row,
-                skip=("strategy_id",),
-                user_id=user.id,
-                strategy_id=strategy_ids.get(row.get("strategy_id")),
+        # 通知管道：同樣一律停用，理由一樣——它們是真的會把東西送出去的那一個。
+        coerce = _Coercer(NotificationChannel)
+        for row in snapshot.get("notification_channels") or []:
+            db.add(
+                coerce.build(
+                    NotificationChannel,
+                    row,
+                    skip=("is_enabled",),
+                    user_id=user.id,
+                    is_enabled=False,
+                )
             )
-        )
-        have.add(row["symbol"])
-        report = replace(report, positions=report.positions + 1)
+            report = replace(report, channels=report.channels + 1)
 
-    # 自選股：同樣有 UNIQUE，而且重複在清單上就只是重複。
-    watched = {
-        symbol
-        for (symbol,) in db.query(WatchlistItem.symbol).filter(WatchlistItem.user_id == user.id)
-    }
-    coerce = _Coercer(WatchlistItem)
-    for row in snapshot.get("watchlist") or []:
-        if row.get("symbol") in watched:
-            report = replace(report, watchlist_skipped=report.watchlist_skipped + 1)
-            continue
-        db.add(coerce.build(WatchlistItem, row, user_id=user.id))
-        watched.add(row["symbol"])
-        report = replace(report, watchlist=report.watchlist + 1)
-
-    # 風控：一個使用者一份，所以只在完全沒有的時候才建。**絕不蓋掉他現在那一份**——
-    # 那是他的停損設定，用一個舊檔案換掉它，下一次穿價就是照錯的數字算。
-    rows = snapshot.get("risk_settings") or []
-    if rows and not db.query(RiskSettings).filter(RiskSettings.user_id == user.id).first():
-        db.add(_Coercer(RiskSettings).build(RiskSettings, rows[0], user_id=user.id))
-        report = replace(report, risk_settings_created=True)
-
-    # 訊號紀錄：純歷史，全部加回來。
-    #
-    # **但待確認的要改成已過期。** 一張三個月前的待確認訊號被復活成「現在等你確認」，
-    # 是拿一個早就過去的價格問他要不要動作——而他不會知道那是舊的。歷史留著，行為不留。
-    coerce = _Coercer(Order)
-    for row in snapshot.get("orders") or []:
-        raw_status = row.get("status")
-        was_pending = str(raw_status or "").upper() == OrderStatus.PENDING.value.upper()
-        db.add(
-            coerce.build(
-                Order,
-                row,
-                skip=("id", "strategy_id", "status"),
-                user_id=user.id,
-                strategy_id=strategy_ids.get(row.get("strategy_id")),
-                status=OrderStatus.EXPIRED if was_pending else coerce("status", raw_status),
+        # 持股：UNIQUE(user, symbol)。重複的話系統會以為他部位加倍，停損和風控全部算錯，
+        # 所以「沒有的才加」——而已經有的那一筆是他現在真正持有的，比備份裡的新。
+        have = {
+            symbol for (symbol,) in db.query(Position.symbol).filter(Position.user_id == user.id)
+        }
+        coerce = _Coercer(Position)
+        for row in snapshot.get("positions") or []:
+            if row.get("symbol") in have:
+                report = replace(report, positions_skipped=report.positions_skipped + 1)
+                continue
+            db.add(
+                coerce.build(
+                    Position,
+                    row,
+                    skip=("strategy_id",),
+                    user_id=user.id,
+                    strategy_id=strategy_ids.get(row.get("strategy_id")),
+                )
             )
-        )
-        report = replace(report, orders=report.orders + 1)
-        if was_pending:
-            report = replace(report, expired_pending=report.expired_pending + 1)
+            have.add(row["symbol"])
+            report = replace(report, positions=report.positions + 1)
 
-    # 提醒紀錄：也是純歷史，沒有任何東西會照著它動作。
-    coerce = _Coercer(StrategyAlert)
-    for row in snapshot.get("alerts") or []:
-        new_id = strategy_ids.get(row.get("strategy_id"))
-        if new_id is None:
-            # 那支策略不在這個備份裡（或沒有帶 id）。FK 是 NOT NULL，所以只能跳過
-            # ——一筆孤兒的提醒紀錄對他也沒有意義。
-            continue
-        db.add(
-            coerce.build(
-                StrategyAlert,
-                row,
-                skip=("strategy_id",),
-                user_id=user.id,
-                strategy_id=new_id,
+        # 自選股：同樣有 UNIQUE，而且重複在清單上就只是重複。
+        watched = {
+            symbol
+            for (symbol,) in db.query(WatchlistItem.symbol).filter(WatchlistItem.user_id == user.id)
+        }
+        coerce = _Coercer(WatchlistItem)
+        for row in snapshot.get("watchlist") or []:
+            if row.get("symbol") in watched:
+                report = replace(report, watchlist_skipped=report.watchlist_skipped + 1)
+                continue
+            db.add(coerce.build(WatchlistItem, row, user_id=user.id))
+            watched.add(row["symbol"])
+            report = replace(report, watchlist=report.watchlist + 1)
+
+        # 風控：一個使用者一份，所以只在完全沒有的時候才建。**絕不蓋掉他現在那一份**——
+        # 那是他的停損設定，用一個舊檔案換掉它，下一次穿價就是照錯的數字算。
+        rows = snapshot.get("risk_settings") or []
+        if rows and not db.query(RiskSettings).filter(RiskSettings.user_id == user.id).first():
+            db.add(_Coercer(RiskSettings).build(RiskSettings, rows[0], user_id=user.id))
+            report = replace(report, risk_settings_created=True)
+
+        # 訊號紀錄：純歷史，全部加回來。
+        #
+        # **但待確認的要改成已過期。** 一張三個月前的待確認訊號被復活成「現在等你確認」，
+        # 是拿一個早就過去的價格問他要不要動作——而他不會知道那是舊的。歷史留著，行為不留。
+        coerce = _Coercer(Order)
+        for row in snapshot.get("orders") or []:
+            raw_status = row.get("status")
+            was_pending = str(raw_status or "").upper() == OrderStatus.PENDING.value.upper()
+            db.add(
+                coerce.build(
+                    Order,
+                    row,
+                    skip=("id", "strategy_id", "status"),
+                    user_id=user.id,
+                    strategy_id=strategy_ids.get(row.get("strategy_id")),
+                    status=OrderStatus.EXPIRED if was_pending else coerce("status", raw_status),
+                )
             )
-        )
-        report = replace(report, alerts=report.alerts + 1)
+            report = replace(report, orders=report.orders + 1)
+            if was_pending:
+                report = replace(report, expired_pending=report.expired_pending + 1)
 
-    db.commit()
+        # 提醒紀錄：也是純歷史，沒有任何東西會照著它動作。
+        coerce = _Coercer(StrategyAlert)
+        for row in snapshot.get("alerts") or []:
+            new_id = strategy_ids.get(row.get("strategy_id"))
+            if new_id is None:
+                # 那支策略不在這個備份裡（或沒有帶 id）。FK 是 NOT NULL，所以只能跳過
+                # ——一筆孤兒的提醒紀錄對他也沒有意義。
+                continue
+            db.add(
+                coerce.build(
+                    StrategyAlert,
+                    row,
+                    skip=("strategy_id",),
+                    user_id=user.id,
+                    strategy_id=new_id,
+                )
+            )
+            report = replace(report, alerts=report.alerts + 1)
+
+        db.commit()
+    except BackupError:
+        db.rollback()
+        raise
+    except Exception as exc:  # noqa: BLE001 -- 檔案是外面來的，內容不合預期是正常狀況
+        # 全有或全無。半套的還原比沒有還原糟：他會看到一部分東西回來了，以為
+        # 成功了，然後不知道少了什麼。
+        db.rollback()
+        logger.exception("還原失敗，已經整批回滾")
+        # 原因只寫進 log。這份檔案裡有他的 token 和整份交易紀錄，而驅動的錯誤
+        # 訊息會把它讀到的東西原封不動帶出來。
+        raise BackupError(
+            "這個備份的內容讀得出來，但放不回去（可能是別的版本寫的，或檔案被改過）。"
+            "沒有任何東西被改動。"
+        ) from exc
     return report
 
 
