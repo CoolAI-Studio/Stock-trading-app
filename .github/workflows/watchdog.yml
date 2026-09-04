@@ -45,11 +45,25 @@ name: Watchdog
 
 on:
   schedule:
-    # Every 15 minutes. GitHub's scheduler is best-effort and often runs late
+    # Every 30 minutes, and that number is a DATABASE BUDGET, not a preference.
+    #
+    # 這個 job 打的是 `?deep=1`（watchdog.py 的 deep_url），而深的那一條會查資料庫。
+    # Neon 免費方案**閒置五分鐘才休眠、而且關不掉**，所以每 15 分鐘查一次等於那顆運算
+    # 單元有三分之一的時間是醒著的；30 分鐘一次剛好跟收盤後的盯盤輪詢同一個節奏
+    # （market_loop.CLOSED_POLL_INTERVAL_SEC），所以它不會多花任何額度。
+    #
+    # 量出來的：維護者的主控台 2026-09-04 顯示 24.12/100 CU-hrs，用量從 9/1 起算——三
+    # 天多用掉四分之一。額度用完之後資料庫會被停到下一個帳單週期，而那半個月一則提醒
+    # 都不會送出。
+    #
+    # 代價是壞掉之後最多晚半小時收到信。刻意選的：晚半小時知道，比每個月後半整個停擺
+    # 好。DEPLOYMENT.md 給外部監控的建議是同一個數字，理由也一樣。
+    #
+    # GitHub's scheduler is best-effort and often runs late
     # under load, which is fine here: this is "has it been down for a while",
     # not a stopwatch. Any faster and a late run would overlap the next one for
     # no extra information.
-    - cron: "*/15 * * * *"
+    - cron: "*/30 * * * *"
   # So the owner can prove it works without waiting for the schedule -- an
   # untested alarm is not an alarm.
   workflow_dispatch:

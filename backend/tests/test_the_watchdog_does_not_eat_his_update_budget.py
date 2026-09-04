@@ -7,10 +7,15 @@
     私人 repo（GitHub Free）：一個月 **2,000 分鐘**，而且
                「usage is blocked once you use up your quota」。
 
-這個看門狗是 `*/15 * * * *`，也就是一個月 2,880 次。每一次都要 checkout 加
+這個看門狗是 `*/30 * * * *`，也就是一個月 1,440 次。每一次都要 checkout 加
 setup-python，所以就算 `HEALTH_URL` 沒設、腳本第一行就 `exit 0`，那一分鐘照樣算。
 
-    2,880 次 × 至少 1 分鐘 = 2,880 分鐘 > 2,000
+    1,440 次 × 至少 1 分鐘 = 1,440 分鐘，佔 2,000 的 72%
+
+（間隔原本是 `*/15`，那時候是 2,880 分鐘、直接超過額度。改成半小時是為了另一件事——
+深的那一條會查資料庫，問得比休眠門檻密就把免費方案的運算時數吃光——但即使數字掉到門
+檻底下，底下那個 `if:` 還是要留著：剩下的 560 分鐘要留給
+`sync-from-upstream.yml`，而那是他拿到更新的唯一管道。）
 
 ＊ 為什麼這件事會咬到「更新」。
 
@@ -58,10 +63,11 @@ def test_it_does_not_run_when_nobody_asked_for_it(without_comments: str):
     """沒設 HEALTH_URL 就不要起這個 job。
 
     被跳過的 job 不計分鐘，而起來只為了印一行「沒設定，略過」的 job 要算一分鐘——
-    一個月 2,880 分鐘，超過私人 repo 的 2,000。
+    一個月 1,440 分鐘，佔掉私人 repo 那 2,000 的四分之三，而剩下的要留給每天同步更新
+    的那條工作流程。
     """
     assert "vars.HEALTH_URL" in without_comments, (
-        "job 層沒有用 vars.HEALTH_URL 擋——沒設定的副本會每十五分鐘燒掉一分鐘額度"
+        "job 層沒有用 vars.HEALTH_URL 擋——沒設定的副本會每半小時燒掉一分鐘額度"
     )
     # 擋在 job 層（if:），不是只在 step 裡面 exit 0——後者照樣起了 runner。
     guarded = [
@@ -75,10 +81,30 @@ def test_it_does_not_run_when_nobody_asked_for_it(without_comments: str):
 def test_the_schedule_is_still_there(without_comments: str):
     """省額度不可以順手把看門狗關掉。
 
-    設好 HEALTH_URL 的人（維護者自己那一份）照樣要每十五分鐘被問一次。
+    設好 HEALTH_URL 的人（維護者自己那一份）照樣要被定期問一次。
     """
     assert "schedule:" in without_comments
-    assert "*/15 * * * *" in without_comments
+    assert "cron:" in without_comments
+
+
+def test_it_does_not_ask_more_often_than_the_database_can_sleep():
+    """這個 job 打的是 `?deep=1`，而深的那一條會查資料庫。
+
+    Neon 免費方案閒置五分鐘才休眠、而且關不掉，所以問得比那個門檻密就等於把那顆運算單
+    元釘在醒著的狀態——一個月 730 小時，而額度只有 400 小時（量出來的：維護者的主控台
+    2026-09-04 是 24.12/100，用量從 9/1 起算）。
+
+    盯盤迴圈收盤後已經拉到半小時一次，這裡不可以比它密——否則省下來的那一半又被這個排
+    程吃回去。
+    """
+    import re
+
+    from app.services.market_loop import CLOSED_POLL_INTERVAL_SEC
+
+    found = re.search(r'cron:\s*"\*/(\d+) \* \* \* \*"', WORKFLOW.read_text(encoding="utf-8"))
+
+    assert found, "看不懂這個排程的間隔"
+    assert int(found.group(1)) * 60 >= CLOSED_POLL_INTERVAL_SEC
 
 
 def test_the_reason_is_written_down_where_the_next_person_looks(text: str):

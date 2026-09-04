@@ -255,7 +255,7 @@ CI 的部署步驟自己會看這個欄位：呼叫部署 hook 之後，它會�
 （要有這個確認，`HEALTH_URL` 這個 repository variable 要設好，就是 UptimeRobot 那一節用的同一個網址。）
 
 > ⚠️ **你的 repo 如果是私人的，設 `HEALTH_URL` 之前先看這裡。** 設了它，`Watchdog` 那個
-> 排程就會開始每 15 分鐘跑一次 = 一個月 2,880 次，而私人 repo 在 GitHub Free 上一個月
+> 排程就會開始每 30 分鐘跑一次 = 一個月 1,440 次，而私人 repo 在 GitHub Free 上一個月
 > 只有 **2,000 分鐘**，用完之後「usage is blocked once you use up your quota」——被擋
 > 掉的是**所有**的 Actions，包括每天從上游快轉的那條更新線。
 >
