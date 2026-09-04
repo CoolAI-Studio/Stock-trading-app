@@ -436,13 +436,42 @@ describe('這一版之後改了什麼', () => {
       expect(hint).toHaveTextContent(/情況 E|GitHub/)
     })
 
-    it('只落後幾天的時候不要嚇他', async () => {
+    it('第一句話不可以把「自己會更新」講成「你要去按」', async () => {
+      // 按鈕部署的那一份追 stable、自動部署，所以正常情況下他什麼都不用做。把它講成
+      // 待辦事項，他會去按一次、看到沒變、然後放棄——而真正該做的（看那次 build 的
+      // 紀錄）沒有人說。
+      frozenAt2026_09_03()
+      withChanges([{ sha: 'ccc1111', title: '剛剛的', at: at(0) }])
+
+      // 「自動」在這一段裡出現不只一次（自動部署），所以問的是那個明確的說法。
+      expect(await screen.findByText(/自己更新/)).toBeInTheDocument()
+      expect(screen.getByText(/什麼都不用做/)).toBeInTheDocument()
+    })
+
+    it('剛落後的時候不要嚇他', async () => {
       // 平常就在喊的東西，真的出事那一次也不會有人看。
       frozenAt2026_09_03()
-      withChanges([{ sha: 'ccc1111', title: '昨天的', at: at(3) }])
+      withChanges([{ sha: 'ccc1111', title: '昨天的', at: at(1) }])
 
-      expect(await screen.findByText(/落後 3 天/)).toBeInTheDocument()
+      expect(await screen.findByText(/落後 1 天/)).toBeInTheDocument()
       expect(screen.queryByText(/自動更新/)).not.toBeInTheDocument()
+    })
+
+    it('落後幾天就已經不正常了 —— 門檻不可以照「手動更新」的直覺訂', async () => {
+      /**
+       * 這一格原本的門檻是 30 天，而那是照「他還沒去按」的模型訂的。
+       *
+       * #52 之後後端是自己更新的：`stable` 一前進，他的服務幾分鐘內就重新部署。所以
+       * 「落後 5 天」的意思**不是**他還沒去按，是那條線已經斷了五天了——而按原本的門
+       * 檻，他要再等 25 天才會看到唯一一句告訴他該去哪裡看的話。
+       *
+       * 25 天的每一則提醒都跑在一個沒有拿到安全修補的版本上。
+       */
+      frozenAt2026_09_03()
+      withChanges([{ sha: 'ccc1111', title: '五天前的', at: at(5) }])
+
+      const hint = await screen.findByText(/自動更新/)
+      expect(hint).toHaveTextContent(/情況 D|build/)
     })
   })
 })
