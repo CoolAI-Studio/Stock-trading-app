@@ -8,15 +8,20 @@
 market_data/service.py 把它讀進去的時候標成「不新鮮」，正是為了這件事。
 """
 
-from datetime import UTC, datetime
+import logging
+import time
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.enums import DataSource
 from app.models.market import MarketBar
+from app.models.mixins import utcnow
 from app.services.market_data.base import Bar, Timeframe
+
+logger = logging.getLogger("app.bar_store")
 
 # 一段序列（來源＋代號＋週期）最多留幾根。
 #
@@ -146,6 +151,82 @@ def _trim(db: Session, data_source: DataSource, symbol: str, timeframe: Timefram
     db.flush()
 
 
+# 一段序列多久沒有被抓過，就算是「沒有人再看了」。
+#
+# **判準是「被寫進來的時間」（`fetched_at`），不是「那根 K 棒是什麼時候的」（`ts`）。**
+# 一段還在被盯的序列，每收一根新的就多一列新的 fetched_at；一段沒有人再看的，最新那
+# 一列就停在他最後一次打開那張圖的時候。
+#
+# 而且判準是**整段**的最新值，不是逐列。逐列的話會把還在用的序列的歷史刪掉——那些舊
+# 列本來就是很久以前寫進去的，而它們正是這些資料存在的全部理由（上游掛掉的時候圖表
+# 還有底可以墊）。
+#
+# 90 天：最長的週期是 1mo，也就是一段還在被盯的月線序列最多可能 31 天才多一列。三根
+# 月線的餘裕。訂太短的代價是他每個月都會掉一次底，而症狀是上游抖一下那張圖就空了。
+IDLE_SERIES_DAYS = 90
+
+# 掃描要花錢（這張表沒有 fetched_at 的索引），而它要回收的東西是以「月」為單位長出來
+# 的，所以一天問一次遠遠夠用。
+#
+# 記在行程裡而不是資料庫裡：多掃幾次是安全方向（免費方案休眠、重新部署都會讓它重
+# 來），而為了記帳多開一張表，就是為了省空間而多佔空間。
+_SWEEP_EVERY_SEC = 24 * 3600.0
+_last_sweep_at: float | None = None
+
+
+def _idle_series(db: Session, cutoff: datetime) -> list[tuple]:
+    """哪幾段序列的最新一列比 `cutoff` 還舊。"""
+    return list(
+        db.execute(
+            select(MarketBar.data_source, MarketBar.symbol, MarketBar.timeframe)
+            .group_by(MarketBar.data_source, MarketBar.symbol, MarketBar.timeframe)
+            .having(func.max(MarketBar.fetched_at) < cutoff)
+        ).all()
+    )
+
+
+def sweep_idle_series(db: Session) -> int:
+    """把沒有人再看的那幾段整段丟掉，回傳丟了幾段。
+
+    ＊ 為什麼是「整段一次一個 DELETE」而不是一句 SQL。
+
+    一句 `WHERE (a, b, c) IN (SELECT ...)` 的 row-value 語法 SQLite 和 Postgres 支援
+    的程度不一樣，而這個 app 兩邊都要跑（開發機 SQLite、線上 Postgres）。閒置的段數本
+    來就少，一段一句是可讀而且可攜的。
+
+    **絕不拋出。** 呼叫端是 `save`，而 `save` 跑在使用者正在等的那個 HTTP 請求裡，也
+    跑在盯盤迴圈的一輪裡。回收空間是次要的，存下這一批 K 棒是主要的。
+    """
+    dropped = 0
+    try:
+        cutoff = utcnow() - timedelta(days=IDLE_SERIES_DAYS)
+        for data_source, symbol, timeframe in _idle_series(db, cutoff):
+            db.execute(
+                delete(MarketBar).where(
+                    MarketBar.data_source == data_source,
+                    MarketBar.symbol == symbol,
+                    MarketBar.timeframe == timeframe,
+                )
+            )
+            dropped += 1
+        if dropped:
+            db.flush()
+            logger.info("回收了 %s 段沒有人再看的 K 棒序列", dropped)
+    except Exception:
+        logger.exception("回收閒置的 K 棒序列失敗；這一批 K 棒照樣存下來")
+    return dropped
+
+
+def _sweep_if_due(db: Session) -> None:
+    """一天最多一次。`save` 每一輪都會被呼叫，掃描不可以跟著它跑。"""
+    global _last_sweep_at
+    now = time.monotonic()
+    if _last_sweep_at is not None and now - _last_sweep_at < _SWEEP_EVERY_SEC:
+        return
+    _last_sweep_at = now
+    sweep_idle_series(db)
+
+
 def save(
     db: Session,
     data_source: DataSource,
@@ -208,3 +289,6 @@ def save(
     # 跑，而這個使用者不會做那三件事的任何一件。寫入這條路則是他每次看圖、每個盯
     # 盤週期都會走到的。
     _trim(db, data_source, symbol, timeframe)
+    # 上面那句封住「這一段有多深」，這一句封住「總共有幾段」（#61）。同一條路，同一
+    # 個理由——只是它一天才問一次，因為它要回收的東西是以月為單位長出來的。
+    _sweep_if_due(db)
