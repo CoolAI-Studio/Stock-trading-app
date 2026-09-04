@@ -28,6 +28,7 @@ report 「done」 about a boot that still crashes, which is worse than no page.
 
 import base64
 import os
+import re
 import secrets
 from dataclasses import dataclass
 
@@ -140,6 +141,36 @@ def _database_unreachable() -> str | None:
     return (os.environ.get("DATABASE_MIGRATION_ERROR") or "").strip() or None
 
 
+# Supabase 的**直連**位址。免費方案上它只有 IPv6，而雲端平台的容器出去是 IPv4。
+#
+#     「Direct connections are on IPv6, or on IPv4 if the project has the IPv4
+#      add-on.」（Supabase 文件，2026-09）
+#
+# 主控台預設就是給這一串，所以照著「複製 Connection string」做完的人拿到的是一個這
+# 台機器永遠連不到的位址——而症狀只是「連線逾時」，跟密碼打錯、資料庫被刪長得一模一
+# 樣。他會回去重新複製一次，而那一串每次都一樣。
+#
+# 正確的是同一頁上的 **Session pooler**（`aws-0-<區域>.pooler.supabase.com:5432`）：
+# IPv4，行為跟直連一樣。Supabase 自己也是這樣寫的。（旁邊的 Transaction pooler 也是
+# IPv4，但它不支援 prepared statements，而 SQLAlchemy ＋ psycopg2 預設會用。）
+_SUPABASE_DIRECT = re.compile(r"@db\.[a-z0-9-]+\.supabase\.co", re.IGNORECASE)
+
+
+def _supabase_direct_hint(database_url: str) -> str:
+    """他手上那一串本身錯在哪裡，如果認得出來的話。
+
+    這是「叫他去別的地方查」的反面：那個值就在我們手上，形狀一眼認得出來。
+    """
+    if not _SUPABASE_DIRECT.search(database_url):
+        return ""
+    return (
+        "另外，你這一串是 Supabase 的「Direct connection」，而它在免費方案上只有 IPv6 "
+        "位址——雲端平台的容器出去是 IPv4，所以連不到，而症狀就是逾時。回 Supabase 那一頁"
+        "改複製「Session pooler」那一段（長得像 aws-0-<區域>.pooler.supabase.com:5432），"
+        "它是 IPv4，行為跟直連一樣。旁邊的 Transaction pooler 不要選。"
+    )
+
+
 def _database_options(on_a_platform: bool) -> tuple[SetupOption, ...]:
     """資料放哪裡，有哪幾條路。
 
@@ -223,6 +254,7 @@ def missing_settings(s: Settings) -> list[MissingSetting]:
                     "多半是那一串本身有問題：貼的時候少了一段、密碼後來換過、"
                     "或那個資料庫已經被刪掉了。回你的資料庫服務主控台重新複製一次"
                     f"完整的連線字串，再貼進{hosting.paste_target()}的這一格。"
+                    + (f" {hint}" if (hint := _supabase_direct_hint(database_url)) else "")
                 ),
                 generator=None,
                 step=1,

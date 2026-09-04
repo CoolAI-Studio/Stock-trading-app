@@ -58,8 +58,18 @@ Neon 免費方案的資料庫在閒置一段時間後會自動暫停，下次連
 >
 > **Supabase 的免費方案沒有這個限制**（500 MB、共用 CPU，只有「Free projects are
 > paused after 1 week of inactivity」——而這個 app 每五分鐘就碰一次資料庫，所以那條永遠
-> 不會踩到）。要長期一直跑的話用它，設定步驟一樣是複製一串連線字串，只多一個「把
-> `[YOUR-PASSWORD]` 換成你設的密碼」。
+> 不會踩到）。要長期一直跑的話用它。
+>
+> 設定步驟一樣是複製一串連線字串，但有**兩個一定要做對的地方**：
+>
+> 1. **選「Session pooler」那一段，不要用 Direct connection。** Supabase 的直連在免費
+>    方案上只有 IPv6 位址（他們的文件：「Direct connections are on IPv6, or on IPv4 if
+>    the project has the IPv4 add-on」），而 Render 的容器出去是 IPv4——用直連那一串會
+>    連不到，而症狀只是「連不上資料庫」，看不出是位址協定的問題。Session pooler
+>    （`aws-0-<區域>.pooler.supabase.com:5432`）是 IPv4，行為跟直連一樣。
+>    （**不要選 Transaction pooler**（6543）：它「does not support prepared
+>    statements」，而 SQLAlchemy ＋ psycopg2 預設會用。）
+> 2. 把字串裡的 `[YOUR-PASSWORD]` 換成你建專案時設的密碼，**連中括號一起換掉**。
 >
 > 留在 Neon 也沒關係，你會知道它發生了：UptimeRobot 會寄信給你，而信裡那一句「連不上
 > 資料庫」後面就寫著這個原因。（其他取捨列在 issue #95。）

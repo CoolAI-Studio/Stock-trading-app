@@ -923,6 +923,31 @@ describe('第二頁：兩家免費 Postgres 的差別，要寫在他選的那個
     expect(text).toMatch(/時數|額度|一直跑|長期/)
   })
 
+  it('Supabase 那一格要叫他選 Session pooler，不是預設那一串', () => {
+    /**
+     * Supabase 自己的文件（2026-09 讀的）：
+     *
+     *   「Direct connections are on IPv6, or on IPv4 if the project has the
+     *    IPv4 add-on.」
+     *   「Use pooler session mode for application traffic from persistent
+     *    clients on IPv4-only networks.」（`aws-[region].pooler.supabase.com:5432`）
+     *
+     * 而 Render 的容器出去是 IPv4。所以「Connection string → URI」給的那一串
+     * （`db.<專案>.supabase.co:5432`）**連不到**——症狀是連線逾時，而畫面上只會說
+     * 「連不上資料庫」，他不會知道那是位址協定的問題。
+     *
+     * Transaction pooler（6543）也是 IPv4，但它「does not support prepared
+     * statements」，而 SQLAlchemy + psycopg2 預設會用——所以要的是 Session pooler。
+     *
+     * 這一頁把 Supabase 標成推薦（因為它沒有每月運算時數的問題），那就有義務讓他複製
+     * 到對的那一串。
+     */
+    const text = drawerFor('Supabase')
+
+    expect(text).toMatch(/Session pooler|工作階段/i)
+    expect(text).toMatch(/IPv6|IPv4/)
+  })
+
   it('不要再把會停的那一家標成推薦', () => {
     const page = read('database.html')
     const summaries = page

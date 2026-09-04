@@ -127,9 +127,23 @@
           <li>開 <a href="https://supabase.com" target="_blank" rel="noreferrer noopener">supabase.com</a>，按 <strong>Start your project</strong>。</li>
           <li>建一個 <strong>New project</strong>。它會要你設一個<strong>資料庫密碼</strong>——設一個並記下來。</li>
           <li>等它建好（約兩分鐘）。</li>
-          <li>左下角 <strong>Project Settings</strong> → <strong>Database</strong> → 找 <strong>Connection string</strong>，選 <strong>URI</strong>。</li>
-          <li>複製那一串。</li>
+          <li>
+            按右上角的 <strong>Connect</strong>（或左下 <strong>Project Settings</strong> →
+            <strong>Database</strong> → <strong>Connection string</strong>）。
+          </li>
+          <li>
+            <strong>選「Session pooler」那一段，不要用最上面那個 Direct connection。</strong>
+            複製那一串（長得像 <code>…@aws-0-<em>區域</em>.pooler.supabase.com:5432/postgres</code>）。
+          </li>
         </ol>
+        <p class="gotcha">
+          <strong>為什麼一定要選 Session pooler：</strong>Supabase 的 Direct connection
+          在免費方案上只有 <strong>IPv6</strong> 位址，而雲端平台的容器出去是 IPv4——複製
+          那一串的話會連不到，而畫面上只會寫「連不上資料庫」，看不出是位址協定的問題。
+          Session pooler 是 IPv4，而且行為跟直連一樣。
+          （旁邊還有一個 <strong>Transaction pooler</strong>，那個是給 serverless 用的，
+          這裡不要選。）
+        </p>
         <p class="gotcha">
           <strong>最容易卡住的一步：</strong>它給你的那串裡有
           <code>[YOUR-PASSWORD]</code>，你要自己把它換成第 2 步設的那個密碼，
