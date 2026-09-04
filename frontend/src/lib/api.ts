@@ -74,7 +74,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
-  if (init.body && !(init.body instanceof URLSearchParams) && !headers.has('Content-Type')) {
+  // **FormData 也要排除。** 自己設 Content-Type 的話那一串沒有 boundary，而
+  // multipart 沒有 boundary 就無法被解析——後端會回「缺少欄位 file」，而那個訊息跟真
+  // 正的原因差了十萬八千里。瀏覽器自己填才會帶上 boundary。
+  if (
+    init.body &&
+    !(init.body instanceof URLSearchParams) &&
+    !(init.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -126,6 +134,9 @@ export const api = {
   put: <T>(path: string, body?: unknown): Promise<T> =>
     request<T>(path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
+  /** 帶檔案的 POST。走 multipart，所以 Content-Type 交給瀏覽器填（見 request）。 */
+  upload: <T>(path: string, form: FormData): Promise<T> =>
+    request<T>(path, { method: 'POST', body: form }),
 }
 
 /** Fetches a file and hands it to the browser as a download.

@@ -26,16 +26,21 @@ backups of identical data do not produce identical bytes.
 """
 
 import base64
+import hashlib
 import json
 import struct
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
+from app.enums import OrderStatus
 from app.models.notification import NotificationChannel
 from app.models.order import Order
 from app.models.position import Position
@@ -232,3 +237,246 @@ def read(blob: bytes, passphrase: str) -> dict:
         return json.loads(payload)
     except json.JSONDecodeError as exc:  # pragma: no cover -- decryption implies valid JSON
         raise BackupError("備份內容無法解讀。") from exc
+
+
+# ---------------------------------------------------------------------------
+# 還原
+# ---------------------------------------------------------------------------
+#
+# ＊ 這裡的每一條規則都來自同一個判斷：**不可以丟東西，也不可以自己動起來。**
+#
+# 「還原」在使用者腦中的意思是「把備份裡的東西拿回來」，不是「把現在這一份換掉」。所
+# 以這裡一律**新增**，從不覆寫、從不刪除——他按錯了也只是多了一些東西，而多出來的東西
+# 刪得掉，被蓋掉的東西回不來。
+#
+# 但「一律新增」單獨拿出來會製造一個更糟的問題：兩份一樣的策略同時在跑，同一件事通知
+# 兩次；兩份一樣的持股，系統以為他部位加倍，停損和風控全部算錯。所以每一張表要分開想：
+#
+#   策略、通知管道      新增，但**一律是停用的**。他自己打開他要的那幾個。
+#   持股、自選股        有 UNIQUE(user, symbol)，所以「沒有的才加」。重複會讓數字是錯的。
+#   風控設定            一個使用者一份。只在完全沒有的時候才建，絕不蓋掉他現在那一份。
+#   訊號紀錄、提醒紀錄  純歷史，全部加回來；待確認的訊號改成已過期（見下面）。
+#   帳號本身            完全不動。資料掛到**現在登入的這個人**底下。
+#
+# ＊ 為什麼策略要改名。
+#
+# `UNIQUE(user_id, name)`——不改名的話還原會直接撞上約束，然後整批失敗。而就算沒有那
+# 個約束也要改：畫面上兩個一模一樣的名字，他分不出哪一個是還原進來的。
+
+_RESTORED_SUFFIX = "（還原 {stamp}）"
+
+
+class _Coercer:
+    """把 JSON 裡的字串換回欄位真正的型別。
+
+    `_plain` 出去的時候把 Decimal、datetime、Enum 都變成了字串（float 會悄悄改掉一個
+    價格，所以不能用）。回來的路照著欄位自己宣告的型別走，而不是在這裡手抄一份清單
+    ——手抄的那一份會在有人加欄位的時候悄悄過期，而症狀是還原回來的價格變成字串。
+    """
+
+    def __init__(self, model) -> None:
+        self._columns = {column.key: column for column in sa_inspect(model).columns}
+
+    def __call__(self, field: str, value: Any) -> Any:
+        column = self._columns.get(field)
+        if value is None or column is None:
+            return value
+        try:
+            python_type = column.type.python_type
+        except (NotImplementedError, AttributeError):
+            return value
+        if python_type is Decimal:
+            return Decimal(str(value))
+        if python_type is datetime:
+            return datetime.fromisoformat(value) if isinstance(value, str) else value
+        if (
+            isinstance(value, str)
+            and isinstance(python_type, type)
+            and issubclass(python_type, Enum)
+        ):
+            return python_type(value)
+        return value
+
+    def build(self, model, row: dict, skip: tuple[str, ...] = (), **overrides):
+        fields = {k: self(k, v) for k, v in row.items() if k not in skip and k in self._columns}
+        return model(**{**fields, **overrides})
+
+
+@dataclass(frozen=True)
+class RestoreReport:
+    """還原完之後畫面上要說的話。
+
+    數字要分開講，不能只說「還原完成」：他最需要知道的是「哪些東西是停用的、等他打
+    開」，而那件事沒有說出口的話，他會以為提醒已經在跑了。
+    """
+
+    strategies: int = 0
+    channels: int = 0
+    orders: int = 0
+    alerts: int = 0
+    positions: int = 0
+    positions_skipped: int = 0
+    watchlist: int = 0
+    watchlist_skipped: int = 0
+    risk_settings_created: bool = False
+    expired_pending: int = 0
+
+
+def restore(db: Session, user: User, snapshot: dict) -> RestoreReport:
+    """把備份裡的東西加到這個帳號底下。**只加，不蓋，不刪。**
+
+    回傳一份「做了什麼」的清單，因為「還原完成」四個字說不出他真正需要知道的那件事：
+    策略和通知管道是停用的，等他自己打開。
+    """
+    version = snapshot.get("format_version")
+    if not isinstance(version, int) or version > FORMAT_VERSION:
+        # 比這一版新的檔案不能倒。往回搬沒有安全的做法——我們不知道未來的欄位是什麼
+        # 意思，而猜錯的代價是他以為還原好了。
+        raise BackupError(
+            f"這個備份是比較新的版本（{version}），這一份程式讀不懂。先把系統更新到最新，再試一次。"
+        )
+
+    stamp = datetime.now(UTC).strftime("%m-%d %H:%M")
+    suffix = _RESTORED_SUFFIX.format(stamp=stamp)
+    report = RestoreReport()
+
+    # 策略：新增、停用、改名。舊 id → 新 id 的對應留著給訊號和提醒紀錄用。
+    strategy_ids: dict[int, int] = {}
+    coerce = _Coercer(Strategy)
+    for row in snapshot.get("strategies") or []:
+        source = row.get("source_code") or ""
+        wanted = str(row.get("name") or "未命名")
+        strategy = coerce.build(
+            Strategy,
+            row,
+            skip=("id", "is_active", "name", "code_hash"),
+            user_id=user.id,
+            name=_unique_name(db, user, wanted + suffix),
+            source_code=source,
+            code_hash=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            # **一律停用。** 兩份一樣的策略同時在跑 ＝ 同一件事通知兩次，而那是這個
+            # 產品最不能發生的事。他打開他要的那幾個。
+            is_active=False,
+        )
+        db.add(strategy)
+        db.flush()
+        if row.get("id") is not None:
+            strategy_ids[int(row["id"])] = strategy.id
+        report = replace(report, strategies=report.strategies + 1)
+
+    # 通知管道：同樣一律停用，理由一樣——它們是真的會把東西送出去的那一個。
+    coerce = _Coercer(NotificationChannel)
+    for row in snapshot.get("notification_channels") or []:
+        db.add(
+            coerce.build(
+                NotificationChannel,
+                row,
+                skip=("is_enabled",),
+                user_id=user.id,
+                is_enabled=False,
+            )
+        )
+        report = replace(report, channels=report.channels + 1)
+
+    # 持股：UNIQUE(user, symbol)。重複的話系統會以為他部位加倍，停損和風控全部算錯，
+    # 所以「沒有的才加」——而已經有的那一筆是他現在真正持有的，比備份裡的新。
+    have = {symbol for (symbol,) in db.query(Position.symbol).filter(Position.user_id == user.id)}
+    coerce = _Coercer(Position)
+    for row in snapshot.get("positions") or []:
+        if row.get("symbol") in have:
+            report = replace(report, positions_skipped=report.positions_skipped + 1)
+            continue
+        db.add(
+            coerce.build(
+                Position,
+                row,
+                skip=("strategy_id",),
+                user_id=user.id,
+                strategy_id=strategy_ids.get(row.get("strategy_id")),
+            )
+        )
+        have.add(row["symbol"])
+        report = replace(report, positions=report.positions + 1)
+
+    # 自選股：同樣有 UNIQUE，而且重複在清單上就只是重複。
+    watched = {
+        symbol
+        for (symbol,) in db.query(WatchlistItem.symbol).filter(WatchlistItem.user_id == user.id)
+    }
+    coerce = _Coercer(WatchlistItem)
+    for row in snapshot.get("watchlist") or []:
+        if row.get("symbol") in watched:
+            report = replace(report, watchlist_skipped=report.watchlist_skipped + 1)
+            continue
+        db.add(coerce.build(WatchlistItem, row, user_id=user.id))
+        watched.add(row["symbol"])
+        report = replace(report, watchlist=report.watchlist + 1)
+
+    # 風控：一個使用者一份，所以只在完全沒有的時候才建。**絕不蓋掉他現在那一份**——
+    # 那是他的停損設定，用一個舊檔案換掉它，下一次穿價就是照錯的數字算。
+    rows = snapshot.get("risk_settings") or []
+    if rows and not db.query(RiskSettings).filter(RiskSettings.user_id == user.id).first():
+        db.add(_Coercer(RiskSettings).build(RiskSettings, rows[0], user_id=user.id))
+        report = replace(report, risk_settings_created=True)
+
+    # 訊號紀錄：純歷史，全部加回來。
+    #
+    # **但待確認的要改成已過期。** 一張三個月前的待確認訊號被復活成「現在等你確認」，
+    # 是拿一個早就過去的價格問他要不要動作——而他不會知道那是舊的。歷史留著，行為不留。
+    coerce = _Coercer(Order)
+    for row in snapshot.get("orders") or []:
+        raw_status = row.get("status")
+        was_pending = str(raw_status or "").upper() == OrderStatus.PENDING.value.upper()
+        db.add(
+            coerce.build(
+                Order,
+                row,
+                skip=("id", "strategy_id", "status"),
+                user_id=user.id,
+                strategy_id=strategy_ids.get(row.get("strategy_id")),
+                status=OrderStatus.EXPIRED if was_pending else coerce("status", raw_status),
+            )
+        )
+        report = replace(report, orders=report.orders + 1)
+        if was_pending:
+            report = replace(report, expired_pending=report.expired_pending + 1)
+
+    # 提醒紀錄：也是純歷史，沒有任何東西會照著它動作。
+    coerce = _Coercer(StrategyAlert)
+    for row in snapshot.get("alerts") or []:
+        new_id = strategy_ids.get(row.get("strategy_id"))
+        if new_id is None:
+            # 那支策略不在這個備份裡（或沒有帶 id）。FK 是 NOT NULL，所以只能跳過
+            # ——一筆孤兒的提醒紀錄對他也沒有意義。
+            continue
+        db.add(
+            coerce.build(
+                StrategyAlert,
+                row,
+                skip=("strategy_id",),
+                user_id=user.id,
+                strategy_id=new_id,
+            )
+        )
+        report = replace(report, alerts=report.alerts + 1)
+
+    db.commit()
+    return report
+
+
+def _unique_name(db: Session, user: User, wanted: str) -> str:
+    """`UNIQUE(user_id, name)`——同一個備份倒兩次也要能倒。
+
+    撞到就加序號，而不是拋錯：他會倒第二次，多半正是因為第一次沒看清楚做了什麼。
+    """
+    name = wanted[:120]
+    taken = {
+        existing for (existing,) in db.query(Strategy.name).filter(Strategy.user_id == user.id)
+    }
+    if name not in taken:
+        return name
+    for n in range(2, 1000):
+        candidate = f"{name[:114]} {n}"
+        if candidate not in taken:
+            return candidate
+    return f"{name[:106]} {datetime.now(UTC).strftime('%H%M%S%f')}"

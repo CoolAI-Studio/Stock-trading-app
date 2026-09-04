@@ -23,6 +23,7 @@ export function BackupPanel() {
   return (
     <div className="space-y-4">
       <ManualBackup />
+      <RestoreBackup />
       <ScheduledBackup />
     </div>
   )
@@ -158,6 +159,142 @@ function ScheduledBackup() {
         <p className="rounded border border-red-800 bg-red-950/40 px-2 py-1 text-xs text-red-300">
           上次沒寄成功：{data.last_error}
         </p>
+      )}
+    </section>
+  )
+}
+
+type RestoreReport = {
+  strategies: number
+  channels: number
+  orders: number
+  alerts: number
+  positions: number
+  positions_skipped: number
+  watchlist: number
+  watchlist_skipped: number
+  risk_settings_created: boolean
+  expired_pending: number
+}
+
+/** 把備份檔倒回來。
+ *
+ * ＊ 為什麼這顆按鈕要存在。
+ *
+ * 備份檔一直都做得出來（上面那一段，或每天自動寄到他信箱），但**倒回去的路只存在於
+ * 文件裡**——而那條路的第一句話是「在你的電腦上跑 psql」。CLAUDE.md 寫得很清楚：任何
+ * 「請在你的電腦上跑這支腳本」的指示，對這個使用者等於流程到此結束。做得出備份卻還
+ * 不回去，等於沒有備份。
+ *
+ * ＊ 為什麼沒有「確定要覆蓋嗎」那種確認。
+ *
+ * 因為沒有東西會被覆蓋。還原一律**新增**，從不覆寫、從不刪除（backup.py 的 restore
+ * 裡有整段理由）——他按錯了也只是多了一些停用的東西，而多出來的東西刪得掉。
+ *
+ * ＊ 為什麼結果要逐項報數字。
+ *
+ * 「還原完成」四個字說不出他真正需要知道的那件事：**策略和通知管道是停用的，等他自
+ * 己打開**。沒有說出口的話，他會以為提醒已經在跑了——而那正是這個產品唯一不能失效的
+ * 東西。
+ */
+function RestoreBackup() {
+  const [file, setFile] = useState<File | null>(null)
+  const [passphrase, setPassphrase] = useState('')
+  const [report, setReport] = useState<RestoreReport | null>(null)
+
+  const run = useMutation({
+    mutationFn: async () => {
+      const form = new FormData()
+      form.append('file', file as File)
+      form.append('passphrase', passphrase)
+      return api.upload<RestoreReport>('/api/backup/restore', form)
+    },
+    onSuccess: (result) => {
+      setReport(result)
+      setPassphrase('')
+    },
+  })
+
+  const ready = file !== null && passphrase.length >= MIN_LENGTH
+
+  return (
+    <section aria-label="還原備份" className="space-y-3 rounded border border-slate-800 p-4">
+      <h2 className="text-sm font-semibold text-slate-300">從備份還原</h2>
+      <p className="text-sm text-slate-400">
+        選一個備份檔、輸入當初設的那個密碼，裡面的東西就會加回這個帳號底下。
+      </p>
+      <p className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+        <strong className="text-slate-300">它只會加，不會刪也不會蓋掉你現在的東西。</strong>
+        你現在的策略、持股、風控設定都會原樣留著；備份裡的東西是<strong>額外</strong>加進來的，
+        而且<strong>策略和通知管道會是停用的</strong>——你自己打開要用的那幾個就好。
+        同一檔已經持有的部位、已經在自選清單裡的代號會被跳過，不會變成兩筆。
+      </p>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label htmlFor="restore-file" className="block text-sm text-slate-400">
+            備份檔（.bak）
+          </label>
+          <input
+            id="restore-file"
+            type="file"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null)
+              setReport(null)
+            }}
+            className="mt-1 block text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:text-slate-200"
+          />
+        </div>
+        <div>
+          <label htmlFor="restore-passphrase" className="block text-sm text-slate-400">
+            還原密碼
+          </label>
+          <input
+            id="restore-passphrase"
+            type="password"
+            autoComplete="off"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            className="mt-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+          />
+        </div>
+        <button
+          type="button"
+          disabled={!ready || run.isPending}
+          onClick={() => run.mutate()}
+          className="rounded bg-slate-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+        >
+          {run.isPending ? '還原中…' : '還原'}
+        </button>
+        <ActionError error={run.error} />
+      </div>
+
+      {report && (
+        <div className="space-y-2 rounded border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200">
+          <p>
+            <strong>還原好了。</strong>加回來的有：策略 {report.strategies} 支、通知管道{' '}
+            {report.channels} 個、持股 {report.positions} 筆、自選 {report.watchlist} 檔、
+            訊號紀錄 {report.orders} 筆、提醒紀錄 {report.alerts} 筆
+            {report.risk_settings_created ? '，以及風控設定' : ''}。
+          </p>
+          {/* 這一句是整段裡最重要的。沒有它，他會以為提醒已經在跑了。 */}
+          <p className="text-amber-200">
+            <strong>加回來的策略和通知管道都是停用的。</strong>
+            去「策略」和「通知」那兩頁，把你要用的打開——沒有打開的不會發出任何提醒。
+          </p>
+          {(report.positions_skipped > 0 || report.watchlist_skipped > 0) && (
+            <p className="text-slate-300">
+              跳過了 {report.positions_skipped} 筆持股和 {report.watchlist_skipped} 檔自選
+              ——那幾檔你現在已經有了，重複加進來會讓部位和停損算錯。
+            </p>
+          )}
+          {report.expired_pending > 0 && (
+            <p className="text-slate-300">
+              有 {report.expired_pending} 筆當時還在「待確認」的訊號，加回來的時候標成已過期
+              ——那是好久以前的價格，不該現在再問你一次要不要動作。
+            </p>
+          )}
+        </div>
       )}
     </section>
   )

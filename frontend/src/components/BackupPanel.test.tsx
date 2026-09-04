@@ -8,7 +8,7 @@ import { api, downloadPost } from '../lib/api'
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
   downloadPost: vi.fn(),
-  api: { get: vi.fn(), put: vi.fn() },
+  api: { get: vi.fn(), put: vi.fn(), upload: vi.fn() },
 }))
 
 const SCHEDULE = {
@@ -180,5 +180,114 @@ describe('automatic emailed backups', () => {
     renderPanel()
 
     expect(await screen.findByText(/找不到可用的 Email 通知管道/)).toBeInTheDocument()
+  })
+})
+
+// --- 還原 --------------------------------------------------------------------
+
+/**
+ * 備份檔一直都做得出來，但**倒回去的路只存在於文件裡**，而那條路的第一句話是「在你的
+ * 電腦上跑 psql」——對這個產品的使用者等於流程到此結束。
+ *
+ * 這一段守的是三件事：那顆按鈕在、它說得出剛剛發生了什麼、而且它說得出**下一步**。
+ * 最後一件最重要：還原進來的策略和通知管道是**停用**的（不然兩份一樣的策略同時在跑，
+ * 同一件事通知兩次），而這件事沒有說出口的話，他會以為提醒已經在跑了。
+ */
+describe('BackupPanel：還原', () => {
+  const REPORT = {
+    strategies: 3,
+    channels: 2,
+    orders: 12,
+    alerts: 4,
+    positions: 1,
+    positions_skipped: 2,
+    watchlist: 0,
+    watchlist_skipped: 5,
+    risk_settings_created: false,
+    expired_pending: 1,
+  }
+
+  async function restore(file = new File([new Uint8Array([1, 2, 3])], 'backup.bak')) {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.upload(screen.getByLabelText(/備份檔/), file)
+    await user.type(screen.getByLabelText(/還原密碼/), GOOD)
+    await user.click(screen.getByRole('button', { name: /還原/ }))
+    return user
+  }
+
+  it('有一顆按得到的還原按鈕 —— 不是叫他去跑 psql', () => {
+    renderPanel()
+
+    expect(screen.getByRole('button', { name: /還原/ })).toBeInTheDocument()
+  })
+
+  it('先說清楚它只加不蓋，因為那是他按下去之前唯一想知道的事', () => {
+    renderPanel()
+
+    expect(screen.getByText(/不會刪|不會蓋|只會加/)).toBeInTheDocument()
+  })
+
+  it('把檔案和密碼一起送出去', async () => {
+    vi.mocked(api.upload).mockResolvedValue(REPORT as never)
+
+    await restore()
+
+    await waitFor(() => expect(api.upload).toHaveBeenCalled())
+    const [path, form] = vi.mocked(api.upload).mock.calls[0]
+    expect(path).toBe('/api/backup/restore')
+    expect((form as FormData).get('passphrase')).toBe(GOOD)
+    expect((form as FormData).get('file')).toBeInstanceOf(File)
+  })
+
+  it('做完之後說出每一項的數字，不是只說「還原完成」', async () => {
+    vi.mocked(api.upload).mockResolvedValue(REPORT as never)
+
+    await restore()
+
+    expect(await screen.findByText(/還原好了/)).toBeInTheDocument()
+    expect(screen.getByText(/跳過了 2 筆持股/)).toBeInTheDocument()
+  })
+
+  it('而且說得出「它們是停用的，等你打開」', async () => {
+    // 這是整段裡最重要的一句。沒有它，他會以為提醒已經在跑了——而那正是這個產品唯一
+    // 不能失效的東西。
+    vi.mocked(api.upload).mockResolvedValue(REPORT as never)
+
+    await restore()
+
+    expect(await screen.findByText(/加回來的策略和通知管道都是停用的/)).toBeInTheDocument()
+    expect(screen.getByText(/把你要用的打開/)).toBeInTheDocument()
+  })
+
+  it('密碼太短就不要讓他按下去', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.upload(
+      screen.getByLabelText(/備份檔/),
+      new File([new Uint8Array([1])], 'backup.bak'),
+    )
+    await user.type(screen.getByLabelText(/還原密碼/), 'short')
+
+    expect(screen.getByRole('button', { name: /還原/ })).toBeDisabled()
+  })
+
+  it('沒選檔案也不要讓他按下去', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await user.type(screen.getByLabelText(/還原密碼/), GOOD)
+
+    expect(screen.getByRole('button', { name: /還原/ })).toBeDisabled()
+  })
+
+  it('失敗的時候把後端那句話原封不動印出來', async () => {
+    // 「密碼不對」和「這個檔案不是備份」是兩件他改得動的事，而「還原失敗」對哪一件都
+    // 沒有幫助。
+    const { ApiError } = await import('../lib/api')
+    vi.mocked(api.upload).mockRejectedValue(new ApiError(422, '密碼不對，或檔案已經損毀。'))
+
+    await restore()
+
+    expect(await screen.findByText(/密碼不對/)).toBeInTheDocument()
   })
 })

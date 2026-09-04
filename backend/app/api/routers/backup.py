@@ -1,6 +1,17 @@
+from dataclasses import asdict
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -12,6 +23,10 @@ from app.schemas.common import UtcDatetime
 from app.services import backup
 
 router = APIRouter(prefix="/backup", tags=["backup"])
+
+# 一個人的交易紀錄不會有幾十 MB。沒有上限的話，這支端點就是一個把記憶體吃光的方法
+# ——而這台機器上跑著他所有的提醒。
+_MAX_RESTORE_BYTES = 32 * 1024 * 1024
 
 
 class BackupRequest(BaseModel):
@@ -42,6 +57,66 @@ def download_backup(
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="trading-backup-{stamp}.bak"'},
     )
+
+
+class RestoreReport(BaseModel):
+    """做了什麼，逐項說。
+
+    **不可以只回「還原完成」。** 他最需要知道的那件事是「策略和通知管道是停用的，
+    等你打開」——沒有說出口的話，他會以為提醒已經在跑了，而那正是這個產品唯一不能
+    失效的東西。
+    """
+
+    strategies: int
+    channels: int
+    orders: int
+    alerts: int
+    positions: int
+    positions_skipped: int
+    watchlist: int
+    watchlist_skipped: int
+    risk_settings_created: bool
+    expired_pending: int
+
+
+# 檔案上傳，所以是 multipart 而不是 JSON。密碼跟著同一個請求走（表單欄位，不是網址
+# 參數）——理由跟上面那個 POST 一樣：不可以進網址、log 或瀏覽紀錄。
+@router.post("/restore", response_model=RestoreReport)
+def restore_backup(
+    file: Annotated[UploadFile, File()],
+    passphrase: Annotated[str, Form(min_length=backup.MIN_PASSPHRASE_LENGTH, max_length=256)],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> RestoreReport:
+    """把備份檔裡的東西加到這個帳號底下。
+
+    ＊ 這支端點不會刪掉任何東西。
+
+    `backup.restore` 一律新增、從不覆寫（那個模組裡有整段理由）。所以這裡沒有「確定
+    要覆蓋嗎」那種確認——因為沒有東西會被覆蓋。他按錯了只是多了一些停用的東西。
+
+    ＊ 大小上限。
+
+    備份是一份 JSON，一個人的交易紀錄不會有幾十 MB；沒有上限的話，這支需要登入的端
+    點會變成一個把整台機器的記憶體吃光的方法。
+    """
+    blob = file.file.read(_MAX_RESTORE_BYTES + 1)
+    if len(blob) > _MAX_RESTORE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="這個檔案太大，不像是這個系統產生的備份。",
+        )
+
+    try:
+        snapshot = backup.read(blob, passphrase)
+        report = backup.restore(db, user, snapshot)
+    except backup.BackupError as exc:
+        # 密碼不對、檔案損毀、版本太新——都是他改得動的狀況，所以原話回去。
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return RestoreReport(**asdict(report))
 
 
 class BackupScheduleRead(BaseModel):
