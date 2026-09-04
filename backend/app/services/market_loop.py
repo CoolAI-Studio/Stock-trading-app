@@ -327,12 +327,37 @@ def _run_bar_strategy(
         # 們的子行程沒了」寫成「你的程式壞了」，累積五次永久停用。
         last_bar_ts = loaded.last_bar_ts
         if last_bar_ts is None:
-            # Every candle in hand closed before this instance existed, so
-            # replay fills its memory and its signals are thrown away: a BUY
-            # from three weeks ago is an observation, not an instruction.
-            loaded.warm_up(bars)
-            loaded.last_bar_ts = bars[-1].timestamp
-            signal_bar, signal_str = bars[-1], "HOLD"
+            # 這個實例沒有記憶，所以不論如何都要用**完整歷史**重暖一次。剩下的問題
+            # 是：重暖完之後，最新那一根算不算「新的」。
+            #
+            # `fed_through` 回答的正是這件事，而它跟上面那個 property 的差別只有
+            # 「實例還在嗎」。兩種處境要的行為不一樣：
+            #
+            #   從來沒餵過       手上那幾根可能是任意久以前收盤的（半夜三點建一支
+            #                    日線策略，最新那根是昨天的收盤），所以訊號是觀察
+            #                    不是指示——整批重播，丟掉。
+            #
+            #   餵過，但實例被殺 我們知道上一輪餵到哪一根，所以那根**剛剛收盤的**
+            #                    完全有依據下判斷。丟掉它的話，對日線策略來說是一
+            #                    整天的提醒消失，而且不會再回來（#58）。而子行程被
+            #                    殺掉是這個設計裡正常會發生的事：同一格上任何一支
+            #                    策略逾時就會發生。
+            fed_through = loaded.fed_through
+            if fed_through is None or bars[-1].timestamp <= fed_through:
+                loaded.warm_up(bars)
+                loaded.last_bar_ts = bars[-1].timestamp
+                signal_bar, signal_str = bars[-1], "HOLD"
+            else:
+                # 重暖到最新那一根**之前**，再對它下判斷——不能整批餵完再叫一次
+                # on_bar，那會讓同一根 K 棒進去兩次，而滾動視窗會把它算兩遍。
+                #
+                # 只有最新那一根可以下指示，跟底下追進度那條路同一條規則：更早那
+                # 幾根的理由已經過期了。
+                if len(bars) > 1:
+                    loaded.warm_up(bars[:-1])
+                signal_bar = bars[-1]
+                signal_str = loaded.on_bar(signal_bar)
+                loaded.last_bar_ts = signal_bar.timestamp
         else:
             new_bars = [bar for bar in bars if bar.timestamp > last_bar_ts]
             if not new_bars:

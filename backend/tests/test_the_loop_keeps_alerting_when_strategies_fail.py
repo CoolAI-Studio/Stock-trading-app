@@ -712,3 +712,185 @@ def test_a_strategy_saved_mid_round_is_not_blamed_for_it(
         "連續五次就永久停用，而且沒有東西會把它打開。"
     )
     assert strategy.is_active
+
+
+def test_the_bar_that_closed_while_the_worker_was_dead_still_gets_a_signal(
+    db_session, monkeypatch, mock_market_service
+):
+    """重新暖身的那一輪，把一根剛收盤的 K 棒的訊號也一起丟掉（#58）。
+
+    ＊ 上一條測試守的是「重建之後不要瞎掉」，這一條守的是那一輪本身。
+
+    子行程被殺掉之後，`last_bar_ts` 回 None，而 `_run_bar_strategy` 的 None 那條路
+    的語意是：「手上每一根 K 棒都在這個實例存在之前就收盤了，所以訊號是觀察不是指
+    示」——它把訊號丟掉。
+
+    那句話對「第一次載入」是對的（使用者半夜三點建一支日線策略，最新那根是昨天
+    的收盤，對它下指示就是為一個過期的理由現在下單）。對「餵過，但實例被殺掉」是
+    **錯的**：這一輪手上有一根**剛剛收盤的** K 棒，而我們知道上一輪餵到哪一根，所
+    以完全有依據對它下判斷。
+
+    ＊ 代價是一整天，不是一輪。
+
+    對 DAY_1 策略來說那根 K 棒的訊號不會再回來（除非條件持續到隔天）。而子行程被
+    殺掉是這個設計裡**正常會發生**的事——同一格上任何一支策略逾時就會發生。
+
+    ＊ 這條測試不靠策略跑的順序。
+
+    直接把那個子行程關掉（模擬逾時或 OOM 從外面把它殺了），而不是靠一個卡住的鄰居
+    ——鄰居會不會排在前面是一個跟這件事無關的變數，而它剛好會讓這條測試在還沒修的
+    時候就變綠。
+    """
+    from app.services import strategy_pool
+
+    pool = strategy_pool.StrategyPool(size=1)
+    monkeypatch.setattr(market_loop, "_registry", pool)
+
+    bars = _seven_daily_bars()
+    closed = [5]
+    monkeypatch.setattr(mock_market_service, "get_bars", lambda *a, **k: list(bars[: closed[0]]))
+
+    user = User(email="lost-bar@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    strategy = Strategy(
+        user_id=user.id,
+        name="已經暖好的那支",
+        symbol="AAPL",
+        source_code=BAR_SOURCE_THAT_NEEDS_HISTORY,
+        code_hash="irrelevant-for-tests",
+        is_active=True,
+    )
+    db_session.add(strategy)
+    db_session.commit()
+    db_session.refresh(strategy)
+
+    try:
+        # 第一輪：五根 K 棒進到子行程裡，暖身完成（它要看到六根才會說話）。
+        market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+
+        # 子行程被殺掉。累積狀態沒了，但「我們餵到第五根」的記帳活在父行程。
+        pool._slot_for(strategy.id).worker.close()
+
+        # 第六根收盤了。重暖 + 對這一根下判斷 = 它看到六根 = BUY。
+        # 丟掉這一根的話，這個訊號今天不會再出現。
+        closed[0] = 6
+        market_loop.tick_once(db=db_session, market_data_service=mock_market_service)
+    finally:
+        pool.shutdown()
+
+    buys = (
+        db_session.query(Order)
+        .filter(Order.strategy_id == strategy.id, Order.side == OrderSide.BUY)
+        .count()
+    )
+    assert buys == 1, (
+        "子行程被殺掉的那一輪剛好有一根 K 棒收盤，而它的訊號被當成「重播」丟掉了。"
+        "對日線策略來說那是一整天的提醒消失，不是延後。"
+    )
+
+
+class _RebuiltHandle:
+    """一個被殺掉又重建出來的實例，從盯盤迴圈看出去的樣子。
+
+    `last_bar_ts` 是 None（累積狀態沒了），而 `fed_through` 還在（那筆記帳活在父行程，
+    殺行程清不掉它）——`PooledStrategy` 在子行程被殺之後就是這個形狀。
+    """
+
+    entry_point = "on_bar"
+    timeframe = market_loop.Timeframe.DAY_1
+    warmup_bars = 0
+    last_bar_ts = None
+
+    def __init__(self, fed_through) -> None:
+        self.fed_through = fed_through
+        self.warmed: list[list] = []
+        self.judged: list = []
+
+    def warm_up(self, bars) -> None:
+        self.warmed.append(list(bars))
+
+    def on_bar(self, bar) -> str:
+        self.judged.append(bar)
+        return "BUY"
+
+
+def _run_rebuilt(db_session, handle, bars) -> None:
+    user = User(email=f"rebuilt-{id(handle)}@example.com", hashed_password="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    strategy = Strategy(
+        user_id=user.id,
+        name="重建過的",
+        symbol="AAPL",
+        source_code=BAR_SOURCE_THAT_NEEDS_HISTORY,
+        code_hash="irrelevant-for-tests",
+        is_active=True,
+    )
+    db_session.add(strategy)
+    db_session.commit()
+    db_session.refresh(strategy)
+    market_loop._run_bar_strategy(db_session, strategy, handle, bars, [], set())
+
+
+def test_a_rebuild_with_nothing_new_does_not_judge_the_same_bar_twice(db_session):
+    """子行程被殺掉，但這一輪沒有新的 K 棒收盤——那就一根都不要判斷。
+
+    上一條讓「重暖的那一輪」有機會對真正新的那一根下判斷。這一條守住另一邊：那一根
+    我們**已經判斷過**的不可以再被判斷一次。
+
+    ＊ 為什麼不從訂單數量去看。
+
+    看不出來。`create_pending_order` 本來就擋掉「同一個代號同一個方向已經有一張待確
+    認的」，`alerts.emit_alert` 也有自己的節流——兩層都會把重複的那一次吃掉，於是一條
+    數訂單的測試不論修沒修都是綠的（我先寫了那一版，把判斷條件改壞之後它照樣通過）。
+
+    那兩層是第二道防線，不是這件事成立的理由。要問的是迴圈本身有沒有再叫一次
+    `on_bar`，所以這裡直接數它。
+
+    ＊ 重複判斷的代價。
+
+    alert_only 的策略走的是「沒有任何下單閘門」那條路（`_emit_alert_only_signal` 的
+    docstring 自己寫著），所以那一層只剩節流。而子行程被殺掉是這個設計裡正常會發生的
+    事——每被殺一次就多一則重複的提醒，他很快就會學會不看。
+    """
+    bars = _seven_daily_bars()
+    handle = _RebuiltHandle(fed_through=bars[-1].timestamp)
+
+    _run_rebuilt(db_session, handle, bars)
+
+    assert handle.judged == [], "已經判斷過的那一根又被判斷了一次"
+    assert handle.warmed == [bars], "狀態沒了，所以完整歷史還是要重暖一次"
+
+
+def test_a_rebuild_with_one_new_bar_judges_exactly_that_one(db_session):
+    """而真正新的那一根要被判斷，**而且只餵一次**。
+
+    整批重暖完再叫一次 `on_bar` 的話，同一根 K 棒會進去兩次，而滾動視窗會把它算兩
+    遍——那比丟掉它更糟：訊號還在，但它是照一個從來沒發生過的價格序列算出來的。
+    """
+    bars = _seven_daily_bars()
+    handle = _RebuiltHandle(fed_through=bars[-2].timestamp)
+
+    _run_rebuilt(db_session, handle, bars)
+
+    assert handle.judged == [bars[-1]]
+    assert handle.warmed == [bars[:-1]], "最新那一根不可以同時出現在重暖那一批裡"
+
+
+def test_a_handle_that_was_never_fed_still_throws_its_signal_away(db_session):
+    """從來沒餵過的那條路不可以被順手改掉。
+
+    手上那幾根可能是任意久以前收盤的——使用者半夜三點建一支日線策略，最新那根是昨天
+    的收盤。對它下指示就是為一個過期的理由現在下單。
+    """
+    bars = _seven_daily_bars()
+    handle = _RebuiltHandle(fed_through=None)
+
+    _run_rebuilt(db_session, handle, bars)
+
+    assert handle.judged == []
+    assert handle.warmed == [bars]

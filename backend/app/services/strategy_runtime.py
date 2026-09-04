@@ -330,6 +330,16 @@ class LoadedStrategy:
     last_bar_ts: datetime | None = field(default=None, compare=False)
     _stuck_thread: threading.Thread | None = field(default=None, repr=False, compare=False)
 
+    @property
+    def fed_through(self) -> datetime | None:
+        """我們餵到哪一根了，就算實例不在了也算數。
+
+        跑在這個行程裡的時候，實例和這筆記帳是同一個物件的兩個欄位——它們一起活、
+        一起死，所以這兩個問題的答案永遠一樣。分開命名是因為 `PooledStrategy` 那一
+        邊不一樣（實例在子行程裡，記帳在父行程），而 market_loop 兩種都要能問。
+        """
+        return self.last_bar_ts
+
     def on_tick(self, price: float) -> str:
         return self._guarded(lambda: self.instance.on_tick(price), "on_tick")
 

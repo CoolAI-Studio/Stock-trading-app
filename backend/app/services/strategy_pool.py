@@ -203,6 +203,31 @@ class PooledStrategy:
     def last_bar_ts(self, value: datetime | None) -> None:
         self._last_bar_ts = value
 
+    @property
+    def fed_through(self) -> datetime | None:
+        """我們餵到哪一根了——**就算那個實例已經不在了也算數**。
+
+        跟上面那個 property 的差別，就是「實例還在嗎」那個問題。兩個都要，因為
+        `last_bar_ts is None` 現在同時表示兩種處境，而它們要的行為不一樣：
+
+            從來沒餵過        `fed_through` 也是 None。手上那幾根 K 棒可能是任意
+                              久以前收盤的（使用者半夜三點建一支日線策略，最新那
+                              根是昨天的收盤），所以訊號是觀察不是指示。
+
+            餵過，但實例被殺  `fed_through` 還在。所以「哪幾根是這之後才收盤的」
+                              答得出來，而那一根剛剛收盤的 K 棒完全有依據下判斷。
+
+        沒有這一格的話，子行程被殺掉的那一輪如果剛好有一根 K 棒收盤，它的訊號會被
+        當成重播丟掉——對日線策略來說那是一整天的提醒消失，不是延後（#58）。
+
+        **不受實例生死影響，所以不需要 try。** 它就是父行程裡的一個欄位。
+
+        改原始碼或參數不會走到這裡：那時候 `get_or_load` 會 `_drop` 掉整個 handle，
+        下一次拿到的是一個全新的 `PooledStrategy`，這一格自然是 None——而那是對的，
+        換了一支策略之後，它的第一個訊號跟「半夜三點新建一支」是同一種東西。
+        """
+        return self._last_bar_ts
+
     def on_tick(self, price: float) -> str:
         return self._pool._call(self._key, "on_tick", price)
 
