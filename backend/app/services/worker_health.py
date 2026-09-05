@@ -63,6 +63,13 @@ class HeartbeatSnapshot:
     #
     # 兩種寫法各壞一半，所以問迴圈本身：它剛剛決定要睡多久，健康檢查就照那個放寬。
     expected_gap_sec: float | None = None
+    # 最近有幾則提醒**放棄**了，以及那個數字是多久以前算的。
+    #
+    # 由盯盤迴圈在它自己那一輪裡算好（那一輪本來就在用資料庫），探測只讀這裡。原本是
+    # 每次探測現算一次，而平台的健康檢查每幾秒就打一次——量出來每分鐘 15.4 句 SQL，於
+    # 是免費方案的運算單元永遠不休眠。
+    undelivered: int | None = None
+    undelivered_age_sec: float | None = None
     # 這個行程起來之前，有多久沒有任何行程在跑。None 代表沒有這種空白。
     #
     # **這張快照上其他每一欄都看不到這件事，而且結構上不可能看得到**：它們全都是這
@@ -92,6 +99,8 @@ class WorkerHeartbeat:
         self._slept_sec: float | None = None
         # 迴圈上一次決定要睡多久。健康檢查照這個放寬門檻。
         self._expected_gap: float | None = None
+        self._undelivered: int | None = None
+        self._undelivered_at: float | None = None
 
     def mark_loop(self) -> None:
         """The loop reached the top of an iteration, so it is not wedged."""
@@ -177,6 +186,15 @@ class WorkerHeartbeat:
         """
         self._expected_gap = seconds
 
+    def mark_undelivered(self, count: int) -> None:
+        """這一輪數到的「放棄掉的提醒」有幾則。
+
+        由盯盤迴圈呼叫，因為它那一輪本來就在用資料庫；探測自己去數的話，平台的健康檢
+        查每幾秒打一次就等於把免費方案的資料庫釘在醒著的狀態。
+        """
+        self._undelivered = count
+        self._undelivered_at = self._clock()
+
     def mark_downtime(self, seconds: float) -> None:
         """開機時回頭看：這個行程起來之前，有多久沒有任何行程在跑。
 
@@ -203,6 +221,10 @@ class WorkerHeartbeat:
             bar_gap_sec={s: now - since for s, since in self._bar_gap_since.items()},
             slept_sec=self._slept_sec,
             expected_gap_sec=self._expected_gap,
+            undelivered=self._undelivered,
+            undelivered_age_sec=(
+                None if self._undelivered_at is None else now - self._undelivered_at
+            ),
         )
 
 

@@ -197,3 +197,59 @@ def test_a_database_that_is_gone_still_turns_the_deep_probe_red(client, monkeypa
 
     assert response.status_code == 503
     assert response.json()["checks"]["database"]["status"] == "fail"
+
+
+def test_the_shallow_probe_sends_no_sql_with_notifications_switched_on(
+    client, counted, monkeypatch
+):
+    """上面那條測試缺的一半，而缺的那一半正是線上真正在跑的設定。
+
+    ＊ 這條測試存在的原因。
+
+    `client` fixture 會把 `NOTIFICATIONS_ENABLED` 關掉（測試不該真的送出通知），而
+    `checks["notifications"]` 那一格**只有在它開著的時候才會去查資料庫**——一句
+    `SELECT count(...)` 數最近放棄掉的提醒。
+
+    於是 `test_the_probe_the_platform_polls_never_touches_the_database` 一直是綠的，而
+    線上每一次健康檢查都在敲資料庫。量出來的（2026-09-05 21:52–22:07，收盤後、盯盤迴
+    圈從 35 秒一路睡到 956 秒）：
+
+        每分鐘 15.4 句 SQL，16 次取樣裡「上次 SQL」沒有一次超過 5 秒
+
+    平台自己的健康檢查每幾秒就打一次 `/healthz`，所以那一格等於把免費方案的運算單元釘
+    在醒著的狀態——這就是 #98、#99 兩輪都沒讓用量掉下來的原因：拿掉了 `SELECT 1`，卻留
+    著它正下方的 `SELECT count(...)`。
+
+    ＊ 教訓寫在這裡，因為它會再犯。
+
+    **fixture 關掉的東西，就是測試看不到的東西。** 一格只在某個設定下才走的路，要在那
+    個設定下測，否則綠燈證明的是另一份程式。
+    """
+    monkeypatch.setattr(settings, "NOTIFICATIONS_ENABLED", True)
+    counted.clear()
+
+    client.get("/healthz")
+
+    assert counted == [], f"淺層探測在通知開著的時候送出了 {len(counted)} 句 SQL：{counted}"
+
+
+def test_the_watchdog_still_sees_alerts_that_gave_up_without_asking_the_database(
+    client, counted, monkeypatch
+):
+    """省下來的喚醒，不可以把「提醒送不出去」這一格一起省掉。
+
+    那一格是看門狗唯一看得到「他的 bot token 被撤銷、每一則都失敗、重送用完」的地方，
+    而那正是這個產品最不能發生的事。所以搬家之後它要**照樣會紅**——只是數字改由盯盤迴
+    圈在它自己那一輪裡數好（那一輪本來就在用資料庫），探測只讀記憶體。
+    """
+    monkeypatch.setattr(settings, "NOTIFICATIONS_ENABLED", True)
+    clock = _a_loop_that_just_finished_a_poll(monkeypatch)
+    worker_health.heartbeat.mark_undelivered(3)
+    clock.now += 60
+    counted.clear()
+
+    response = client.get("/healthz", params={"deep": "1"})
+
+    assert counted == [], f"讀迴圈數好的那個數字時又查了一次資料庫：{counted}"
+    assert response.status_code == 503
+    assert response.json()["checks"]["notifications"] == {"status": "fail", "undelivered": 3}

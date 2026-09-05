@@ -165,7 +165,9 @@ def test_the_health_check_is_quiet_when_notifications_are_on(client, monkeypatch
     # put them back explicitly rather than relying on the default.
     monkeypatch.setattr("app.config.settings.NOTIFICATIONS_ENABLED", True)
 
-    body = client.get("/healthz").json()
+    # **深的那一條。** 這一格要數資料庫才答得出來，而沒帶參數的那一條刻意不數——平台的
+    # 健康檢查每幾秒就打一次它，每一次查詢都是一次喚醒（#100）。
+    body = client.get("/healthz", params={"deep": "1"}).json()
 
     assert body["checks"]["notifications"]["status"] == "ok"
 

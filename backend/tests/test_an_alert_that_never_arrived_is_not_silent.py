@@ -29,10 +29,20 @@ bar_gap_sec）——兩次都是「後果真的發生了，而每一個探測都
 test_the_watchdog_does_not_cry_wolf 守的事）。**放棄**不一樣：重送已經用完，那一則
 提醒永遠不會到了。那不是雜訊，那正是這個產品唯一不能發生的事。
 
-＊ 為什麼查資料庫而不是記在行程裡。
+＊ 數字從資料庫來，但**不是每次探測都去數**（#100 改的）。
 
-行程重啟就忘了，而「上一版部署之前放棄掉的那幾則」照樣是沒送到。而且 /healthz 本來
-就會碰資料庫（database 那一格），多一句有索引的計數不會改變它的成本結構。
+原本這裡寫的理由是「/healthz 本來就會碰資料庫，多一句有索引的計數不會改變它的成本結
+構」。那個前提在 #98、#99 之後被抽掉了地基：淺層探測現在什麼都不碰，所以這「一句」
+就是全部的成本——而平台的健康檢查每幾秒就打一次。量出來是每分鐘 15.4 句 SQL，也就是
+免費方案的運算單元永遠不休眠、額度月中用完，接下來半個月一則提醒都不會送出。
+
+所以改成由盯盤迴圈在它自己那一輪裡數好（那一輪本來就在用資料庫），探測讀心跳。數字
+還是從資料庫來的，「行程重啟就忘了」也還是解掉的——每一輪都重新數一次，而第一輪在開
+機後幾秒內就跑完。
+
+因此**這個檔案裡的斷言問的是 `?deep=1`**：那是看門狗在看的那一條，也是這一格存在的
+理由。沒帶參數的那一條在還沒有人數過的時候回 `skipped`——「不知道」不可以顯示成「沒
+問題」。
 """
 
 from datetime import timedelta
@@ -119,7 +129,7 @@ def test_it_counts_them_but_does_not_say_whose(client, db_session):
     _log(db_session, user, channel, given_up=True)
     _log(db_session, user, channel, given_up=True)
 
-    body = client.get("/healthz").json()
+    body = client.get("/healthz", params={"deep": "1"}).json()
 
     assert body["checks"]["notifications"]["undelivered"] == 2
     assert "undelivered@example.com" not in response_text(body)
@@ -142,7 +152,9 @@ def test_something_still_being_retried_is_not_an_outage(client, db_session):
     user = _owner(db_session)
     _log(db_session, user, _channel(db_session, user), given_up=False)
 
-    assert client.get("/healthz").json()["checks"]["notifications"]["status"] == "ok"
+    body = client.get("/healthz", params={"deep": "1"}).json()
+
+    assert body["checks"]["notifications"]["status"] == "ok"
 
 
 def test_an_old_failure_does_not_keep_it_red_for_ever(client, db_session):
@@ -153,14 +165,16 @@ def test_an_old_failure_does_not_keep_it_red_for_ever(client, db_session):
     user = _owner(db_session)
     _log(db_session, user, _channel(db_session, user), given_up=True, hours_ago=24 * 15)
 
-    assert client.get("/healthz").json()["checks"]["notifications"]["status"] == "ok"
+    body = client.get("/healthz", params={"deep": "1"}).json()
+
+    assert body["checks"]["notifications"]["status"] == "ok"
 
 
 def test_turning_notifications_off_still_fails_the_way_it_did(client, monkeypatch, db_session):
     """本來就有的那一半不可以弄丟：功能被關掉也是「一則都不會送出」。"""
     monkeypatch.setattr(settings, "NOTIFICATIONS_ENABLED", False)
 
-    body = client.get("/healthz").json()
+    body = client.get("/healthz", params={"deep": "1"}).json()
 
     assert body["checks"]["notifications"]["status"] == "fail"
 

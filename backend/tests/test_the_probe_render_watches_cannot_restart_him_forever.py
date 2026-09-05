@@ -132,10 +132,15 @@ def test_an_upstream_outage_does_not_restart_the_instance(client, watching):
 def test_the_two_answers_agree_on_everything_the_shallow_one_measured(client, watching):
     """兩個讀者要做的事不一樣，但看到的事實要一樣——**淺層真的量過的那幾格**。
 
-    唯一的例外是資料庫：淺層刻意不查它，因為平台的健康檢查一直在打這個網址，每打一次
-    就把免費方案的運算單元叫醒一次
-    （test_the_health_probe_does_not_keep_the_database_awake 有量出來的數字）。那一格
-    在淺層回的是 skipped 而不是 ok——「不知道」不可以顯示成「沒問題」。
+    例外是那些要查資料庫才答得出來的格子（資料庫本身、通知有沒有掉在地上）。淺層刻意
+    不查，因為平台的健康檢查每幾秒就打一次這個網址，每一次查詢都是一次喚醒——量出來是
+    每分鐘 15.4 句 SQL，而免費方案是照醒著的時間計費的
+    （test_the_health_probe_does_not_keep_the_database_awake 記著那些數字）。
+
+    那幾格在淺層回的是 `skipped` 而**不是** `ok`：「不知道」不可以顯示成「沒問題」。
+
+    **這裡把可以被跳過的格子釘死**，而不是「凡是 skipped 就跳過比較」——後者會讓下一
+    次「順手再省一格」悄悄通過，而那一格可能正是唯一會叫人的那個。
     """
     beat, clock = watching
     beat.mark_symbols(asked={"2330.TW"}, answered=set())
@@ -146,8 +151,12 @@ def test_the_two_answers_agree_on_everything_the_shallow_one_measured(client, wa
     shallow = client.get("/healthz").json()["checks"]
     deep = client.get("/healthz", params={"deep": "1"}).json()["checks"]
 
-    assert shallow.pop("database")["status"] == "skipped"
-    deep.pop("database")
+    not_measured = {name for name, cell in shallow.items() if cell["status"] == "skipped"}
+
+    assert not_measured == {"database", "notifications"}
+    for name in not_measured:
+        shallow.pop(name)
+        deep.pop(name)
     assert shallow == deep
 
 

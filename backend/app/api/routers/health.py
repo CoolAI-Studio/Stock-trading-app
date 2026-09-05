@@ -1,22 +1,15 @@
 import logging
-from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy import func, select, text
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
-from app.enums import NotificationStatus
-from app.models.mixins import utcnow
-from app.models.notification import NotificationLog
 from app.services import build_info, db_activity, worker_health
-
-# 只看最近這段時間的「放棄」。跟狀態頁的統計窗口同一個道理：半個月前沒送出去的那
-# 一則，今天已經不是一個他可以做什麼的東西，而一個永遠紅著的燈會被學會忽略。
-_UNDELIVERED_WINDOW_HOURS = 24
+from app.services.notification import retry as notification_retry
 
 logger = logging.getLogger("app.health")
 
@@ -348,28 +341,41 @@ def healthz(
     #
     # 只看最近這段時間：半個月前放棄掉的那一則不該讓今天的探測是紅的，而一個永遠紅著
     # 的燈會被學會忽略。
-    undelivered = 0
-    if settings.NOTIFICATIONS_ENABLED:
+    # **這個數字不在這裡數。**
+    #
+    # 它要查資料庫，而這支端點被打的頻率遠高於資料庫能休眠的門檻——平台自己的健康檢查
+    # 每幾秒就打一次沒帶參數的那一條。量出來的（2026-09-05 21:52–22:07，收盤後、盯盤迴
+    # 圈從 35 秒一路睡到 956 秒）：每分鐘 15.4 句 SQL，16 次取樣裡「上次 SQL」沒有一次
+    # 超過 5 秒。#98 和 #99 兩輪都沒讓用量掉下來，就是漏了這一句——拿掉了 `SELECT 1`，
+    # 卻留著它正下方的 `SELECT count(...)`。
+    #
+    # 改成由盯盤迴圈在它自己那一輪裡數好（那一輪本來就在用資料庫），這裡只讀記憶體。
+    undelivered = None if beat is None else beat.undelivered
+    counted_recently = (
+        beat is not None
+        and beat.undelivered_age_sec is not None
+        and beat.undelivered_age_sec <= _max_age(beat.expected_gap_sec)
+    )
+    if deep and not counted_recently and settings.NOTIFICATIONS_ENABLED:
+        # 迴圈沒在跑，或還沒跑完第一輪。深的那一條是看門狗在看的，它寧可多花一次喚醒也
+        # 不能把「提醒送不出去」漏掉——那正是這一格存在的理由。
         try:
-            since = utcnow() - timedelta(hours=_UNDELIVERED_WINDOW_HOURS)
-            undelivered = int(
-                db.execute(
-                    select(func.count(NotificationLog.id)).where(
-                        NotificationLog.status == NotificationStatus.FAILED,
-                        NotificationLog.next_retry_at.is_(None),
-                        NotificationLog.channel_id.is_not(None),
-                        NotificationLog.created_at >= since,
-                    )
-                ).scalar_one()
-                or 0
-            )
+            undelivered = notification_retry.count_recently_given_up(db)
+            counted_recently = True
         except Exception:  # noqa: BLE001 -- 資料庫那一格已經在報這件事了，不要報兩次
-            undelivered = 0
+            undelivered = None
+            counted_recently = False
 
     if not settings.NOTIFICATIONS_ENABLED:
         checks["notifications"] = {
             "status": _FAIL,
             "detail": "NOTIFICATIONS_ENABLED is off; no alert will be sent",
+        }
+    elif not counted_recently:
+        # 「不知道」不可以顯示成「沒問題」：沒有人數過，就不能說沒有提醒掉在地上。
+        checks["notifications"] = {
+            "status": _SKIPPED,
+            "detail": "not counted on the shallow probe; ask /healthz?deep=1",
         }
     elif undelivered:
         # 幾則，不是哪一則。這支端點沒有憑證也打得到——跟代號和策略那兩格同一條規則。

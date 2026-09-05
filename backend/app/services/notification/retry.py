@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from datetime import timedelta
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import ChannelType, NotificationStatus
@@ -426,3 +427,37 @@ def _send_notice(db: Session, channel: NotificationChannel, text: str) -> None:
         )
     )
     db.commit()
+
+
+# 「最近」是多久。半個月前放棄掉的那一則不該讓今天的探測是紅的，而一個永遠紅著的燈會
+# 被學會忽略。
+GIVEN_UP_WINDOW_HOURS = 24
+
+
+def count_recently_given_up(db: Session, hours: int = GIVEN_UP_WINDOW_HOURS) -> int:
+    """最近這段時間裡，有幾則提醒**放棄**了。
+
+    算的是「放棄」，不是「失敗」：失敗會重送，而重送多半會成功——一次 Telegram 抖動不
+    該把看門狗叫起來。放棄不一樣，重送已經用完，那一則永遠不會到了。
+
+    ＊ 為什麼由盯盤迴圈來算，而不是每次探測現算。
+
+    因為它要查資料庫，而 `/healthz` 被打的頻率遠高於資料庫能休眠的門檻——平台自己的健
+    康檢查每幾秒就打一次。原本這一句就寫在探測裡，量出來是每分鐘 15.4 句 SQL，於是免
+    費方案的運算單元永遠不休眠，額度月中用完，接下來半個月一則提醒都不會送出。
+
+    迴圈每一輪本來就在用資料庫，所以由它順便算好、放進心跳，探測只讀記憶體。代價是這
+    個數字最舊可能是一個輪詢週期以前的——而看門狗本來就是半小時問一次。
+    """
+    since = utcnow() - timedelta(hours=hours)
+    return int(
+        db.execute(
+            select(func.count(NotificationLog.id)).where(
+                NotificationLog.status == NotificationStatus.FAILED,
+                NotificationLog.next_retry_at.is_(None),
+                NotificationLog.channel_id.is_not(None),
+                NotificationLog.created_at >= since,
+            )
+        ).scalar_one()
+        or 0
+    )
