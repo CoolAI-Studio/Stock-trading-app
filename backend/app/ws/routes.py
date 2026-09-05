@@ -57,7 +57,22 @@ async def ws_endpoint(websocket: WebSocket, ticket: str, db: Session = Depends(g
     await websocket.accept()
     await manager.connect(user_id, websocket)
 
-    await websocket.send_json({"type": "snapshot", "v": 1, "data": _initial_snapshot(db, user_id)})
+    snapshot = _initial_snapshot(db, user_id)
+    # **交易要在這裡結束，不是等 socket 斷掉才結束。**
+    #
+    # 這是整個 app 裡唯一長命的請求，而 FastAPI 的依賴要等 handler 回來才收——所以在
+    # 這一行之前，那條交易的壽命等於使用者的分頁開多久。
+    #
+    # 免費方案的資料庫（Neon）閒置 5 分鐘就把運算單元收起來，這是額度活得下去的唯一
+    # 原因；但它文件裡明講的例外是「idle-in-transaction 的連線一律當成還在用」。所以
+    # 一個沒關的分頁 = 那顆運算單元永遠不休眠 = 一個月 730 小時對上 400 小時的額度，
+    # 大約月中用完，之後到下一個帳單週期為止一則提醒都不會送出。
+    #
+    # close() 之後這個 session 還是能用（下次查詢會自己重開一條交易），只是這裡不會
+    # 再用到它了：之後的每一筆推播都是別人的 session 產生的事件。
+    db.close()
+
+    await websocket.send_json({"type": "snapshot", "v": 1, "data": snapshot})
 
     try:
         while True:
