@@ -46,6 +46,7 @@ from sqlalchemy import event
 
 from app.config import settings
 from app.services import worker_health
+from app.services.market_loop import CLOSED_POLL_INTERVAL_SEC
 
 
 @pytest.fixture
@@ -148,3 +149,75 @@ class _Clock:
 
     def __call__(self) -> float:
         return self.now
+
+
+def _a_loop_that_just_finished_a_poll(monkeypatch) -> "_Clock":
+    """一個剛剛成功跑完一輪的盯盤迴圈。"""
+    monkeypatch.setattr(settings, "WORKER_ENABLED", True)
+    clock = _Clock()
+    beat = worker_health.WorkerHeartbeat(clock=clock)
+    monkeypatch.setattr(worker_health, "heartbeat", beat)
+    beat.mark_loop()
+    beat.mark_poll_success()
+    beat.expect_next_within(CLOSED_POLL_INTERVAL_SEC)
+    return clock
+
+
+def test_the_deep_one_reuses_the_work_the_loop_already_did(client, counted, monkeypatch):
+    """迴圈剛跑完一輪 = 資料庫剛剛被用過而且能用。不要再問一次。
+
+    ＊ 為什麼要擋，明明深層一天只被打 288 次。
+
+    因為每一次都是**一次喚醒**。免費方案閒置 5 分鐘才休眠，所以每 5 分鐘問一次等於那
+    顆運算單元永遠醒著——一個月 730 小時，而額度是 400 小時。
+
+    而那個 5 分鐘的監控是**我們自己的文件教出來的**（DEPLOYMENT.md、docs/install.html
+    在 2026-09-04 之前都寫著 `?deep=1` ＋ 5 分鐘）。照做的人不會回來重讀文件，我們也搆
+    不到他的 UptimeRobot——所以只有端點自己擋得住。這跟資料庫預設換不換是同一條教訓：
+    **改設定只幫得到還沒裝的人，改程式才救得到已經在跑的那些。**
+
+    ＊ 為什麼這個答案比 SELECT 1 好。
+
+    `mark_poll_success()` 只在 `tick_once` 整輪沒炸的時候才會被呼叫，而那一輪從頭到尾
+    都在讀寫資料庫。所以它證明的是**真正要用的那條路通**，不是一句人造的查詢通。
+    """
+    clock = _a_loop_that_just_finished_a_poll(monkeypatch)
+    clock.now += 60  # 一分鐘前剛跑完
+    counted.clear()
+
+    response = client.get("/healthz", params={"deep": "1"})
+
+    # 不問整體狀態碼：測試環境裡 NOTIFICATIONS_ENABLED 是關的，那一格本來就紅。
+    assert response.json()["checks"]["database"]["status"] == "ok"
+    assert counted == [], f"迴圈剛證明過了，深層探測還是自己又問了一次：{counted}"
+
+
+def test_it_asks_for_itself_once_the_loops_evidence_has_expired(client, counted, monkeypatch):
+    """證據會過期。過期之後不可以繼續拿它當答案——那就變成猜的。
+
+    門檻跟 worker 那一格用的是同一個（`_max_age`），也就是迴圈自己說的下一輪期限。過
+    了那個時間迴圈還沒回報成功，資料庫能不能用就是一件沒有人知道的事了。
+    """
+    clock = _a_loop_that_just_finished_a_poll(monkeypatch)
+    clock.now += CLOSED_POLL_INTERVAL_SEC + settings.HEALTH_TICK_BUDGET_SEC + 1
+    counted.clear()
+
+    client.get("/healthz", params={"deep": "1"})
+
+    assert counted, "迴圈的證據已經過期，深層探測卻沒有自己去問資料庫"
+
+
+def test_a_database_that_is_gone_still_turns_the_deep_probe_red(client, monkeypatch):
+    """省下來的喚醒不可以連「資料庫掛了」都一起省掉。
+
+    迴圈碰不到資料庫就不會再 `mark_poll_success`，所以那份證據一定會過期；過期之後這
+    條路自己去問，於是照樣紅。看門狗寄不寄得出信，靠的就是這一格。
+    """
+    clock = _a_loop_that_just_finished_a_poll(monkeypatch)
+    clock.now += CLOSED_POLL_INTERVAL_SEC + settings.HEALTH_TICK_BUDGET_SEC + 1
+    monkeypatch.setattr("app.api.routers.health._check_database", lambda db: {"status": "fail"})
+
+    response = client.get("/healthz", params={"deep": "1"})
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["database"]["status"] == "fail"

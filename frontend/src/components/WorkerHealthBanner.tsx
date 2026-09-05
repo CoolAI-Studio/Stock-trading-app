@@ -31,8 +31,12 @@ export function WorkerHealthBanner() {
   const { data, isError } = useQuery({
     queryKey: ['healthz'],
     queryFn: () => api.get<Health>('/healthz'),
-    // Roughly the market poll interval. Cheap by design -- one SELECT 1 and
-    // two in-memory timestamps, nothing that touches a data provider.
+    // Roughly the market poll interval. Cheap by design: this URL carries no
+    // ?deep=1, and without it the endpoint does not touch the database at all
+    // -- just in-memory timestamps. That matters at 30s: the free-tier
+    // database sleeps after 5 minutes idle, and a query here would pin it
+    // awake for as long as any tab is open, which is how a month's compute
+    // allowance disappears by mid-month (backend health._database_answer).
     refetchInterval: 30_000,
     retry: false,
   })

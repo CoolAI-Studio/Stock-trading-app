@@ -42,6 +42,48 @@ def _check_database(db: Session) -> dict[str, Any]:
     return {"status": _OK}
 
 
+def _database_answer(db: Session, beat: worker_health.HeartbeatSnapshot | None) -> dict[str, Any]:
+    """深層探測那一格的答案——**能不問就不問。**
+
+    ＊ 為什麼要省，明明深層一天只被打幾百次。
+
+    因為每一次都是一次**喚醒**。免費方案的資料庫（Neon）閒置 5 分鐘才休眠，所以每 5
+    分鐘問一次就等於那顆運算單元永遠醒著：一個月 730 小時，而額度是 400 小時，大約月
+    中用完，然後停到下一個帳單週期——那半個月一則提醒都不會送出。
+
+    而那個 5 分鐘的監控是**我們自己的文件教出來的**（2026-09-04 之前的 DEPLOYMENT.md
+    和 docs/install.html 都寫著 `?deep=1` ＋ 5 分鐘）。照做的人不會回來重讀文件，我們
+    也搆不到他的 UptimeRobot——所以只有這支端點自己擋得住。跟「不要為了額度去換資料庫
+    預設」是同一條教訓：改設定只幫得到還沒裝的人，改程式才救得到已經在跑的那些。
+
+    ＊ 為什麼迴圈的心跳可以當答案，而且是更好的答案。
+
+    `mark_poll_success()` 只在 `tick_once` 整輪沒有例外的時候才會被呼叫，而那一輪從頭
+    到尾都在讀寫資料庫（策略、持股、報價、通知重送）。所以「剛剛跑完一輪」證明的是
+    **真正要用的那條路通**，比一句人造的 `SELECT 1` 強。
+
+    ＊ 證據會過期，過期就要自己去問。
+
+    門檻用的是 worker 那一格同一個 `_max_age`，也就是迴圈自己說的下一輪期限。過了還沒
+    回報成功，資料庫能不能用就是沒有人知道的事——那時候多花一次喚醒是值得的，因為看門
+    狗寄不寄得出信靠的就是這一格。
+
+    代價講明白：資料庫在迴圈兩輪之間死掉的話，這一格最多晚一個輪詢週期才變紅。而那個
+    週期正是迴圈自己碰資料庫的週期，所以沒有辦法比它更早知道——除非付出讓資料庫永遠不
+    休眠的代價，而那個代價是每個月後半完全停擺。
+    """
+    if beat is not None and beat.last_poll_age_sec is not None:
+        age = beat.last_poll_age_sec
+        if age <= _max_age(beat.expected_gap_sec):
+            return {
+                "status": _OK,
+                # 說清楚這個 ok 是哪裡來的。「不知道」不可以顯示成「沒問題」，而
+                # 「從別的地方推出來的」也不可以假裝成「剛剛親自問過」。
+                "detail": f"proved by the market loop's own queries {age:.0f}s ago",
+            }
+    return _check_database(db)
+
+
 def _max_age(expected_gap_sec: float | None) -> float:
     """「多久沒動算不正常」——照迴圈自己剛剛決定要睡多久算。
 
@@ -152,8 +194,9 @@ def healthz(
     # 而淺層根本不需要這個答案：#94 之後它唯一會 503 的條件是「盯盤迴圈不再往前」，跟
     # 資料庫沒有關係。深的那一條照舊查——看門狗和監控服務每 5 分鐘打一次，那個頻率是刻
     # 意接受的代價，換來的是「有沒有人會被通知」唯一的外部觀測。
+    beat = worker_health.heartbeat.snapshot() if settings.WORKER_ENABLED else None
     checks: dict[str, dict[str, Any]] = {
-        "database": _check_database(db)
+        "database": _database_answer(db, beat)
         if deep
         else {
             "status": _SKIPPED,
@@ -165,8 +208,7 @@ def healthz(
     # 直覺窄得多**——窄到只剩一格，理由見底下 mark_loop 那一段。
     restart_might_help = False
 
-    if settings.WORKER_ENABLED:
-        beat = worker_health.heartbeat.snapshot()
+    if beat is not None:
         # Two independent signals: the loop can keep spinning while every tick
         # raises, so "wedged" and "erroring" have to be distinguishable here.
         checks["worker"] = _check_age(

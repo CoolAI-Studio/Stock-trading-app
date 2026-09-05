@@ -84,6 +84,14 @@ def test_healthz_503s_when_the_database_is_unreachable(client, worker_clock, mon
     worker_health.heartbeat.mark_loop()
     worker_health.heartbeat.mark_poll_success()
     monkeypatch.setitem(app.dependency_overrides, get_db, _UnreachableSession)
+    # **時間要往前走。** 深層探測會先看盯盤迴圈剛剛有沒有成功跑完一輪——跑完了就拿那
+    # 個當答案，不再自己 `SELECT 1`（`_database_answer`：每一次自己問都是一次喚醒，而
+    # 每 5 分鐘喚醒一次就等於免費方案的額度在月中用完）。
+    #
+    # 所以「資料庫剛剛還好好的，這一秒不見了」這一格看不到，這是刻意換來的。真實情況
+    # 下那份證據撐不過一個輪詢週期：資料庫不見了，`tick_once` 第一句查詢就炸，
+    # `mark_poll_success` 不會再被呼叫，證據過期——也就是這裡撥的這段時間。
+    worker_clock.advance(settings.HEALTH_MAX_AGE_SEC + 1)
 
     # **深的那一條。** 沒帶參數的 `/healthz` 是平台的健康檢查在看的，而它失敗 60 秒
     # 就會把行程重開——資料庫不見了重開一萬次也回不來（免費方案運算時數用完的話，那
