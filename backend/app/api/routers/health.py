@@ -12,7 +12,7 @@ from app.db.session import get_db
 from app.enums import NotificationStatus
 from app.models.mixins import utcnow
 from app.models.notification import NotificationLog
-from app.services import build_info, worker_health
+from app.services import build_info, db_activity, worker_health
 
 # 只看最近這段時間的「放棄」。跟狀態頁的統計窗口同一個道理：半個月前沒送出去的那
 # 一則，今天已經不是一個他可以做什麼的東西，而一個永遠紅著的燈會被學會忽略。
@@ -82,6 +82,23 @@ def _database_answer(db: Session, beat: worker_health.HeartbeatSnapshot | None) 
                 "detail": f"proved by the market loop's own queries {age:.0f}s ago",
             }
     return _check_database(db)
+
+
+def _database_activity() -> dict[str, Any]:
+    """這個行程上一次真的送出 SQL 是多久以前，以及總共送了幾句。
+
+    **不碰資料庫**（全部在記憶體裡，見 services/db_activity.py），所以讀它不會把要量的
+    東西弄髒——這正是它掛在沒帶參數那一條上也答得出來的原因。
+
+    要問的是頻率，而頻率是兩次取樣相減。免費方案照醒著的時間計費、閒置 5 分鐘休眠，所
+    以「多久碰它一次」直接決定這個部署活不活得過這個月。
+    """
+    age = db_activity.activity.last_statement_age_sec
+    return {
+        # None 而不是 0：一句都還沒送過的時候，0 會被讀成「剛剛才碰過」。
+        "last_sql_age_sec": None if age is None else round(age, 1),
+        "statements": db_activity.activity.statements,
+    }
 
 
 def _max_age(expected_gap_sec: float | None) -> float:
@@ -204,6 +221,9 @@ def healthz(
             "detail": "not checked on the shallow probe; ask /healthz?deep=1",
         }
     }
+    # 上面那一格回答的是「它現在還能不能用」；這兩個回答的是「我們多常碰它」，而後者
+    # 才是免費方案活不活得過這個月的關鍵。兩個都不用查資料庫就答得出來。
+    checks["database"] |= _database_activity()
     # 重開這個行程有沒有機會修好。只有這個決定沒帶參數的那一條要不要 503，而**它比
     # 直覺窄得多**——窄到只剩一格，理由見底下 mark_loop 那一段。
     restart_might_help = False

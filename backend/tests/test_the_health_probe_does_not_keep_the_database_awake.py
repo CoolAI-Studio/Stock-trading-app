@@ -41,33 +41,9 @@
 規則的第五次出現：**「不知道」不可以顯示成「沒問題」。**
 """
 
-import pytest
-from sqlalchemy import event
-
 from app.config import settings
 from app.services import worker_health
 from app.services.market_loop import CLOSED_POLL_INTERVAL_SEC
-
-
-@pytest.fixture
-def counted(db_session):
-    """數這個請求真的送出去幾句 SQL。
-
-    不用 monkeypatch `_check_database`：那只證明那個函式沒被呼叫，不證明「這條路真的
-    沒有碰資料庫」——而後者才是 Neon 在計費的東西。連線池的 pre-ping 也算，所以要在引
-    擎那一層數。
-    """
-    engine = db_session.get_bind()
-    seen: list[str] = []
-
-    def record(conn, cursor, statement, parameters, context, executemany):
-        seen.append(statement)
-
-    event.listen(engine, "after_cursor_execute", record)
-    try:
-        yield seen
-    finally:
-        event.remove(engine, "after_cursor_execute", record)
 
 
 def test_the_probe_the_platform_polls_never_touches_the_database(client, counted):
