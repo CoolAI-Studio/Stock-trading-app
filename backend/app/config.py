@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The PUBLIC_BASE_URL default, named so the 「still unset」 check in
@@ -17,6 +18,47 @@ LOCAL_BASE_URL = "http://localhost:8000"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _repair_what_he_pasted(cls, value):
+        """把各家主控台「複製」按鈕給的東西修成 SQLAlchemy 收得下的樣子。
+
+        `DATABASE_URL` 是部署表單上**唯一一格 app 生不出來**的值，只能去別人家的服務複
+        製貼上——所以它拿到什麼形狀，我們控制不了。
+
+        而貼錯的代價比其他每一格都嚴重：`db/session.py` 在模組層建引擎，建不起來就是
+        import 期例外，uvicorn 起不來，**整個網址是死的**。`scripts/start.py` 那一整套
+        「跑不動也要把服務起起來、讓設定頁說得出原因」在這條路上派不上用場，因為那段話
+        要行程活著才送得出去。
+
+        修三種真的會發生的形狀：
+
+            postgres://                 SQLAlchemy 1.4 拿掉的舊別名，而 Heroku 和大半
+                                        教學到現在都還是給這個。錯誤訊息是
+                                        「Can't load plugin: sqlalchemy.dialects:postgres」
+            psql '…'                    Neon 主控台的 psql 分頁，整行連指令一起複製
+            前後的引號和空白             從網頁上選取時很容易一起帶到
+
+        **只修「貼進來的字串」，不做「壞掉之後撐住」。** 後者很危險：一份已經在跑的部署
+        如果連線字串被改壞，現在是行程死掉、平台判部署失敗、上一版繼續服務、他的提醒沒
+        有斷；改成「起得來但連到一個空資料庫」反而會讓流量切過去。修不動的，照樣讓它死。
+        """
+        if not isinstance(value, str):
+            return value
+
+        url = value.strip()
+        if url.startswith("psql "):
+            url = url[len("psql ") :].strip()
+        # **整串**被引號包住才算，不是「出現過引號」——密碼裡的引號不可以被吃掉，
+        # 那會變成「密碼錯誤」，而他會跑去改資料庫上的密碼，愈修愈遠。
+        for quote in ("'", '"'):
+            if len(url) >= 2 and url.startswith(quote) and url.endswith(quote):
+                url = url[1:-1].strip()
+                break
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://") :]
+        return url
 
     DATABASE_URL: str = "sqlite:///./trading_app_dev.db"
 
