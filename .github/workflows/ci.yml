@@ -409,6 +409,136 @@ jobs:
           docker logs first-deploy || true
           docker logs bad-database || true
 
+  # 我們每一次 push，都是別人機器上的一次升級（#50、#52：後端追 stable ＋ autoDeploy）。
+  # 而在這一關出現之前，CI 驗的是「從空的建起來」——空資料庫、SQLite、第一次啟動。
+  #
+  # 真實事件是另一件事：他的資料庫裡已經有東西，而且是 Postgres。那條路上有兩件從來沒
+  # 有人跑過的事：
+  #
+  #   1. Postgres 本身。CI 裡出現 postgres 的唯一一處，是上面那個故意連不通的假位址。
+  #      帶 dialect 守衛的遷移（`if dialect.name != "postgresql": return`）在 SQLite 上
+  #      整支被跳過，所以那些手寫的 ALTER TABLE 語法，唯一真正執行的地方是使用者那台。
+  #   2. 既有的列。一支忘了給預設值、或把欄位改名的遷移，在空資料庫上永遠是綠的。
+  #
+  # 而映像檔的 CMD 是 `alembic upgrade head && uvicorn`：遷移失敗，uvicorn 從來不會被
+  # 執行，他的服務起不來，提醒全面停擺——而告訴他這件事的東西也在那個容器裡。
+  #
+  # 所以這一關把那件事排練一遍：用他現在正在跑的那一版（stable）開起來、建資料，換成
+  # 這一個 commit 指同一個資料庫，看它起不起得來、資料還在不在。
+  upgrade:
+    name: upgrade (his version -> this commit, real Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rehearsal
+          POSTGRES_PASSWORD: rehearsal
+          POSTGRES_DB: rehearsal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rehearsal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg2://rehearsal:rehearsal@127.0.0.1:5432/rehearsal
+      # 兩次啟動要用**同一把**。通知管道的設定是用它加密存的（EncryptedJSON），換一把
+      # 就等於升級之後每一個管道都解不開——而那是「提醒送不出去」最安靜的一種。這一把
+      # 是為 CI 生的、只活在這個 job 裡，不是任何一份部署的金鑰。
+      SECRET_ENCRYPTION_KEY: j34pnvWK6zIyaM7XYVMDwYQU9cNQZzEk3taSPl2y3UE=
+      JWT_SECRET: ci-not-a-placeholder-0123456789
+      TV_WEBHOOK_SECRET: ci-not-a-placeholder-9876543210
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # stable 是另一條分支，預設的淺 clone 拿不到它。
+          fetch-depth: 0
+
+      - name: 他現在跑的是哪一版
+        id: his
+        run: |
+          if git fetch --no-tags origin stable 2>/dev/null; then
+            echo "ref=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            # fork 或剛開的 repo 還沒有 stable。跳過而不是紅燈：這一關要驗的事情在那種
+            # 副本上還不存在。
+            echo "::notice::這一份沒有 stable 分支，升級排練跳過。"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 建他現在那一版的映像檔
+        if: steps.his.outputs.ref != ''
+        run: |
+          git worktree add /tmp/his-version "${{ steps.his.outputs.ref }}"
+          docker build -f /tmp/his-version/backend/Dockerfile -t trading-app:his /tmp/his-version
+
+      - name: 建這一個 commit 的映像檔
+        if: steps.his.outputs.ref != ''
+        # 前端相依那一層跟上面共用快取，所以這一次通常快得多。
+        run: docker build -f backend/Dockerfile -t trading-app:new .
+
+      - name: 用他那一版開起來
+        if: steps.his.outputs.ref != ''
+        # --network host：service container 的 5432 對映在 runner 的 localhost 上。
+        run: |
+          docker run -d --name his-version --network host \
+            -e PORT=8000 \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e SECRET_ENCRYPTION_KEY="$SECRET_ENCRYPTION_KEY" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e TV_WEBHOOK_SECRET="$TV_WEBHOOK_SECRET" \
+            trading-app:his
+
+      - name: 等它起來
+        if: steps.his.outputs.ref != ''
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8000/healthz >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "::error::他現在那一版在這個 Postgres 上就起不來了。"
+          docker logs his-version
+          exit 1
+
+      - name: 建出一個真的使用者會有的東西
+        if: steps.his.outputs.ref != ''
+        run: python3 backend/scripts/upgrade_smoke.py seed http://localhost:8000 --out /tmp/seed.json
+
+      - name: 升級他
+        if: steps.his.outputs.ref != ''
+        run: |
+          docker stop his-version
+          docker run -d --name new-version --network host \
+            -e PORT=8000 \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e SECRET_ENCRYPTION_KEY="$SECRET_ENCRYPTION_KEY" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e TV_WEBHOOK_SECRET="$TV_WEBHOOK_SECRET" \
+            trading-app:new
+
+      - name: 它起得來嗎（壞掉的遷移在這一步現形）
+        if: steps.his.outputs.ref != ''
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8000/healthz >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "::error::升級之後服務起不來。他的容器會停在這裡，而提醒全面停擺——最可能的原因是遷移在既有資料上失敗（CMD 是 alembic upgrade head && uvicorn）。"
+          docker logs new-version
+          exit 1
+
+      - name: 他的資料還在嗎
+        if: steps.his.outputs.ref != ''
+        run: python3 backend/scripts/upgrade_smoke.py verify http://localhost:8000 --seed /tmp/seed.json
+
+      - name: Container logs (on failure)
+        if: failure()
+        run: |
+          docker logs his-version || true
+          docker logs new-version || true
+
   # Nobody presses Deploy. That was the whole problem: CLAUDE.md carried
   # 「Render 自動部署 webhook 沒觸發，目前手動」 as a status line for weeks, and
   # a manual step in the release path is a step that gets skipped -- the
@@ -429,7 +559,7 @@ jobs:
   # fork or a clone is never broken by a secret it does not have.
   deploy:
     name: deploy (only after everything is green)
-    needs: [backend, frontend, first-deploy]
+    needs: [backend, frontend, first-deploy, upgrade]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # 只有這個 job 需要寫入權限，而它只用在最後一步：把 stable 移到已經上線且健

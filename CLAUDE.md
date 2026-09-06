@@ -162,6 +162,27 @@ Windows。跟上限有關的測試分兩層——「每個平台都要活著」�
 **要新增一格之前先問：它要不要查資料庫？** 要的話，答案只有兩種——由迴圈順便算好，或者
 不要加。沒有第三種，因為這支端點被打的頻率是平台決定的，不是我們。
 
+### 每一次 push 都是別人機器上的一次升級（#102）
+
+`upgrade` job 排練那件事：真的 Postgres ＋ `stable` 那一版建資料 → 換成這個 commit →
+資料還要在（`scripts/upgrade_smoke.py` 的 seed／verify 兩半）。它一次補掉兩個洞：
+
+1. **Postgres 從來沒有被驗過。** 在它之前，CI 裡出現 postgres 的唯一一處是一個故意連不
+   通的假位址。帶 dialect 守衛的遷移（`if dialect.name != "postgresql": return`）在
+   SQLite 上整支被跳過，所以那些手寫的 `ALTER TABLE` 語法唯一真正執行的地方，是使用者
+   那台。
+2. **既有資料從來沒有被驗過。** 一支忘了給預設值、或把欄位改名的遷移，在空資料庫上永遠
+   是綠的。而映像檔的 CMD 是 `alembic upgrade head && uvicorn`——遷移失敗，uvicorn 從來
+   不會被執行，他的服務起不來，提醒全面停擺，而告訴他這件事的東西也在那個容器裡。
+
+**這一關擋 `deploy`**（圖表和 first-run 不擋）。理由是方向不同：那兩關紅了是畫面難看，
+這一關紅了是「送出去會讓已經在跑的那一份起不來」——那就是提醒全面停擺本身。
+
+驗的四樣東西各有理由，寫在 `upgrade_smoke.py` 的檔頭：帳號（密碼欄位動過就全部鎖在外
+面）、通知管道（`EncryptedJSON`，列得出來就代表解得開）、**啟用中的**策略（#50 的原話）、
+自選（最普通的一列資料）。兩次啟動用**同一把** `SECRET_ENCRYPTION_KEY`，否則加密那一格
+驗的是假的。
+
 ### fixture 關掉的東西，就是測試看不到的東西（#100）
 
 `test_the_probe_the_platform_polls_never_touches_the_database` 從 #98 起就是綠的，而線上
@@ -306,7 +327,7 @@ Render」部署一份自己的副本——自己的網址、自己的資料庫�
    | **TDD** | 先紅後綠。每個功能先寫會失敗的測試，確認它為**正確的原因**失敗，才動實作 | ✅ |
    | **Linter** | 後端**用 CI 的那兩句原句**：`ruff check app tests` ＋ `ruff format --check app tests alembic`——`alembic` **只在第二句裡**，所以用 `ruff format app tests scripts` 這種自己想的路徑，遷移檔永遠測不到，而 autogenerate 出來的遷移檔預設就不是 ruff 的格式（已經因此紅過一次）。前端是 **`npm run build`**（等於 `tsc -b` + vite build）+ `oxlint`。前端不要只跑 `tsc --noEmit`——它不涵蓋測試檔，漏掉的型別錯誤會等到 CI 的 build 步驟才爆。除錯先看 linter，不要用 print 猜。**兩關開真的瀏覽器**：`npm run test:chart`（CI 的 `chart` job）守圖表——替身和 jsdom 都看不到「選項被吃進去了但行為不如預期」，那已經讓一個修好的 bug 帶著全綠的 CI 上線過一次；`npm run test:firstrun`（CI 的 `first-run` job）走一遍全新使用者的路（全空部署 → 設定頁 → 建立第一個帳號 → 引導），它抓到的四件事沒有一件會讓別的 job 變紅。**兩關都不擋 `deploy`**：警告不能停擺優先於畫面 | ✅ |
    | **Git** | 每個邏輯單元一個 commit，訊息寫清楚「為什麼」而不只是「改了什麼」 | ✅ |
-   | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數。要在推之前先確認，就把 `backend/.env` 和 `trading_app_dev.db` 暫時移開再跑一次——CI 沒有這兩個，而它們已經三次讓本機綠、CI 紅 | ✅ CI ＋ CD（`.github/workflows/ci.yml` 的 `deploy` job：三個 job 全綠才呼叫 Render Deploy Hook。刻意**不用** Render 自己的自動部署——它在 push 時就觸發，會送出測試還沒跑完的 commit）。**部署有沒有真的送達也是自動確認的**：hook 回 201 只代表對方收下請求，所以 deploy job 之後會一直問線上 `/healthz` 的 `version.commit`，等到它變成剛推的那一個才算成功，等不到就紅燈——舊版的後端每一項健康檢查都是綠的，沒有這一步就看不出部署失敗 |
+   | **CI/CD** | GitHub Actions 每次 push 跑完整套件。**CI 綠燈才算綠燈**，本機跑過不算數。要在推之前先確認，就把 `backend/.env` 和 `trading_app_dev.db` 暫時移開再跑一次——CI 沒有這兩個，而它們已經三次讓本機綠、CI 紅 | ✅ CI ＋ CD（`.github/workflows/ci.yml` 的 `deploy` job：`backend`／`frontend`／`first-deploy`／`upgrade` 四個 job 全綠才呼叫 Render Deploy Hook。刻意**不用** Render 自己的自動部署——它在 push 時就觸發，會送出測試還沒跑完的 commit）。**部署有沒有真的送達也是自動確認的**：hook 回 201 只代表對方收下請求，所以 deploy job 之後會一直問線上 `/healthz` 的 `version.commit`，等到它變成剛推的那一個才算成功，等不到就紅燈——舊版的後端每一項健康檢查都是綠的，沒有這一步就看不出部署失敗。**升級也排練過**（`upgrade` job，#102）：起一個真的 Postgres，用 `stable`（＝他現在跑的那一版）開起來建資料，換成這個 commit 指同一個資料庫，驗它起得來而且資料還在 |
    | **DevSecOps** | 安全左移：相依套件漏洞掃描（Dependabot/`pip-audit`）、密鑰不進版控、CI 內做 SAST、部署前檢查設定 | ✅ Dependabot、CI 內 pip-audit、開機檢查密鑰、SAST（`bandit -r app scripts`，CI 內是硬性關卡；抑制一定要附 `# nosec BXXX` 加理由）、**常態資料外流稽查**（`backend/scripts/audit.py`：CI 每次 push 的硬性關卡 ＋ 每週排程 ＋ 唯讀稽查線上那一份。它不知道這個 app 有什麼——端點從跑起來的 app 讀、資料表從模型登記簿讀——所以新增一個沒有帳號閘門的端點會直接紅燈。做法與三層機制見 `AUDIT.md`） |
    | **需求追蹤** | GitHub Issues 當單一事實來源；每個 commit / PR 連回一個 issue，缺口清單逐項建票。**commit 訊息尾端加 `Refs #N`**（修好的加 `Closes #N`）——這一列跟其他列不一樣：TDD／linter／CI 做不到會有東西變紅，需求追蹤做不到不會有任何東西變紅，它只會讓「為什麼要做這件事」慢慢從版控裡消失。刻意**不**在 CI 加硬性檢查：擋住推送會連帶擋住修通知路徑的 hotfix，而警告不能停擺優先 | ✅ 樣板（`.github/ISSUE_TEMPLATE/` 缺口／故障、`.github/PULL_REQUEST_TEMPLATE.md`）＋ `Refs #N` 慣例。缺口清單已逐項建票 |
    | **Docker / IaC** | 容器已有（`backend/Dockerfile`），相依套件用 `requirements.lock` 鎖版、CI 與映像檔裝同一份；雲端資源（Render / Neon / Vercel）改用 Terraform 宣告，不要靠手點介面 | ⚠️ Docker ✅、鎖版 ✅、Terraform ⚠️（`infra/` 宣告維護者自己那一份 Render／Neon／Vercel。**`terraform init` ＋ `validate` 已經跑過而且過了**——那兩步不需要任何 token，所以「欄位是抄來的、沒驗過」這個理由已經不成立：provider 名稱、版本、每一個欄位名稱都對著真正的 schema 檢查過了。`.terraform.lock.hcl` 進版控，把三個 provider 連同校驗碼釘死（跟 `requirements.lock` 同一條規則——`~> 1.9` 是範圍不是釘死，而 `providers.tf` 自己說 provider 握有刪掉那幾個資源的權限）。**還沒跑過的是 `plan`**，它要對著三家的 API 問現況，那才需要 token；`infra/README.md` 記著線上真正存著的值當核對表。**第一次一定是 import 不是 apply**。驗得到的安全性質：放資料的東西不能被刪、token 不在檔案裡、state 不進版控、鎖檔在——`test_the_infra_declaration_cannot_destroy_the_database.py`。**這個目錄不在使用者的路徑上**：README 不提 Terraform，一鍵部署仍然是 render.yaml ＋ 按鈕） |
