@@ -193,6 +193,11 @@ def verify(base_url: str, seeded: dict) -> None:
     if now and seeded.get("from_version") and now == seeded["from_version"]:
         # 不是失敗：`stable` 剛好就是這個 commit 的時候（例如重跑一次 CI）本來就會一
         # 樣。說出來，免得有人以為這一關驗過了它其實沒驗到的東西。
+        #
+        # **這一句只在映像檔帶得動版本號的時候才有用。** CI 建的映像檔沒有
+        # APP_GIT_COMMIT（那是環境變數，不是 build arg——見 CLAUDE.md #53），所以那裡
+        # 兩邊都是 None，這個 if 進不來。真正管用的是工作流程那一側：它比對的是
+        # `stable` 的 SHA 和 github.sha，那兩個一定拿得到。
         print(f"注意：兩次跑的是同一版（{now}），這一關這次沒有真的跨版本。")
 
     token = _login(base_url)

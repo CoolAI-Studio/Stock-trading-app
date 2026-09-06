@@ -460,7 +460,14 @@ jobs:
         id: his
         run: |
           if git fetch --no-tags origin stable 2>/dev/null; then
-            echo "ref=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+            ref=$(git rev-parse FETCH_HEAD)
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+            # stable 有可能就是這個 commit（在同一版上重跑一次 CI）。那時候這一關還是
+            # 會跑完、還是綠的，但它**沒有跨版本**——說出來，免得有人把那次的綠燈當成
+            # 「升級驗過了」。
+            if [ "$ref" = "${{ github.sha }}" ]; then
+              echo "::notice::stable 就是這個 commit，這一次的排練沒有跨版本。"
+            fi
           else
             # fork 或剛開的 repo 還沒有 stable。跳過而不是紅燈：這一關要驗的事情在那種
             # 副本上還不存在。
