@@ -783,17 +783,27 @@ def tick_once(
         # bound on time, and twenty rows timing out at ten seconds each is
         # three minutes of this thread not polling a price or checking a
         # stop-loss (see notification/retry.py:_MAX_SWEEP_SEC).
+        # 在同一輪、同一個 session 裡數好，`/healthz` 只讀記憶體。
+        #
+        # 這一句原本住在探測裡，而平台的健康檢查每幾秒就打一次 `/healthz`——量出來是每分
+        # 鐘 15.4 句 SQL，也就是免費方案的運算單元永遠不休眠、額度月中用完，接下來半個
+        # 月一則提醒都不會送出（#101）。
+        #
+        # **在重送掃描之前，而且自己一個 try。** 它本來寫在那個 try 的後面，而
+        # `retry_pending` 是這一輪裡最會丟例外的一段（它真的去打 Telegram、SMTP、推
+        # 播）。前面一炸這一句就跳過，心跳裡的數字愈來愈舊，超過門檻之後深層探測判定證
+        # 據過期、每一次都自己去查一次資料庫——三輪的成果就這樣還回去了，而整條路上不會
+        # 有任何東西變紅。
         try:
-            notification_retry.retry_pending(session)
-            # 在同一輪、同一個 session 裡數好，`/healthz` 只讀記憶體。
-            #
-            # 這一句原本住在探測裡，而平台的健康檢查每幾秒就打一次 `/healthz`——量出來
-            # 是每分鐘 15.4 句 SQL，也就是免費方案的運算單元永遠不休眠、額度月中用完，
-            # 接下來半個月一則提醒都不會送出。#98、#99 兩輪都沒讓用量掉下來就是因為漏
-            # 了它：拿掉了 `SELECT 1`，卻留著正下方的 `SELECT count(...)`。
             worker_health.heartbeat.mark_undelivered(
                 notification_retry.count_recently_given_up(session)
             )
+        except Exception:
+            # 數不到就讓探測自己去查（那是它本來的退路）。這一句失敗不該讓整輪失敗。
+            logger.exception("數不到放棄掉的提醒")
+
+        try:
+            notification_retry.retry_pending(session)
             # Cheap: one indexed query, and it only does real work on the day a
             # backup comes due. Living in the same sweep as the retry means
             # there is one place where "the worker is alive" implies "the

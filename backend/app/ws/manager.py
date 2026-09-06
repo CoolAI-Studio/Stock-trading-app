@@ -20,6 +20,14 @@ class ConnectionManager:
         async with self._lock:
             self._connections.setdefault(user_id, set()).add(websocket)
 
+    def count_for(self, user_id: int) -> int:
+        """這個人現在有幾條連線在推播名單上。
+
+        給測試問「快照失敗之後有沒有留下一筆死掉的登記」用的——那個問題要問行為，而不是
+        伸手進 `_connections`。
+        """
+        return len(self._connections.get(user_id, ()))
+
     async def disconnect(self, user_id: int, websocket: WebSocket) -> None:
         async with self._lock:
             sockets = self._connections.get(user_id)
