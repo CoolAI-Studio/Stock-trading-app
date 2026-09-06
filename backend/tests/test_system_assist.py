@@ -248,3 +248,61 @@ def test_the_assistant_is_told_which_platform_this_is(auth_client, db_session):
     summary = _state_for_assistant(db_session, user)
 
     assert "平台" in summary or "部署在" in summary
+
+
+def test_the_assistant_is_told_how_far_behind_this_deployment_is(
+    auth_client, db_session, monkeypatch
+):
+    """「你這一份落後上游 12 版」常常就是整個答案。
+
+    這個 app 的更新是自動送的（#52：後端追 stable ＋ autoDeploy，前端靠每天的同步工作
+    流程），而**同步可能不會發生**——Actions 沒開、有衝突、他改過程式碼。那時候他遇到
+    的每一個「為什麼會這樣」，正確答案都是「那個在新版修好了」。
+
+    這份狀態裡本來每一格都很細（哪一個代號沒價、哪一支策略叫不動子行程），唯獨沒有
+    「你在哪一版」。助手於是只能拿現在這一版的行為去解釋一個三個月前的 bug。
+    """
+    from app.api.routers.system import _state_for_assistant
+    from app.models.user import User
+    from app.services import update_check
+
+    monkeypatch.setattr(
+        update_check,
+        "status",
+        lambda: {"running": "abc1234", "latest": "def5678", "behind": True, "why": "落後 12 版"},
+    )
+    user = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+
+    summary = _state_for_assistant(db_session, user)
+
+    assert "abc1234" in summary
+    assert "落後 12 版" in summary
+
+
+def test_not_knowing_the_version_is_not_told_as_up_to_date(auth_client, db_session, monkeypatch):
+    """**「不知道」不可以說成「已經是最新」。**
+
+    這是這個 repo 一路在守的同一條規則（build_info、update_check、系統狀態頁、健康檢查
+    的 database 那一格），而它在這裡被違反的後果特別安靜：助手會拿「你已經是最新版」當
+    前提去推理，然後把一個早就修好的 bug 解釋成使用者做錯了什麼。
+    """
+    from app.api.routers.system import _state_for_assistant
+    from app.models.user import User
+    from app.services import update_check
+
+    monkeypatch.setattr(
+        update_check,
+        "status",
+        lambda: {
+            "running": None,
+            "latest": None,
+            "behind": None,
+            "why": "這個平台沒有告訴這個 app 它是哪一個版本，所以比不出來。",
+        },
+    )
+    user = db_session.query(User).filter(User.email == "fixture-user@example.com").one()
+
+    summary = _state_for_assistant(db_session, user)
+
+    assert "比不出來" in summary
+    assert "已經是最新" not in summary

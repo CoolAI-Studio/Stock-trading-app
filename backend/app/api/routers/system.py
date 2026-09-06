@@ -476,6 +476,21 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"{row['name']}（已 {row['blocked_sec']:.0f} 秒叫不動子行程）"
         for row in status["strategies"]["blocked"]
     )
+    # **他在哪一版，以及有沒有落後。** 更新是自動送的，但同步可能不會發生（Actions 沒
+    # 開、有衝突、他改過程式碼），而那時候他每一個「為什麼會這樣」的正確答案都是「那個
+    # 在新版修好了」。少了這一行，助手只能拿現在這一版的行為去解釋一個三個月前的 bug。
+    #
+    # `behind` 是 None 的時候帶的是 why 那句話，**不是**「已經是最新」——這是這個 repo
+    # 一路在守的同一條規則，而在這裡被違反特別安靜：助手會拿一個錯的前提去推理。
+    update = status["update"]
+    version = f"{update.get('running') or '不知道'}"
+    if update.get("behind") is True:
+        version += f"（落後上游：{update.get('why') or '有新版'}）"
+    elif update.get("behind") is False:
+        version += "（已經是最新）"
+    else:
+        version += f"（是不是最新不知道：{update.get('why') or '比不出來'}）"
+
     stuck_bars = "、".join(
         f"{row['series']}（已 {row['gap_sec']:.0f} 秒抓不到 K 棒）" for row in market["stale_bars"]
     )
@@ -495,6 +510,7 @@ def _state_for_assistant(db: Session, user: User) -> str:
         f"等靜音 {notifications['deferred']}、已放棄 {notifications['given_up']}、"
         f"沒送到任何管道 {notifications['reached_nobody']}\n"
         f"- 資料庫：{status['database']['detail']}\n"
+        f"- 這一份跑的版本：{version}\n"
         f"- 這個部署在：{status['platform']['name']}"
         f"（環境變數在：{status['platform']['env_where']}）\n"
         f"- 還沒填的設定項目（只列名稱，不含內容）：{', '.join(missing) or '無'}"
