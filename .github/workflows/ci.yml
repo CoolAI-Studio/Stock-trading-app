@@ -420,8 +420,10 @@ jobs:
   #      整支被跳過，所以那些手寫的 ALTER TABLE 語法，唯一真正執行的地方是使用者那台。
   #   2. 既有的列。一支忘了給預設值、或把欄位改名的遷移，在空資料庫上永遠是綠的。
   #
-  # 而映像檔的 CMD 是 `alembic upgrade head && uvicorn`：遷移失敗，uvicorn 從來不會被
-  # 執行，他的服務起不來，提醒全面停擺——而告訴他這件事的東西也在那個容器裡。
+  # 而「服務起得來」不等於「遷移跑成了」：scripts/start.py 刻意讓遷移失敗的容器照樣起
+  # 來（一個死掉的網址送不出任何說明），已經有帳號的部署更是刻意不鎖。所以這一關真正的
+  # 斷言在最後一步——系統狀態頁的 database 那一格，它會把 DATABASE_MIGRATION_STALE 的
+  # 原因原樣帶出來。
   #
   # 所以這一關把那件事排練一遍：用他現在正在跑的那一版（stable）開起來、建資料，換成
   # 這一個 commit 指同一個資料庫，看它起不起得來、資料還在不在。
@@ -525,18 +527,18 @@ jobs:
             -e TV_WEBHOOK_SECRET="$TV_WEBHOOK_SECRET" \
             trading-app:new
 
-      - name: 它起得來嗎（壞掉的遷移在這一步現形）
+      - name: 它起得來嗎
         if: steps.his.outputs.ref != ''
         run: |
           for i in $(seq 1 60); do
             curl -fsS http://localhost:8000/healthz >/dev/null 2>&1 && exit 0
             sleep 2
           done
-          echo "::error::升級之後服務起不來。他的容器會停在這裡，而提醒全面停擺——最可能的原因是遷移在既有資料上失敗（CMD 是 alembic upgrade head && uvicorn）。"
+          echo "::error::升級之後服務在兩分鐘內沒有回答。start.py 連遷移失敗都會照樣把服務起起來，所以走到這裡代表更早的地方就死了——看下面的容器日誌。"
           docker logs new-version
           exit 1
 
-      - name: 他的資料還在嗎
+      - name: 遷移跑成了嗎、他的資料還在嗎
         if: steps.his.outputs.ref != ''
         run: python3 backend/scripts/upgrade_smoke.py verify http://localhost:8000 --seed /tmp/seed.json
 

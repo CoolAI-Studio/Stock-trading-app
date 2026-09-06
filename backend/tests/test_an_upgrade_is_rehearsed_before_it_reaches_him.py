@@ -14,11 +14,12 @@ CLAUDE.md 第一優先：「更新不可以停掉已經在跑的那一份。」�
    `test_a_postgres_only_migration_is_not_unverified` 的檔頭已經寫著，帶 dialect 守衛
    的那幾支遷移「語法那一半沒有人驗過」。
 2. **既有資料。** 一支把欄位改名、或忘記給既有列預設值的遷移，在空資料庫上永遠是綠
-   的，在他那台是 `alembic upgrade head` 非零退出——而映像檔的 CMD 是
-   `alembic upgrade head && uvicorn`，所以 uvicorn 從來不會被執行。
+   的，在他那台是 `alembic upgrade head` 非零退出。
 
-失敗的形狀是這個 repo 最怕的那一種：**我們全綠，他的服務起不來，而提醒全面停擺。**他
-不會收到任何東西告訴他這件事，因為會告訴他的那個東西也在那個容器裡。
+失敗的形狀是這個 repo 最怕的那一種：**我們全綠，他那邊壞掉。** 而且不是壞成一個看得見
+的樣子——`scripts/start.py` 刻意讓服務在遷移失敗時照樣起來（見
+`test_it_notices_a_migration_that_did_not_actually_run`），所以他拿到的是一份「網址打得
+開、畫面正常、而 schema 跟程式碼對不上」的部署。
 
 所以這一關把那件事排練一遍：起一個真的 Postgres，用**上一個released 版本**（`stable`，
 也就是他現在正在跑的那一版）開起來、建資料，然後換成這一個 commit 的映像檔指同一個資料
@@ -166,3 +167,42 @@ def test_the_seed_uses_payloads_this_app_actually_accepts(auth_client):
 
     assert activated.status_code == 200, activated.text
     assert activated.json()["is_active"] is True
+
+    # migration_problem 讀的那一格，形狀要跟真的回應對得上——上面那條測試餵給它的是手
+    # 寫的 payload，只有這一句擋得住「回應改了形狀而那個函式從此永遠回 None」。
+    status = auth_client.get("/api/system/status")
+    assert status.status_code == 200, status.text
+    assert "database" in status.json()
+    assert upgrade_smoke.migration_problem(status.json()) is None
+
+
+def test_it_notices_a_migration_that_did_not_actually_run():
+    """**「服務起得來」不等於「遷移跑成了」，而這一關原本只驗了前者。**
+
+    容器的 CMD 是 `python scripts/start.py`，而那支腳本刻意**不**用
+    `alembic upgrade head && uvicorn`：遷移跑不動的時候服務照樣起來，好讓設定頁說得出
+    原因（一個死掉的網址送不出任何說明）。已經有帳號的部署更是刻意不鎖——一次跑不動的
+    遷移不該讓一份跑了三個月的部署所有提醒停擺。
+
+    那個設計是對的，但它讓「curl /healthz 有回答」失去了它在這一關裡的意義：一支壞掉的
+    遷移**照樣**會讓那一步變綠。
+
+    真正說得出這件事的是系統狀態頁：`start.py` 把原因放進 `DATABASE_MIGRATION_STALE`，
+    而 `/api/system/status` 的 database 那一格會因此變成 warn 並把原因原樣帶出來。
+    """
+    from scripts.upgrade_smoke import migration_problem
+
+    healthy = {"database": {"status": "ok", "detail": "資料存在 Postgres 裡。"}}
+
+    assert migration_problem(healthy) is None
+
+    stale = {
+        "database": {
+            "status": "warn",
+            "detail": "上一次啟動時資料庫遷移沒有跑完……原因：column strategies.foo does not exist",
+        }
+    }
+    problem = migration_problem(stale)
+
+    assert problem is not None
+    assert "column strategies.foo does not exist" in problem

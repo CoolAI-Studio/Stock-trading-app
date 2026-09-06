@@ -10,8 +10,17 @@
 的事：帶 dialect 守衛的遷移在 SQLite 上整支被跳過（所以那些手寫的 `ALTER TABLE` 語法
 沒有人執行過），以及「既有的列」——一支忘了給預設值的遷移在空資料庫上永遠是綠的。
 
-而映像檔的 CMD 是 `alembic upgrade head && uvicorn`：遷移失敗，uvicorn 從來不會被執
-行，他的服務起不來，提醒全面停擺。**而告訴他這件事的東西也在那個容器裡。**
+＊ 而「服務起得來」**不等於**「遷移跑成了」。
+
+容器的 CMD 是 `python scripts/start.py`，而那支腳本刻意不用
+`alembic upgrade head && uvicorn`：遷移跑不動的時候服務照樣起來，好讓設定頁說得出原因
+（一個死掉的網址送不出任何說明）。已經有帳號的部署更是刻意**不鎖**——一次跑不動的遷移
+不該讓一份跑了三個月的部署所有提醒停擺（#50 的形狀，入口從編譯移到開機）。
+
+那個設計是對的，但它讓「curl /healthz 有回答」在這一關裡幾乎沒有意義：一支壞掉的遷移照
+樣會讓那一步變綠。所以這裡要問的是**系統狀態頁**——`start.py` 把原因放進
+`DATABASE_MIGRATION_STALE`，而 `/api/system/status` 的 database 那一格會因此變成 warn
+並把原因原樣帶出來。
 
 ＊ 兩半。
 
@@ -187,6 +196,22 @@ def _version(base_url: str) -> str | None:
     return ((payload or {}).get("version") or {}).get("commit")
 
 
+def migration_problem(status_payload: dict) -> str | None:
+    """狀態頁說遷移有沒有跑成。沒問題回 None，有問題回那句可以直接顯示的原因。
+
+    純函式，這樣「這一關到底看不看得出壞掉的遷移」測得到，不用真的弄壞一支遷移。
+
+    判準是 database 那一格不是 ok 就算有問題。在這一關的情境下（真的 Postgres、剛升級
+    完）那一格只有兩種變成非 ok 的理由，而**兩種都該讓這一關紅**：遷移沒跑完，或者資
+    料庫其實是容器裡的一個檔案（那代表 DATABASE_URL 根本沒接上這個 Postgres，這一關就
+    什麼都沒驗到）。
+    """
+    database = (status_payload or {}).get("database") or {}
+    if database.get("status") == "ok":
+        return None
+    return database.get("detail") or f"database 那一格是 {database.get('status')!r}"
+
+
 def verify(base_url: str, seeded: dict) -> None:
     """換成新版之後，那些東西還要在。"""
     now = _version(base_url)
@@ -230,12 +255,20 @@ def verify(base_url: str, seeded: dict) -> None:
             "而畫面上只會寫『停用』，沒有東西說為什麼。"
         )
 
+    # **這一段才是「遷移真的跑成了」的證據。** 上面每一項都可能在一個 schema 沒跟上的
+    # 部署上照樣通過——那些端點只是剛好沒碰到新的那一欄。
+    status_code, system = _request("GET", f"{base_url}/api/system/status", token=token)
+    _expect(status_code, (200,), "讀系統狀態頁", system)
+    problem = migration_problem(system)
+    if problem:
+        raise Failed(f"升級之後 schema 跟程式碼對不上：{problem}")
+
     status_code, health = _request("GET", f"{base_url}/healthz?deep=1")
     database = ((health or {}).get("checks") or {}).get("database", {}).get("status")
     if database not in {"ok", "skipped"}:
         raise Failed(f"升級之後健康檢查的資料庫那一格是 {database}：{health}")
 
-    print("升級排練通過：帳號、自選、加密的通知設定、啟用中的策略都活著。")
+    print("升級排練通過：遷移跑完了，帳號、自選、加密的通知設定、啟用中的策略都活著。")
 
 
 def main() -> int:
