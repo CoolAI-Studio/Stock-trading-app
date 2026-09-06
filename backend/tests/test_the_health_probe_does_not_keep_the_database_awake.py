@@ -253,3 +253,29 @@ def test_the_watchdog_still_sees_alerts_that_gave_up_without_asking_the_database
     assert counted == [], f"讀迴圈數好的那個數字時又查了一次資料庫：{counted}"
     assert response.status_code == 503
     assert response.json()["checks"]["notifications"] == {"status": "fail", "undelivered": 3}
+
+
+def test_the_shallow_probe_touches_nothing_under_production_settings(client, counted, monkeypatch):
+    """把 fixture 為了方便關掉的東西**全部打開**，再問一次同一個問題。
+
+    #101 的教訓是「fixture 關掉的東西就是測試看不到的東西」，而那一次修的是其中一格
+    （NOTIFICATIONS_ENABLED）。這一條修的是**那一類**：conftest 為了讓測試好寫，對整套
+    套件強制關掉三樣線上都開著的東西——
+
+        NOTIFICATIONS_ENABLED = False    線上是 True
+        WORKER_ENABLED = False           線上是 True
+        市場永遠開盤（autouse）           線上一天有八成時間是收盤
+
+    ——而這支端點被平台每幾秒打一次，所以「它有沒有碰資料庫」這個問題只有在**線上那組
+    設定**下問才算數。少了這一條，下一格新的檢查只要躲在任何一個開關後面，就會重演一次
+    同樣的事：這裡全綠，而免費方案的額度在月中用完。
+    """
+    monkeypatch.setattr(settings, "NOTIFICATIONS_ENABLED", True)
+    monkeypatch.setattr(settings, "WORKER_ENABLED", True)
+    monkeypatch.setattr("app.services.market_calendar.is_open", lambda *a, **k: False)
+    monkeypatch.setattr("app.services.market_calendar.any_open", lambda *a, **k: False)
+    counted.clear()
+
+    client.get("/healthz")
+
+    assert counted == [], f"線上那組設定下，淺層探測送出了 {len(counted)} 句 SQL：{counted}"
