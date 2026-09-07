@@ -4,6 +4,7 @@ import { useWebSocket } from '../lib/useWebSocket'
 import { InstallPrompt } from './InstallPrompt'
 import { PushSelfHeal } from './PushSelfHeal'
 import { NoChannelBanner } from './NoChannelBanner'
+import { NothingWatchedBanner } from './NothingWatchedBanner'
 import { WorkerHealthBanner } from './WorkerHealthBanner'
 
 const NAV_ITEMS = [
@@ -80,6 +81,10 @@ export function Layout() {
       {/* 同一種失效的另一半：worker 在跑、策略啟用中、/healthz 全綠——而沒有
           任何一個啟用中的通知管道，條件成立時還是不會有人知道。 */}
       <NoChannelBanner />
+      {/* 而這是同一句話的第三半：管道有了、worker 在跑，但沒有任何啟用中的策略、也沒有
+          持股——盯盤迴圈每一輪都無事可做，所以不會有東西「條件成立」。維護者自己那一份
+          就是這個狀態，而連續 33.6 小時的觀測裡每一格都是綠的。 */}
+      <NothingWatchedBanner />
       <main className="p-4 sm:p-6">
         <Outlet />
       </main>
