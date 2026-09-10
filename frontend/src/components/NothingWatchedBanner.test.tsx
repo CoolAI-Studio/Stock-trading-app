@@ -41,11 +41,11 @@ function answer({ strategies, positions }: { strategies: Strategy[]; positions: 
   })
 }
 
-function renderBanner() {
+function renderBanner(path = '/') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
         <NothingWatchedBanner />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -136,5 +136,41 @@ describe('沒有東西被盯著的時候', () => {
     await waitFor(() => {
       expect(screen.getByRole('link')).toHaveAttribute('href', '/strategies')
     })
+  })
+})
+
+/**
+ * 在「正在解決這件事」的那一頁上，這句話要閉嘴。
+ *
+ * OnboardingGate 會把一個剛建好帳號、什麼都還沒有的人直接導去 /welcome——那一頁的
+ * 全部工作就是帶他建第一支策略。而這個橫幅掛在 Layout 裡、每一頁都在，所以他的第一個
+ * 畫面會是：一條黃色警告說「你沒有任何啟用中的策略」，外加一個連結把他**帶離**那個正
+ * 在一步步教他的引導。
+ *
+ * 那不只是噪音，是一個跟引導搶人的第二個行動呼籲，而且發生在第一印象那一刻。
+ * /guide 是同一種頁面（設定引導）。
+ */
+describe('在引導頁上', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset()
+  })
+
+  it.each(['/welcome', '/guide'])('%s 不顯示——那一頁本身就是解法', async (path) => {
+    answer({ strategies: [], positions: [] })
+
+    renderBanner(path)
+
+    // 等查詢真的回來，否則「沒顯示」可能只是還在載入，這條測試就什麼都沒證明。
+    await waitFor(() => expect(api.get).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('離開引導回到一般頁面，就要照樣說', async () => {
+    answer({ strategies: [], positions: [] })
+
+    renderBanner('/strategies')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
   })
 })

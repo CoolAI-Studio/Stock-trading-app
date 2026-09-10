@@ -1,7 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { Position, Strategy } from '../lib/types'
+
+// 這兩頁的全部工作就是帶他建第一支策略。OnboardingGate 會把剛建好帳號的人直接導去
+// /welcome，所以在這裡還掛著這句話，等於他的第一個畫面上有一條黃色警告外加一個把他
+// **帶離**引導的連結——一個跟引導搶人的第二個行動呼籲。
+const PAGES_THAT_ARE_THE_FIX = new Set(['/welcome', '/guide'])
 
 /**
  * 說出「這份部署現在沒有在盯任何東西」。
@@ -29,6 +34,7 @@ import type { Position, Strategy } from '../lib/types'
  * WorkerHealthBanner 在講。一句被學會忽略的警告，跟沒有那句話是同一件事。
  */
 export function NothingWatchedBanner() {
+  const { pathname } = useLocation()
   const strategies = useQuery({
     queryKey: ['strategies'],
     queryFn: () => api.get<Strategy[]>('/api/strategies'),
@@ -40,6 +46,7 @@ export function NothingWatchedBanner() {
     retry: false,
   })
 
+  if (PAGES_THAT_ARE_THE_FIX.has(pathname)) return null
   if (!strategies.isSuccess || !positions.isSuccess) return null
   if ((strategies.data ?? []).some((one) => one.is_active)) return null
   // 數量 0 是一筆平掉的紀錄，不是還在看的部位——停損掃描也是這樣分的。
