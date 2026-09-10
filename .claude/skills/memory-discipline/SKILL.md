@@ -96,10 +96,27 @@ died:
   Say "停用" when reporting this, not "刪除" — they are very different things to hear about
   your own machine.
 
+  **Closing the window does not stop it.** `CloseMainWindow()` — what this section used to
+  recommend — only sends Docker Desktop to the system tray: `com.docker.backend` keeps
+  running and brings the WSL VM straight back. A "stop" that looked like it had worked is
+  what took this machine down in September 2026. So stop the processes, not the window,
+  and then **check that they are gone** — the check is the step that matters, because the
+  command returning is not evidence:
+
   ```bash
-  powershell -Command "Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }"
+  taskkill //F //IM "Docker Desktop.exe"; taskkill //F //IM "com.docker.backend.exe"
   wsl.exe --shutdown
   ```
+
+  ```powershell
+  Get-Process 'Docker Desktop','com.docker.backend' -ErrorAction SilentlyContinue   # must print nothing
+  ```
+
+  If the PowerShell tool itself fails to start (a CLR error, `HRESULT 0x80004005`), that is
+  not a PowerShell bug: the machine no longer has the memory to start a runtime. Use the
+  bash `taskkill` above, which needs none. Docker's own `AutoStart` is off on this machine
+  (`%APPDATA%\Docker\settings-store.json`), so once it is really stopped it stays stopped
+  across a reboot.
 
 - **Local dev servers** — stop the uvicorn/vite processes you started once the check that
   needed them is done. Do not leave one running across a whole session on the chance it
