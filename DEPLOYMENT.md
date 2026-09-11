@@ -256,15 +256,16 @@ CI 的部署步驟自己會看這個欄位：呼叫部署 hook 之後，它會�
 （要有這個確認，`HEALTH_URL` 這個 repository variable 要設好，就是 UptimeRobot 那一節用的同一個網址。）
 
 > ⚠️ **你的 repo 如果是私人的，設 `HEALTH_URL` 之前先看這裡。** 設了它，`Watchdog` 那個
-> 排程就會開始每 30 分鐘跑一次 = 一個月 1,440 次，而私人 repo 在 GitHub Free 上一個月
-> 只有 **2,000 分鐘**，用完之後「usage is blocked once you use up your quota」——被擋
-> 掉的是**所有**的 Actions，包括每天從上游快轉的那條更新線。
+> 排程就會開始跑——設定是每 30 分鐘一次 = 一個月**最多** 1,440 次，而私人 repo 在
+> GitHub Free 上一個月只有 **2,000 分鐘**，用完之後「usage is blocked once you use up
+> your quota」——被擋掉的是**所有**的 Actions，包括每天從上游快轉的那條更新線。
 >
 > 也就是說，一個為了「看得到提醒有沒有在跑」而設的變數，會在每個月第二十天前後把「拿
 > 得到更新」關掉，而兩件事都是安靜的。
 >
 > 公開的 repo 沒有這個問題（公開 repo 的 Actions 是免費的）。私人的話，**不要設它**，
-> 用第 4 節那個 UptimeRobot 監控就好——它每 5 分鐘檢查一次（比這個快三倍）、壞掉一樣
+> 用第 4 節那個 UptimeRobot 監控就好——它真的每 5 分鐘檢查一次（這個排程只是設定成半
+> 小時，GitHub 實際上常常好幾個小時才跑一次）、壞掉一樣
 > 寄信，而且不吃你任何額度。沒設 `HEALTH_URL` 的話那個排程整個不會起來（job 層就擋掉
 > 了，被跳過的 job 不計分鐘）。
 >
