@@ -9,7 +9,10 @@ passlib[bcrypt]>=1.7.4
 # passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt>=4.1 -- pin below that
 # until passlib cuts a compatible release (or we drop passlib for direct bcrypt).
 bcrypt<4.1
-python-jose[cryptography]>=3.3
+# PyJWT, not python-jose: jose drags in python-ecdsa, whose PYSEC-2026-1325 has no
+# planned fix, so the weekly audit's pip-audit gate would be red forever (#111).
+# 2.10.1 is the first release with the issuer-matching fix (CVE-2024-53861).
+PyJWT>=2.10.1
 pyotp>=2.9
 python-multipart>=0.0.12
 httpx>=0.27

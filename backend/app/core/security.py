@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from jose import JWTError, jwt
+import jwt
 from passlib.context import CryptContext
 
 from app.config import settings
@@ -37,9 +37,14 @@ def decode_token(token: str) -> tuple[str | None, int]:
     A token minted before this claim existed has no `ver`; it reads as 0,
     which is where every account starts. Rejecting those instead would sign
     the owner out on the deploy that adds this, for no security gain.
+
+    PyJWT, not python-jose (#111): jose pulls in python-ecdsa, whose
+    PYSEC-2026-1325 has no planned fix, so the weekly audit's dependency gate
+    could never go green again. The tokens are the same HS256 JWTs either way,
+    so the ones already in browsers keep working across the switch.
     """
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError:
+    except jwt.PyJWTError:
         return None, 0
     return payload.get("sub"), int(payload.get("ver", 0))

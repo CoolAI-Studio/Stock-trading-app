@@ -70,6 +70,10 @@ jobs:
         # ci.yml 裡這一項是 continue-on-error（不擋住一個跟它無關的修正）。
         # 這裡是關卡：這個 job 存在的理由就是「沒有人在改程式的時候也要有人看」，
         # 而一個上週還乾淨的相依套件今天被公告漏洞，正是那種沒有人會發現的事。
+        #
+        # 紅了先看公告有沒有修好的版本。**上游明說不修的**（PYSEC-2026-1325：
+        # python-ecdsa，2026-08-24 起讓這一步連紅三週）不要加 --ignore-vuln，換掉帶
+        # 它進來的套件——理由在 backend/tests/test_the_weekly_audit_is_not_red_forever.py。
         run: |
           pip install pip-audit
           pip-audit -r requirements.lock --desc

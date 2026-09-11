@@ -214,7 +214,7 @@ def test_the_intruder_cannot_delete_from_the_owners_watchlist(auth_client, intru
 def test_a_token_signed_with_another_key_is_refused(auth_client):
     """The signing key is per deployment. If a forged token were accepted, every
     deployment's data would be reachable from any other."""
-    from jose import jwt
+    import jwt
 
     forged = jwt.encode({"sub": "1", "ver": 0}, "some-other-deployments-key", algorithm="HS256")
 

@@ -45,7 +45,7 @@ def test_a_token_from_before_versions_existed_is_still_readable():
     sign the owner out on the deploy that adds this, for no security gain --
     they are indistinguishable from version 0, which is what every account
     starts at."""
-    from jose import jwt
+    import jwt
 
     from app.config import settings
 
