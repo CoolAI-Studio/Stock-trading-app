@@ -386,6 +386,57 @@ def test_a_bundle_pointing_at_localhost_is_a_finding(auditor):
     )
 
 
+def test_a_url_base_a_library_parses_against_is_not_a_finding(auditor):
+    """react-router 自己帶著一個 `"http://localhost"`，而它從來不是一個會被連的位址。
+
+    那是它 `createBrowserURLImpl` 的解析基準：只有在沒有 `window` 的時候（伺服器端渲
+    染）才拿來當 `new URL(href, base)` 的第二個參數，瀏覽器裡一律換成
+    `location.origin`。這個 app 用 react-router，所以**每一份**正式建置都帶著它。
+
+    規則原本是「任何 localhost 位址」，於是加上這條規則之後的第一次每週稽查
+    （2026-09-07）就紅了，而且之後每一週都會紅。一個每一次都紅的警報器跟壞掉的警報
+    器是同一件事——這個檔案裡已經有兩條測試在守同一個原則。
+
+    真的會打到使用者電腦的那一種一定帶埠號：我們自己的開發伺服器是 8000 和 5173，沒
+    有一個跑在 80。所以判準是「帶埠號的 localhost」，上面那條 `ws://localhost:8000`
+    照樣是發現。
+    """
+    served = {
+        "/": '<!doctype html><script src="/assets/app.js"></script>',
+        "/assets/app.js": 'function j(e){let r="http://localhost";e&&(r=e.location.origin)}',
+    }
+    auditor.served_bundle(lambda path: (200, served.get(path, "")))
+
+    assert auditor.findings == []
+
+
+def test_the_same_rule_stops_a_push_before_it_reaches_anyone():
+    """每週的線上稽查一週才看一次，而且是在上線之後——#110 那個 `localhost:8000` 就這樣
+    在線上待了一週。CI 的 frontend job 建置完就用**同一條規則**掃 `dist`，推送當下就紅。
+
+    兩邊要一字不差：規則只有一份（`LOCALHOST_WITH_PORT`），這裡確認 CI 用的就是它。兩份
+    規則會各自漂移，而漂移的那一天沒有東西會變紅。
+
+    解析 YAML，不在原始碼裡找字串：這個 repo 被註解騙過一次（`"pip-audit" in ci`）。
+    """
+    import yaml
+
+    ci_yml = AUDIT_PATH.parents[2] / ".github" / "workflows" / "ci.yml"
+    steps = yaml.safe_load(ci_yml.read_text(encoding="utf-8"))["jobs"]["frontend"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    scanning = [
+        index
+        for index, step in enumerate(steps)
+        if audit_module.LOCALHOST_WITH_PORT in (step.get("run") or "")
+    ]
+
+    assert scanning, "CI 的 frontend job 沒有用稽查那條規則掃建置結果"
+    step = steps[scanning[0]]
+    assert "dist" in step["run"]
+    assert scanning[0] > names.index("Build"), "要掃的是建置出來的東西，所以要排在 Build 後面"
+    assert not step.get("continue-on-error"), "這是我們自己的程式碼，要擋下來，不是提醒"
+
+
 def test_a_clean_bundle_is_not_a_finding(auditor):
     """而正常的那一份不可以報警。
 

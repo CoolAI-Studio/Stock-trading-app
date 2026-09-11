@@ -28,7 +28,13 @@ export function resolveApiBase({ base, dev }: { base: string | undefined; dev: b
   // 會讓他在開發模式下拿到 localhost:8000，一個他明明寫了設定卻沒被聽見的結果。
   if (base !== undefined) return base
   // 開發模式：前端 5173、後端 8000，兩邊分開跑。
-  if (dev) return 'http://localhost:8000'
+  //
+  // 那個位址要再躲在 `import.meta.env.DEV` 後面，不能只靠 `dev` 這個參數：`dev` 是執
+  // 行期的值，壓縮器刪不掉它後面的字串，於是每一份正式建置都帶著一個
+  // `http://localhost:8000`。它在正式版上走不到，但從外面看，跟上面那兩次**真的走到**
+  // 的長得一模一樣——每週的線上稽查因此紅了（#110），而一個每週都紅的稽查會被學會忽
+  // 略。`import.meta.env.DEV` 在建置時就被換成 false，整段字串不會進 bundle。
+  if (dev) return import.meta.env.DEV ? 'http://localhost:8000' : ''
   // 正式版而且沒設：後端就是供應這個頁面的那一個，所以同源。
   return ''
 }

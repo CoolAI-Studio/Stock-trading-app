@@ -139,6 +139,24 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: The build points nowhere near the developer's machine
+        # A GATE, like SAST and for the same reason: whatever this finds is in
+        # code in this repo, so we are the ones who can fix it.
+        #
+        # 每週的線上稽查（audit.py 的 served_bundle）在成品上抓過同一種靜默失效——
+        # bundle 裡一個指回 localhost 的位址：頁面正常、健康檢查全綠，只有即時報價永遠
+        # 不更新。但它一週才看一次，而且是在上線之後（#110 就是這樣在線上待了一週）。這
+        # 裡在推送當下、部署之前問同一個問題，用的是**同一條規則**
+        # （audit.LOCALHOST_WITH_PORT，由測試釘住兩邊一字不差）。
+        #
+        # -a：壓縮過的 bundle 會被 grep 當成二進位檔，不加的話紅燈時只印
+        # 「Binary file matches」，看不到是哪一個位址。
+        run: |
+          if grep -raEo '(ws|wss|http|https)://(localhost|127\.0\.0\.1):[0-9]+' dist; then
+            echo "::error::正式建置裡有指回開發機的位址（見上面）——使用者的瀏覽器會去連他自己的電腦"
+            exit 1
+          fi
+
       - name: Known vulnerabilities in the locked dependencies
         # 跟後端那一步同一件事、同一個姿態，而前端一直沒有。
         #

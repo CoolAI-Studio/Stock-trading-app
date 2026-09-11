@@ -183,6 +183,19 @@ PLACEHOLDER_WORDS = (
 # patterns, and the tests that plant fake credentials on purpose.
 REPO_SCAN_SKIP = ("backend/scripts/audit.py", "backend/tests/", "__pycache__")
 
+# A URL that points back at the machine the browser is running on. The served
+# bundle is scanned for it (served_bundle), and the SAME string is the per-push
+# gate in ci.yml's frontend job -- one rule, pinned by a test, so the weekly
+# look at the live copy and the check before deploy cannot drift apart.
+#
+# The port is required, and that is the whole judgement. Every dev server this
+# project runs has one (8000, 5173) and none listens on 80, so a leak of ours
+# always carries it. react-router ships a bare "http://localhost" as the base
+# it parses against when there is no `window`; without the port requirement
+# that string failed every build, which is what the first version of this rule
+# did (#110). Plain groups rather than (?:...), so grep -E reads it unchanged.
+LOCALHOST_WITH_PORT = r"(ws|wss|http|https)://(localhost|127\.0\.0\.1):[0-9]+"
+
 STRATEGY_TEMPLATE = """class Strategy:
     def __init__(self):
         self.name = 'audit'
@@ -673,10 +686,11 @@ class Audit:
         # 位址都指回**使用者自己電腦上的** 8000 埠：頁面正常、REST 正常、健康檢查全綠，
         # 只有即時報價永遠不更新——而 README 第一行就在宣傳那個功能。
         #
-        # 它跟秘密同一類：只有在成品上看得見，而且沒有任何一關會因此變紅。
+        # 它跟秘密同一類：只有在成品上看得見，而且沒有任何一關會因此變紅。只算帶埠號
+        # 的——理由寫在 LOCALHOST_WITH_PORT 上面，CI 的 frontend job 用的也是同一條。
         patterns.append(
             (
-                re.compile(r"(?:ws|wss|http|https)://(?:localhost|127\.0\.0\.1)(?::\d+)?"),
+                re.compile(LOCALHOST_WITH_PORT),
                 "一個指回這台電腦的位址（localhost）——使用者的瀏覽器會去打他自己的機器",
             )
         )
