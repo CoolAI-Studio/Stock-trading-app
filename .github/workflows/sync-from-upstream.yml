@@ -52,7 +52,7 @@ jobs:
     # 的同步工作流程也只是噪音。
     if: github.repository != 'CoolAI-Studio/Stock-trading-app'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

@@ -213,7 +213,7 @@ jobs:
       # Keyed on the lockfile: Playwright pins a browser build, so a new
       # Playwright means a new download and an old cache must not be reused.
       - name: Cache the browser
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -276,7 +276,7 @@ jobs:
         working-directory: frontend
 
       - name: Cache the browser
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
@@ -305,7 +305,7 @@ jobs:
     name: first deploy (blank config, real container)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build the image that actually ships
         # context 是 repo 根目錄，不是 ./backend：Dockerfile 現在也要建前端
@@ -471,7 +471,7 @@ jobs:
       JWT_SECRET: ci-not-a-placeholder-0123456789
       TV_WEBHOOK_SECRET: ci-not-a-placeholder-9876543210
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # stable 是另一條分支，預設的淺 clone 拿不到它。
           fetch-depth: 0
