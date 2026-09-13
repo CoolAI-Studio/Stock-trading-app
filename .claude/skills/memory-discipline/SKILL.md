@@ -90,6 +90,22 @@ died:
   completely idle, and nothing in this project needs it running except building the deploy
   image. Stop it when it is not in use.
 
+  **But first check that it really is not in use — this machine runs other projects'
+  stacks in it.** On 2026-09-13, with memory already exhausted and Docker looking idle
+  (this repo did not need it, and Windows had restored it at sign-in), `docker ps` showed
+  a different project's six containers — web backend, worker, frontend, proxy, Postgres,
+  Redis — up for nine hours. They were most of the memory pressure, and stopping Docker
+  Desktop would have taken that project's database down with them. It is the same rule as
+  the pytest orphans above: only ever stop what belongs to THIS repo.
+
+  ```bash
+  timeout 20 docker ps --format '{{.Names}}  {{.Status}}'   # read-only; starts nothing
+  ```
+
+  Any container up means somebody is using it: leave Docker alone and tell the user what is
+  holding the memory. Stopping that stack is their call (in its own project directory,
+  `docker compose stop` keeps its data; `down -v` would delete the volumes).
+
   **Stop, never uninstall.** Closing Docker Desktop and running `wsl --shutdown` frees the
   memory and changes nothing else: the install, the images, the volumes and the settings
   all survive, and the user gets it back by opening Docker Desktop from the Start menu.
