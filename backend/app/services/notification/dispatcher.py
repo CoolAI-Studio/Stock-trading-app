@@ -14,6 +14,7 @@ from app.models.notification import NotificationChannel, NotificationLog
 from app.models.order import Order
 from app.models.strategy import Strategy
 from app.models.user import User
+from app.schemas.common import format_decimal
 from app.services.events import Event
 from app.services.notification.email import EmailSender
 from app.services.notification.line import LineSender
@@ -141,9 +142,15 @@ def _format_message(event: Event, session=None) -> str:
         who = _strategy_name(session, order.strategy_id) or (
             "TradingView" if order.source == OrderSource.TRADINGVIEW else "手動建立"
         )
+        # 欄位是 Numeric(18, 8)：原樣印是「333.08000000」。而 TradingView 的警報可以不帶
+        # price，那一列就沒有價格——原樣印是「訊號價 None」。兩封都是本機端到端真的收到的。
+        price = (
+            f"，訊號價 {format_decimal(order.signal_price)}"
+            if order.signal_price is not None
+            else ""
+        )
         return (
-            f"{who}：{order.symbol} {_label(_SIDE_LABEL, order.side)}訊號"
-            f"，訊號價 {order.signal_price}。"
+            f"{who}：{order.symbol} {_label(_SIDE_LABEL, order.side)}訊號{price}。"
             "這是提醒，沒有真的下單——要下單請到你的券商 App。"
         )
     if event.type == "order.updated":
