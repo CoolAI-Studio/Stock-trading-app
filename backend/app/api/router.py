@@ -8,6 +8,7 @@ from app.api.routers import (
     backup,
     broker_costs,
     broker_credentials,
+    daily_summary,
     export,
     indicators,
     market,
@@ -44,6 +45,7 @@ api_router.include_router(risk.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(export.router)
 api_router.include_router(watchlist.router)
+api_router.include_router(daily_summary.router)
 api_router.include_router(ws_ticket.router)
 api_router.include_router(notifications.router)
 api_router.include_router(broker_credentials.router)
