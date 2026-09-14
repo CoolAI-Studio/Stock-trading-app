@@ -59,10 +59,32 @@ export class ApiError extends Error {
   }
 }
 
+/** The reasons in a FastAPI validation failure, or null for any other shape.
+ *
+ * pydantic answers a refused field with a LIST, one entry per problem, and
+ * prefixes a validator's own sentence with 「Value error, 」. Reading only a
+ * string `detail` threw every one of those sentences away: locally the screen
+ * said 「Unprocessable Content」, and in production -- HTTP/2, which has no
+ * reason phrase -- it said nothing at all. */
+function validationReasons(detail: unknown): string | null {
+  if (!Array.isArray(detail)) return null
+  const reasons: string[] = []
+  for (const item of detail) {
+    const msg = (item as { msg?: unknown } | null)?.msg
+    if (typeof msg !== 'string') continue
+    const reason = msg.replace(/^Value error, /, '').trim()
+    if (reason && !reasons.includes(reason)) reasons.push(reason)
+  }
+  return reasons.length ? reasons.join('；') : null
+}
+
 async function parseErrorDetail(response: Response): Promise<string> {
   try {
     const body = await response.json()
-    return typeof body?.detail === 'string' ? body.detail : response.statusText
+    if (typeof body?.detail === 'string') return body.detail
+    // An unrecognised shape still falls back to the status line rather than a
+    // guess: the pages' own Chinese fallbacks appear only when this is empty.
+    return validationReasons(body?.detail) ?? response.statusText
   } catch {
     return response.statusText
   }

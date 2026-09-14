@@ -92,6 +92,61 @@ describe('api requests', () => {
     })
   })
 
+  // --- 驗證失敗的說明要到得了畫面上 ----------------------------------------------
+  //
+  // FastAPI 對 pydantic 驗證失敗回的 `detail` 是**陣列**，不是字串。原本只認字串，於是後端
+  // 每一句寫好的中文說明都被換成 HTTP 的狀態列——本機是「Unprocessable Content」，而正式
+  // 機走 HTTP/2，狀態列是空字串（量到的：線上 nextHopProtocol 'h2'、statusText ""）。
+  // 下面的 body 是本機真的後端對 {"symbol":"蘋果"} 回的那一份，原封不動。
+
+  const refusedChineseName = {
+    detail: [
+      {
+        type: 'value_error',
+        loc: ['body', 'symbol'],
+        msg: 'Value error, 「蘋果」是公司名稱，不是代號。請用上面的搜尋選出正確的代號 —— 例如台積電是 2330.TW。',
+        input: '蘋果',
+        ctx: { error: {} },
+      },
+    ],
+  }
+
+  it('shows the reason a validator gave, not the status line', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(refusedChineseName, 422))
+
+    await expect(api.post('/api/watchlist', { symbol: '蘋果' })).rejects.toMatchObject({
+      status: 422,
+      message: '「蘋果」是公司名稱，不是代號。請用上面的搜尋選出正確的代號 —— 例如台積電是 2330.TW。',
+    })
+  })
+
+  it('keeps every reason when more than one field was refused, once each', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(
+        {
+          detail: [
+            { type: 'value_error', loc: ['body'], msg: 'Value error, 回測的結束時間必須晚於開始時間。' },
+            { type: 'missing', loc: ['body', 'symbol'], msg: 'Field required' },
+            { type: 'value_error', loc: ['body'], msg: 'Value error, 回測的結束時間必須晚於開始時間。' },
+          ],
+        },
+        422,
+      ),
+    )
+
+    await expect(api.post('/api/backtest', {})).rejects.toMatchObject({
+      message: '回測的結束時間必須晚於開始時間。；Field required',
+    })
+  })
+
+  it('falls back to the status line for a shape it does not recognise', async () => {
+    // 元件各自的中文備用句（「加不進去，請確認代號。」）靠的是訊息為空才出現——認不得的形狀
+    // 不可以被猜成一句話，否則那些備用句就再也出不來。
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: [{ nothing: 'useful' }] }, 422))
+
+    await expect(api.post('/api/watchlist', {})).rejects.toMatchObject({ status: 422, message: '' })
+  })
+
   it('clears the token and calls the unauthorized handler on 401', async () => {
     setToken('stale-token')
     const handler = vi.fn()
