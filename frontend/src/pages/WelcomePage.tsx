@@ -1,19 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { SymbolInput } from '../components/SymbolInput'
 import { TemplateAlertForm } from '../components/TemplateAlertForm'
 import { TradingViewSetupPanel } from '../components/TradingViewSetupPanel'
 import { ApiError, api } from '../lib/api'
 import { markOnboardingSeen } from '../lib/onboarding'
 import { isPushSupported, requestPushPermission, subscribeToPush } from '../lib/push'
 import type {
+  DailySummaryState,
   NotificationChannel,
   Strategy,
   StrategyGenerateResult,
+  WatchlistItem,
   WebhookSetup,
 } from '../lib/types'
 
-type Step = 'choose' | 'templates' | 'ai' | 'tradingview' | 'channel' | 'done'
+type Step = 'choose' | 'templates' | 'summary' | 'ai' | 'tradingview' | 'channel' | 'done'
 
 /**
  * 引導流程：從「帳號建好了」到「第一則提醒送到手機」。規格在 ONBOARDING.md。
@@ -34,6 +37,9 @@ type Step = 'choose' | 'templates' | 'ai' | 'tradingview' | 'channel' | 'done'
  * 已經在 TradingView 設好警報的人（方案 4，#115）拿到的是一條可以直接複製的網址——
  * 不是一個要他去部署平台翻出來的密碼。那條網址本身就是密碼，所以畫面上遮著、複製的
  * 是完整的，而「重新產生」不放在引導裡。
+ *
+ * 不想被盤中打擾的人（方案 2，#117）選幾檔股票、打開收盤摘要。選的股票就是加進自選股——
+ * 走自選股那支本來就在驗代號的端點，不是另一份清單（ONBOARDING.md 通則 6）。
  */
 export function WelcomePage() {
   const navigate = useNavigate()
@@ -48,6 +54,11 @@ export function WelcomePage() {
   // 走過 TradingView 那一步的人，完成畫面上的「0 則提醒」會嚇到他：他的警報在
   // TradingView 那邊，不在這個 app 的策略清單裡。
   const [usedTradingView, setUsedTradingView] = useState(false)
+  // 收盤摘要那一步：正在輸入的代號、已經加進自選股的、最後一次的錯誤、打開了沒有。
+  const [summarySymbol, setSummarySymbol] = useState('')
+  const [summarySymbols, setSummarySymbols] = useState<string[]>([])
+  const [summaryError, setSummaryError] = useState<string | null>(null)
+  const [usedSummary, setUsedSummary] = useState(false)
 
   const channelsQuery = useQuery({
     queryKey: ['notification-channels'],
@@ -123,6 +134,44 @@ export function WelcomePage() {
       setAiError(err instanceof ApiError ? err.message : '建立失敗，請再試一次。')
     },
   })
+
+  const addSummarySymbol = useMutation({
+    mutationFn: (symbol: string) => api.post<WatchlistItem>('/api/watchlist', { symbol }),
+    onSuccess: (item) => {
+      setSummaryError(null)
+      setSummarySymbol('')
+      setSummarySymbols((current) =>
+        current.includes(item.symbol) ? current : [...current, item.symbol],
+      )
+      queryClient.invalidateQueries({ queryKey: ['watchlist'] })
+    },
+    onError: (err) => {
+      // 伺服器說得出「台積電不是代號，請輸入 2330.TW」這種話——那是他唯一改得了的線索，
+      // 不要換成一句「加入失敗」。
+      setSummaryError(err instanceof Error && err.message ? err.message : '加不進去，請確認代號。')
+    },
+  })
+
+  const enableSummary = useMutation({
+    mutationFn: () => api.put<DailySummaryState>('/api/daily-summary', { is_enabled: true }),
+    onSuccess: (fresh) => {
+      queryClient.setQueryData(['daily-summary'], fresh)
+      setUsedSummary(true)
+      setStep('channel')
+    },
+    onError: (err) => {
+      setSummaryError(err instanceof Error && err.message ? err.message : '沒有打開，請再試一次。')
+    },
+  })
+
+  function submitSummarySymbol() {
+    const trimmed = summarySymbol.trim()
+    // 跟儀表板同一個規則：只有 ASCII 轉大寫。中文轉大寫是空操作，而伺服器會把它擋下來並說
+    // 出原因，那個原因要照原樣給他看。
+    const symbol = /^[\x20-\x7e]*$/.test(trimmed) ? trimmed.toUpperCase() : trimmed
+    if (!symbol) return
+    addSummarySymbol.mutate(symbol)
+  }
 
   const enablePush = useMutation({
     mutationFn: async () => {
@@ -206,6 +255,18 @@ export function WelcomePage() {
             </span>
           </button>
 
+          {/* 方案 2（#117）。跟「我自己選」一樣不寫程式、不用金鑰，所以緊跟在它後面；
+              給的是不想被盤中打擾的那一種人。 */}
+          <button
+            onClick={() => setStep('summary')}
+            className="w-full rounded border border-slate-700 bg-slate-900 p-4 text-left hover:border-slate-500"
+          >
+            <span className="block font-medium text-slate-100">收盤後給我一則摘要就好</span>
+            <span className="mt-1 block text-sm text-slate-400">
+              不想被盤中打擾：選幾檔股票，每個交易日收盤後傳一則當天的漲跌。不用寫程式，也不用任何金鑰。
+            </span>
+          </button>
+
           {/* 方案 4（#115）。排在「我自己選」後面：多數人沒有 TradingView，預設路徑不可以
               假設他有。排在 AI 前面：它不需要金鑰，只需要他本來就在用的東西。 */}
           <button
@@ -253,6 +314,65 @@ export function WelcomePage() {
         <div className="space-y-4">
           <h1 className="text-lg font-semibold text-slate-100">要盯什麼？</h1>
           <TemplateAlertForm onCreated={() => setStep('channel')} />
+          <button
+            onClick={() => setStep('choose')}
+            className="text-xs text-slate-500 underline hover:text-slate-300"
+          >
+            回上一步
+          </button>
+        </div>
+      )}
+
+      {step === 'summary' && (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-slate-100">收盤後給你一則摘要</h1>
+          <p className="text-sm text-slate-400">
+            選幾檔股票。每個交易日收盤後（台股 13:30、美股 16:00 紐約時間），會傳一則當天的漲跌整理
+            ——盤中不會吵你。選的股票會加進你的自選股，之後在儀表板照常增刪。
+          </p>
+
+          <form
+            className="flex items-end gap-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              submitSummarySymbol()
+            }}
+          >
+            <div className="w-64">
+              <SymbolInput
+                id="summary-symbol"
+                label="股票代號"
+                value={summarySymbol}
+                onChange={(symbol) => setSummarySymbol(symbol)}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!summarySymbol.trim() || addSummarySymbol.isPending}
+              className="mb-0.5 rounded bg-slate-700 px-3 py-1 text-sm font-medium text-white hover:bg-slate-600 disabled:opacity-50"
+            >
+              加入
+            </button>
+          </form>
+
+          {summaryError && <p className="text-sm text-red-400">{summaryError}</p>}
+
+          {summarySymbols.length > 0 && (
+            <ul className="list-inside list-disc text-sm text-slate-300">
+              {summarySymbols.map((symbol) => (
+                <li key={symbol}>{symbol}</li>
+              ))}
+            </ul>
+          )}
+
+          {/* 一檔都沒有的摘要是一則永遠不會來的——不讓他打開一個空的。 */}
+          <button
+            onClick={() => enableSummary.mutate()}
+            disabled={summarySymbols.length === 0 || enableSummary.isPending}
+            className="w-full rounded bg-emerald-600 px-3 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            打開收盤摘要
+          </button>
           <button
             onClick={() => setStep('choose')}
             className="text-xs text-slate-500 underline hover:text-slate-300"
@@ -514,6 +634,12 @@ export function WelcomePage() {
               '。'
             )}
           </p>
+
+          {usedSummary && (
+            <p className="text-sm text-slate-300">
+              <strong>收盤摘要</strong>已經打開：每個交易日收盤後，會傳一則你選的那幾檔當天的漲跌。
+            </p>
+          )}
 
           {usedTradingView && (
             <p className="text-sm text-slate-300">

@@ -10,7 +10,7 @@ import type { StrategyTemplate } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
 }))
 
 vi.mock('../lib/push', async (importOriginal) => ({
@@ -314,6 +314,120 @@ describe('引導流程：TradingView 那條路', () => {
     await user.click(await screen.findByRole('button', { name: /這一步先跳過/ }))
 
     expect(await screen.findAllByText(/TradingView 的警報/)).not.toHaveLength(0)
+  })
+})
+
+/**
+ * 方案 2：不想被盤中打擾的人（ONBOARDING.md，#117）。
+ *
+ * 規格：他填幾支股票 → 加進自選股 ＋ 一條收盤摘要。清單就是自選股（通則 6：引導做出來的
+ * 東西是普通資料）——所以「加入」走的是自選股那支本來就在驗代號的端點，不是另一份清單。
+ */
+describe('引導流程：收盤摘要那條路', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.includes('templates')) return Promise.resolve([TEMPLATE]) as never
+      if (path.includes('ai-settings')) return Promise.resolve({ configured: false }) as never
+      return Promise.resolve([]) as never
+    })
+    vi.mocked(api.post).mockImplementation(
+      (path: string, body?: unknown) =>
+        Promise.resolve(
+          path === '/api/watchlist'
+            ? {
+                id: 1,
+                symbol: (body as { symbol: string }).symbol,
+                data_source: 'yfinance',
+                created_at: '',
+              }
+            : {},
+        ) as never,
+    )
+    vi.mocked(api.put).mockResolvedValue({
+      is_enabled: true,
+      markets: [],
+      unsupported: [],
+      last_sent_at: null,
+      last_error: null,
+    } as never)
+  })
+
+  async function addSymbol(user: ReturnType<typeof userEvent.setup>, symbol: string) {
+    await user.type(screen.getByLabelText('股票代號'), symbol)
+    await user.click(screen.getByRole('button', { name: '加入' }))
+  }
+
+  it('有這個選項，而且排在「我自己選」後面', async () => {
+    renderWizard()
+
+    const own = await screen.findByRole('button', { name: /我自己選/ })
+    const summary = screen.getByRole('button', { name: /收盤後給我一則摘要/ })
+
+    expect(own.compareDocumentPosition(summary)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it('選的股票是加進自選股，不是另一份清單', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /收盤後給我一則摘要/ }))
+    await addSymbol(user, '2330.TW')
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/watchlist', { symbol: '2330.TW' }),
+    )
+    expect(await screen.findByText('2330.TW')).toBeInTheDocument()
+  })
+
+  it('一檔都還沒加的時候「打開收盤摘要」按不了——空的摘要是一則永遠不會來的', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /收盤後給我一則摘要/ }))
+
+    expect(screen.getByRole('button', { name: '打開收盤摘要' })).toBeDisabled()
+  })
+
+  it('打開之後，下一步一樣是「這些提醒要送到哪裡」', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /收盤後給我一則摘要/ }))
+    await addSymbol(user, '2330.TW')
+    await screen.findByText('2330.TW')
+    await user.click(screen.getByRole('button', { name: '打開收盤摘要' }))
+
+    await waitFor(() =>
+      expect(api.put).toHaveBeenCalledWith('/api/daily-summary', { is_enabled: true }),
+    )
+    expect(await screen.findByText(/送到哪裡/)).toBeInTheDocument()
+  })
+
+  it('代號被拒絕的時候，說出伺服器給的原因——那是他唯一改得了的線索', async () => {
+    vi.mocked(api.post).mockRejectedValue(new Error('「台積電」不是代號，請輸入 2330.TW 這種格式。'))
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /收盤後給我一則摘要/ }))
+    await addSymbol(user, '台積電')
+
+    // 比對伺服器那句話獨有的部分：代號輸入框自己對公司名稱也會提示「不是代號」，而這條測試
+    // 要證明的是伺服器給的原因有照原樣出現，不是輸入框的提示。
+    expect(await screen.findByText(/請輸入 2330\.TW 這種格式/)).toBeInTheDocument()
+  })
+
+  it('完成畫面說收盤摘要已經打開——否則「0 則提醒」會讓他以為沒設好', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /收盤後給我一則摘要/ }))
+    await addSymbol(user, '2330.TW')
+    await screen.findByText('2330.TW')
+    await user.click(screen.getByRole('button', { name: '打開收盤摘要' }))
+    await user.click(await screen.findByRole('button', { name: /這一步先跳過/ }))
+
+    expect(await screen.findAllByText(/收盤摘要/)).not.toHaveLength(0)
   })
 })
 
