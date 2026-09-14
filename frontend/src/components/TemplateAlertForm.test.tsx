@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TemplateAlertForm } from './TemplateAlertForm'
@@ -165,6 +165,63 @@ describe('不用寫程式就設定得出一則提醒', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     const [, body] = vi.mocked(api.post).mock.calls[0]
     expect((body as { name: string }).name).toContain('2330.TW')
+  })
+
+  // --- 代號欄要跟儀表板那一格一樣會搜尋 ---------------------------------------------
+  //
+  // 擁有者自己的話（SymbolInput.test.tsx 的檔頭）：「輸入欄位使用者不會知道要如何填，通常是打
+  // 台積電或 2330 這種代表性指標」。儀表板、引導的收盤摘要、策略頁都換成會搜尋的那一格了，只有
+  // 這一張——核心功能那一張——還是一個純文字框。而後端擋下來的時候說的是「請用**上面的搜尋**選
+  // 出正確的代號」，這一頁上面沒有搜尋。
+
+  const TSMC_SEARCH = {
+    query: '台積電',
+    matches: [
+      {
+        symbol: '2330.TW',
+        name: '台積電',
+        detail: '上市 · 台灣積體電路製造股份有限公司',
+        market: '台股',
+        data_source: 'yfinance',
+        verified: true,
+        currency: 'TWD',
+      },
+    ],
+    listings_generated_at: '2026-08-19',
+    us_listings_generated_at: '2026-08-19',
+  }
+
+  function answerSearchesToo() {
+    vi.mocked(api.get).mockImplementation(async (path: string) =>
+      path.startsWith('/api/symbols/search') ? TSMC_SEARCH : [PRICE_ALERT, MA_BREAK],
+    )
+  }
+
+  it('打公司名稱會列出代號，選了之後送出去的是代號', async () => {
+    answerSearchesToo()
+    const user = userEvent.setup()
+    renderForm()
+
+    await user.click(await screen.findByRole('button', { name: /到價提醒/ }))
+    await user.type(screen.getByLabelText('股票代號'), '台積電')
+    await user.click(within(await screen.findByRole('option', { name: /2330\.TW/ })).getByRole('button'))
+    await user.click(screen.getByRole('button', { name: '建立提醒' }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalled())
+    const [, body] = vi.mocked(api.post).mock.calls[0]
+    expect(body).toMatchObject({ symbol: '2330.TW' })
+  })
+
+  it('打的是公司名稱，送出之前就說', async () => {
+    answerSearchesToo()
+    const user = userEvent.setup()
+    renderForm()
+
+    await user.click(await screen.findByRole('button', { name: /到價提醒/ }))
+    await user.type(screen.getByLabelText('股票代號'), '台積電')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/公司名稱/)
+    expect(api.post).not.toHaveBeenCalled()
   })
 
   it('可以退回去換一個範本', async () => {

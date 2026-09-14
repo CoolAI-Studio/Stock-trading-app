@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError, api } from '../lib/api'
 import type { Strategy, StrategyTemplate } from '../lib/types'
+import { SymbolInput } from './SymbolInput'
 
 /**
  * 一則提醒，用表單設定出來——完全不用寫程式。
@@ -142,21 +143,15 @@ export function TemplateAlertForm({ onCreated }: { onCreated?: (strategy: Strate
         </button>
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor="template-symbol" className="text-sm text-slate-400">
-          股票代號
-        </label>
-        <input
-          id="template-symbol"
-          value={symbol}
-          onChange={(event) => setSymbol(event.target.value)}
-          placeholder="2330.TW"
-          className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100"
-        />
-        <p className="text-xs text-slate-500">
-          台股要加 .TW（上櫃是 .TWO），美股直接填代號，例如 AAPL。
-        </p>
-      </div>
+      {/* 跟儀表板、引導、策略頁同一格會搜尋的代號欄（#125）。這一張是核心功能，卻是最後一個還
+          要他自己知道「台積電要寫成 2330.TW」的地方——而後端擋下來時說的是「請用上面的搜尋」。 */}
+      <SymbolInput
+        id="template-symbol"
+        label="股票代號"
+        value={symbol}
+        onChange={(picked) => setSymbol(picked)}
+        hint="打公司名稱或代號都可以，從搜尋結果選一個。"
+      />
 
       {selected.fields.map((field) => (
         <div key={field.key} className="space-y-1">
