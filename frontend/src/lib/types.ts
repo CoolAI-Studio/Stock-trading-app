@@ -466,6 +466,10 @@ export interface DailySummaryState {
   unsupported: string[]
   last_sent_at: string | null
   last_error: string | null
+  /** Enabled channels, and how many of them take `summary.daily`. Optional
+   * because a backend older than this screen does not send it -- and not
+   * knowing is not the same as having none. */
+  channels?: { enabled: number; receiving: number }
 }
 
 /** One recorded TradingView call. Failures are included on purpose -- a wrong

@@ -54,7 +54,9 @@ class FakeQuotes:
         self.quotes = quotes or {}
         self.asked: list[tuple[tuple[str, ...], DataSource]] = []
 
-    def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
+    def get_quotes(
+        self, symbols: list[str], data_source: DataSource, answered_since=None
+    ) -> dict[str, Quote]:
         self.asked.append((tuple(symbols), data_source))
         return {symbol: self.quotes[symbol] for symbol in symbols if symbol in self.quotes}
 
@@ -385,6 +387,85 @@ def test_the_loop_publishes_what_the_summary_finds(db_session, published_events,
     )
 
     assert wanted in published_events
+
+
+class _Upstream:
+    """真的報價服務後面的那一家：每次被問，就回答「現在」準備好的報價，並記下被問了哪些。"""
+
+    def __init__(self):
+        self.current: dict[str, object] = {}
+        self.asked: list[tuple[str, ...]] = []
+
+    def get_quotes(self, symbols: list[str]) -> dict[str, Quote]:
+        self.asked.append(tuple(symbols))
+        return {symbol: self.current[symbol]() for symbol in symbols if symbol in self.current}
+
+
+@pytest.fixture
+def real_service(monkeypatch):
+    """跟線上同一個 MarketDataService（同一份快取規則），時鐘和上游換成測試控制的。
+
+    上面那些 FakeQuotes 從來不會回一個舊的報價，所以它們證明不了這一件事：摘要和迴圈共用
+    同一份快取，而快取會把盤中留下來的報價，當成還新鮮的交出去。
+    """
+    from app.services.market_data import service as service_module
+    from app.services.market_data.service import MarketDataService
+
+    clock = {"wall": _taipei(12, 0), "mono": 0.0}
+    monkeypatch.setattr(service_module, "utcnow", lambda: clock["wall"])
+    upstream = _Upstream()
+    service = MarketDataService(
+        providers={DataSource.YFINANCE: upstream}, clock=lambda: clock["mono"]
+    )
+    return service, upstream, clock
+
+
+def test_a_symbol_the_loop_does_not_poll_is_not_served_from_this_mornings_cache(
+    db_session, owner, real_service
+):
+    """（一次唯讀審查抓到的）迴圈每一輪只抓策略和持股的代號（market_loop._watched_symbols），
+    不抓自選股。
+
+    盤中他開著儀表板，自選股的 2454.TW 被問過一次、留在快取裡。收盤後那一輪，迴圈先整批刷新
+    策略的 2330.TW——快取的計時因此歸零——幾秒後輪到摘要：2454.TW「已經在快取裡」而快取「還
+    新鮮」，於是拿到的是中午的報價。回答時間在收盤之前，被判成今天沒有收盤；六小時內每一輪都
+    一樣，一則都不送，畫面還說「可能是休市日」。第二天起連儀表板都不用開：昨天的那一筆一直在。
+    """
+    service, upstream, clock = real_service
+    upstream.current["2454.TW"] = lambda: _quote(
+        "2454.TW", "1195", "1200", traded_at=datetime(2026, 9, 15, 12, 0, tzinfo=TAIPEI)
+    )
+    service.get_quotes(["2454.TW"], DataSource.YFINANCE)  # 盤中，儀表板
+
+    clock["wall"], clock["mono"] = _taipei(13, 50), 6000.0
+    upstream.current["2330.TW"] = lambda: _quote("2330.TW", "1050", "1035")
+    upstream.current["2454.TW"] = lambda: _quote("2454.TW", "1190", "1200")
+    service.get_quotes(["2330.TW"], DataSource.YFINANCE)  # 收盤後那一輪，迴圈抓策略的代號
+
+    clock["mono"] += 2  # 同一輪裡，幾秒後輪到摘要
+    _watch(db_session, owner, "2454.TW")
+    _switch_on(db_session, owner)
+    events = daily_summary.run_due(db_session, now=_taipei(13, 50), service=service)
+
+    assert len(events) == 1, "拿到的是盤中留在快取裡的報價，被當成今天沒有收盤"
+    assert events[0].data["lines"][0]["price"] == "1190"
+
+
+def test_but_a_close_the_loop_just_fetched_is_not_asked_for_twice(db_session, owner, real_service):
+    """反過來也要成立：收盤後剛抓過的，不為了摘要再打一次上游——共用 IP 的 429 就是這樣來的。"""
+    service, upstream, clock = real_service
+    clock["wall"], clock["mono"] = _taipei(13, 50), 6000.0
+    upstream.current["2330.TW"] = lambda: _quote("2330.TW", "1050", "1035")
+    service.get_quotes(["2330.TW"], DataSource.YFINANCE)  # 迴圈
+    asked_before = len(upstream.asked)
+
+    clock["mono"] += 2
+    _watch(db_session, owner, "2330.TW")
+    _switch_on(db_session, owner)
+    events = daily_summary.run_due(db_session, now=_taipei(13, 50), service=service)
+
+    assert len(events) == 1
+    assert len(upstream.asked) == asked_before, "收盤後剛抓過的又去問了一次上游"
 
 
 def test_a_broken_summary_does_not_take_the_loop_down(db_session, published_events, monkeypatch):

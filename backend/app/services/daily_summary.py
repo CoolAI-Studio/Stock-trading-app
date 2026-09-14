@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from app.enums import DataSource
 from app.models.daily_summary import DailySummary
 from app.models.mixins import utcnow
+from app.models.notification import NotificationChannel
 from app.models.watchlist import WatchlistItem
 from app.services import market_calendar, symbol_search
 from app.services.events import Event
@@ -114,10 +115,14 @@ def _summarise(
     for item in items:
         by_source.setdefault(item.data_source, []).append(item.symbol)
 
+    # 收盤之後回答的才算數。行情服務的快取是迴圈、儀表板、摘要共用的，而迴圈只抓策略和持股
+    # 的代號：沒有這一格，自選股會帶著盤中（或昨天）留下的報價顯得「還新鮮」，被判成今天沒
+    # 有收盤，一則都不送。
+    closes = market_calendar.close_on(market, day)
     quotes: dict[str, Quote] = {}
     for source, symbols in by_source.items():
         try:
-            quotes.update(service.get_quotes(symbols, source))
+            quotes.update(service.get_quotes(symbols, source, answered_since=closes))
         except Exception:
             # 抓不到就當作這幾檔今天缺資料：下面會決定要等還是照有的送。
             logger.exception("收盤摘要：%s 的報價抓不到", market)
@@ -263,7 +268,22 @@ def state_for(db: Session, user_id: int) -> dict:
         .all()
     )
     placed = [(item, market_calendar.market_of(item.symbol, item.data_source)) for item in watched]
+    # 整理好了送不送得到。通知頁在沒有全勾的時候存的是一份清單，而收盤摘要出現之前存的清單
+    # 裡不會有它——派送器照清單跳過，這一格卻照樣寫「上一次送出」。只拿清單那一欄：管道設定
+    # 是加密的，這裡不需要解開它。
+    subscriptions = (
+        db.query(NotificationChannel.subscribed_events)
+        .filter(NotificationChannel.user_id == user_id, NotificationChannel.is_enabled.is_(True))
+        .all()
+    )
     return {
+        "channels": {
+            "enabled": len(subscriptions),
+            # 跟派送器同一個規則：沒有清單（或空清單）＝全部都收。
+            "receiving": sum(
+                1 for (events,) in subscriptions if not events or EVENT_TYPE in events
+            ),
+        },
         "is_enabled": bool(summary and summary.is_enabled),
         "markets": [
             {
