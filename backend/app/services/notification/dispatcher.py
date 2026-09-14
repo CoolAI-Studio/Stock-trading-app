@@ -34,7 +34,14 @@ SENDERS = {
     ChannelType.WEB_PUSH: WebPushSender(),
 }
 
-_DISPATCHED_EVENT_TYPES = {"order.created", "order.updated", "strategy.error", "strategy.alert"}
+_DISPATCHED_EVENT_TYPES = {
+    "order.created",
+    "order.updated",
+    "strategy.error",
+    "strategy.alert",
+    # 收盤摘要（#117）。事件自己帶著內容，不需要回頭撈任何一列。
+    "summary.daily",
+}
 
 # Stamped on an event whose channels the caller already dispatched itself.
 # services/alerts.py has to send synchronously -- it needs to know whether
@@ -160,6 +167,11 @@ def _format_message(event: Event, session=None) -> str:
             f"，價格 {event.data.get('price')}。"
             "這是提醒，沒有真的下單——要下單請到你的券商 App。"
         )
+    if event.type == "summary.daily":
+        # 在這裡才載入：摘要模組會碰到行情服務，而派送器不該在 import 時就把它拉進來。
+        from app.services.daily_summary import format_message as summary_message
+
+        return summary_message(event.data)
     return f"{event.type}: {event.data}"
 
 
