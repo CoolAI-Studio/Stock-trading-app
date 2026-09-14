@@ -1,6 +1,8 @@
+import hashlib
 import hmac
 import json
 import logging
+import time
 from datetime import timedelta
 from decimal import Decimal
 
@@ -55,6 +57,19 @@ _REGENERATED = (
     "這個網址已經重新產生過，舊的不再收件。請到「TradingView」頁複製現在的網址，"
     "換掉這則 TradingView 警報裡的 Webhook URL。"
 )
+
+# A RETIRED URL, REMEMBERED IN THE PROCESS RATHER THAN ASKED OF THE DATABASE.
+#
+# Its MAC is genuine, so without this every call walks all the way in: look up
+# the account, write a row, prune -- about six statements. A leaked URL is the
+# very reason somebody presses 「重新產生」, and whoever holds it can keep
+# calling in a loop: that pins Neon awake (#95) and shoves real rows out of the
+# capped log. Versions only ever go up, so 「this (account, version) is retired」
+# never stops being true once learnt; the row is still written again every
+# _RETIRED_URL_LOG_EVERY_SEC, because a forgotten alert should keep showing up.
+_RETIRED_URL_LOG_EVERY_SEC = 3600.0
+_RETIRED_URL_LOGGED: dict[tuple[int, int], float] = {}
+_clock = time.monotonic
 
 
 def _client_ip(request: Request) -> str | None:
@@ -190,6 +205,10 @@ def _seen_recently(db: Session, raw_body: str, user_id: int | None = None) -> bo
         TradingViewWebhookLog.signature_valid.is_(True),
         TradingViewWebhookLog.received_at >= cutoff,
         TradingViewWebhookLog.id != None,  # noqa: E711 -- exclude the unsaved row
+        # A retired URL's row does not count as having been received: otherwise
+        # whoever holds the leaked old URL sends a body first, and the owner's
+        # identical real alert on the new URL is then dropped as its replay.
+        (TradingViewWebhookLog.error.is_(None)) | (TradingViewWebhookLog.error != _REGENERATED),
     )
     if user_id is not None:
         query = query.filter(TradingViewWebhookLog.user_id == user_id)
@@ -309,6 +328,20 @@ def _accept(db: Session, request: Request, payload: dict, user: User | None):
 
     log.user_id = user.id
 
+    # THE ALERT'S IDENTITY, NOT ITS `id` ALONE. The template's id is {{timenow}},
+    # which TradingView fills to the second -- and two stocks' closing alerts
+    # firing in the same second is ordinary. Keyed on the id alone, the second
+    # one came back 「duplicate idempotency_key」: no signal, no notification,
+    # and a log row pointing at the first one's order. A redelivery by
+    # TradingView is the same body, so it still collides with itself. Done here
+    # rather than in the template so the alerts already configured are covered
+    # without anybody editing them; hashed so an id of any length fits the
+    # column on Postgres.
+    idempotency_key = None
+    if alert.id:
+        identity = "\n".join((str(user.id), alert.id, symbol, alert.action, alert.strategy or ""))
+        idempotency_key = "tv:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
     result = create_pending_order(
         db,
         user,
@@ -318,7 +351,7 @@ def _accept(db: Session, request: Request, payload: dict, user: User | None):
             source=OrderSource.TRADINGVIEW,
             quantity=alert.quantity or Decimal(1),
             signal_price=alert.price,
-            idempotency_key=alert.id,
+            idempotency_key=idempotency_key,
             raw_payload={key: value for key, value in payload.items() if key != "secret"},
         ),
     )
@@ -399,6 +432,14 @@ async def tradingview_personal_webhook(token: str, request: Request, db: Session
         raise _too_large(request)
 
     user_id, version = claim
+    retired_at = _RETIRED_URL_LOGGED.get((user_id, version))
+    if retired_at is not None and _clock() - retired_at < _RETIRED_URL_LOG_EVERY_SEC:
+        # Already known to be retired and already in the log this hour: answer
+        # from memory. Not one statement -- see _RETIRED_URL_LOGGED.
+        return JSONResponse(
+            status_code=status.HTTP_200_OK, content={"ok": False, "error": _REGENERATED}
+        )
+
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         # The MAC was genuine, so this URL was handed out once -- to an account
@@ -415,6 +456,11 @@ async def tradingview_personal_webhook(token: str, request: Request, db: Session
         # 200, because TradingView retries any non-2xx and this will never
         # succeed. And a row, because this is the owner's own call to a URL they
         # retired: the log is the only place that can tell them to update it.
+        if version < user.webhook_url_version:
+            # Only an older version is retired for good. A newer one than the
+            # account holds (a database restored to an earlier state) could
+            # still become current, so it is not remembered.
+            _RETIRED_URL_LOGGED[(user_id, version)] = _clock()
         log = _audit_row(request, user, payload, raw_body)
         log.parsed_ok = payload is not None
         return _reject_with_log(db, log, _REGENERATED)
@@ -496,8 +542,8 @@ def _setup_for(user: User, response: Response) -> TradingViewSetup:
             "不要貼在公開的地方；萬一外洩了，按「重新產生」，舊的會立刻失效。",
             "網址貼進 TradingView 警報的 Webhook URL，上面那段貼進「訊息」欄。"
             "訊息裡不需要任何密碼。",
-            "id 一定要填。同一個 id 只會建立一次訊號——沒有它，任何人只要重送一次"
-            "抄到的訊息就能重複觸發。用 {{timenow}} 最省事。",
+            "id 一定要填。同一則警報重送幾次都只建立一次訊號——沒有它，任何人只要重送一次"
+            "抄到的訊息就能重複觸發。用 {{timenow}} 最省事，同一秒響的不同股票會各算一則。",
             # The old wording printed the {{ticker}} template and then said TW
             # must look like 2330.TW -- an instruction that contradicts itself,
             # because that placeholder never includes the exchange. It now says

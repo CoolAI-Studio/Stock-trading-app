@@ -209,6 +209,98 @@ def test_changing_the_deployment_secret_retires_every_url(
     assert db_session.query(Order).count() == 0
 
 
+def test_a_retired_url_hammered_in_a_loop_stops_costing_the_database(
+    auth_client, db_session, counted, secret
+):
+    """外洩了、他照指示按了重新產生——而拿到舊網址的人繼續用迴圈打它。
+
+    舊網址的 MAC 是真的，所以它一路走到資料庫：查帳號、寫一列、修剪紀錄，每一次大約六句。
+    沒有限流的話，這正是「一個迴圈把 Neon 釘在醒著」，而重新產生原本是他唯一的補救。
+    版本號只會往上加，所以「這一條已經退休」一旦知道就永遠是真的——記在行程裡，不用再問。
+    """
+    old_path = _personal_path(auth_client)
+    auth_client.post("/api/webhooks/tradingview/setup/rotate")
+    _post(auth_client, old_path, _alert(id="stale-0"))
+    counted.clear()
+
+    for n in range(1, 6):
+        resp = _post(auth_client, old_path, _alert(id=f"stale-{n}"))
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is False
+        assert "重新產生" in resp.json()["error"]
+
+    assert counted == [], f"退休的網址被連打五次，送出了 {len(counted)} 句 SQL"
+    assert db_session.query(TradingViewWebhookLog).count() == 1
+
+
+def test_but_the_log_still_hears_about_it_again_later(auth_client, db_session, monkeypatch, secret):
+    """省的是連打的那一串，不是提醒他：隔一段時間還在打，收件紀錄要再記一次。"""
+    from app.api.routers import webhooks
+
+    now = [1000.0]
+    monkeypatch.setattr(webhooks, "_clock", lambda: now[0])
+    old_path = _personal_path(auth_client)
+    auth_client.post("/api/webhooks/tradingview/setup/rotate")
+
+    _post(auth_client, old_path, _alert(id="stale-a"))
+    now[0] += webhooks._RETIRED_URL_LOG_EVERY_SEC + 1
+    _post(auth_client, old_path, _alert(id="stale-b"))
+
+    assert db_session.query(TradingViewWebhookLog).count() == 2
+
+
+def test_a_retired_url_cannot_make_a_real_alert_look_like_a_replay(auth_client, db_session, secret):
+    """沒有 id 的警報靠「短時間內一模一樣的內容」擋重放，而退休網址寫下的那一列原本也算數。
+
+    拿到舊網址的人先送一段內容，他新網址上一模一樣的真警報就會被當成重放略過——提醒沒了，
+    收件紀錄還說是它自己重複。
+    """
+    old_path = _personal_path(auth_client)
+    rotated = auth_client.post("/api/webhooks/tradingview/setup/rotate")
+    new_path = urlsplit(rotated.json()["url"]).path
+    body = json.dumps({"symbol": "AAPL", "action": "buy", "quantity": 1})
+
+    _post(auth_client, old_path, body)
+    real = _post(auth_client, new_path, body)
+
+    assert real.status_code == 202, real.text
+    assert real.json()["created"] is True
+    assert db_session.query(Order).count() == 1
+
+
+# --- 同一秒響的兩則 ----------------------------------------------------------------
+
+
+def test_two_alerts_that_fire_in_the_same_second_are_both_signals(auth_client, db_session, secret):
+    """範本的 id 是 {{timenow}}，而 TradingView 給它的精度只到秒（2023-06-01T17:38:10Z）。
+
+    兩檔股票的收盤警報在同一秒響是日常，不是巧合。原本 id 原封不動當成去重的鍵，於是第二則
+    回「duplicate idempotency_key」：沒有訊號、沒有通知，收件紀錄還掛著第一則的訂單編號。
+    改在伺服器這邊把代號和買賣算進去，已經設好的警報不用改就得救。
+    """
+    path = _personal_path(auth_client)
+    same_second = "2026-09-14T20:00:00Z"
+
+    first = _post(auth_client, path, _alert(symbol="AAPL", id=same_second))
+    second = _post(auth_client, path, _alert(symbol="NVDA", id=same_second))
+
+    assert first.json()["created"] is True
+    assert second.json()["created"] is True, second.text
+    assert {order.symbol for order in db_session.query(Order).all()} == {"AAPL", "NVDA"}
+
+
+def test_but_the_same_alert_delivered_twice_is_still_one_signal(auth_client, db_session, secret):
+    """TradingView 重送的是同一段內容。那一則還是只能算一次。"""
+    path = _personal_path(auth_client)
+    body = _alert(symbol="AAPL", id="2026-09-14T20:00:00Z")
+
+    _post(auth_client, path, body)
+    again = _post(auth_client, path, body)
+
+    assert again.json()["created"] is False
+    assert db_session.query(Order).count() == 1
+
+
 # --- 網址是憑證，所以不可以被印出來 -----------------------------------------------
 
 
