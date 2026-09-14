@@ -4,7 +4,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ from app.schemas.webhook import (
     TradingViewSetup,
     TradingViewWebhookLogRead,
 )
-from app.services import symbol_search
+from app.services import symbol_search, tradingview_url
 from app.services.signals import SignalIn, create_pending_order
 
 logger = logging.getLogger("app.webhooks")
@@ -46,6 +46,15 @@ _MAX_LOGGED_BODY_CHARS = 8 * 1024
 # audit trail is not worth taking the app down for.
 _LOG_RETENTION_DAYS = 30
 _LOG_MAX_ROWS = 500
+
+# Said to the owner, in the log they read, when an alert arrives at a URL they
+# have since regenerated. The symptom of forgetting to update TradingView is
+# 「it stopped ringing」 with nothing on screen, so this row is the only place
+# that can say why.
+_REGENERATED = (
+    "這個網址已經重新產生過，舊的不再收件。請到「TradingView」頁複製現在的網址，"
+    "換掉這則 TradingView 警報裡的 Webhook URL。"
+)
 
 
 def _client_ip(request: Request) -> str | None:
@@ -75,6 +84,26 @@ async def _read_bounded_body(request: Request) -> bytes | None:
     return b"".join(chunks)
 
 
+def _too_large(request: Request) -> HTTPException:
+    logger.warning(
+        "tradingview webhook: refused a body over %d bytes from %s",
+        _MAX_BODY_BYTES,
+        _client_ip(request),
+    )
+    return HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="payload too large")
+
+
+def _parse_json(raw_body: bytes) -> tuple[dict | None, str | None]:
+    """The alert as a dict, or None and the reason it is not one."""
+    try:
+        payload = json.loads(raw_body)
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be a JSON object")
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        return None, f"invalid JSON: {exc}"
+    return payload, None
+
+
 def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User | None:
     """Whose alert this is. On a single-owner deployment: the owner. Otherwise:
     nobody, and the alert is rejected with a reason in the log.
@@ -99,9 +128,14 @@ def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User |
 
     So the guess is gone. It never carried information: with one account the
     answer is that account either way, and with two the query could only be
-    right by luck. Per-account webhook tokens (a path like
-    /api/webhooks/tradingview/{token}) are the real fix and remove the
-    question entirely; until then, refusing is the only honest answer.
+    right by luck.
+
+    THE REAL FIX NOW EXISTS: every account has its own URL
+    (`tradingview_personal_webhook`, #115), where the URL proves the account
+    instead of anything being inferred. This function serves only the
+    shared-secret door, which stays for the alerts configured before those
+    URLs existed -- and for those, refusing is still the only honest answer
+    when there is more than one account.
     """
     users = db.query(User).order_by(User.id).limit(2).all()
     if len(users) != 1:
@@ -114,7 +148,7 @@ def _resolve_user(db: Session, symbol: str, strategy_name: str | None) -> User |
 def _prune_audit_log(db: Session) -> None:
     """Enforces the two retention bounds described at _LOG_MAX_ROWS.
 
-    Only the authenticated path reaches this, so it runs at TradingView alert
+    Only the authenticated paths reach this, so it runs at TradingView alert
     volume -- a handful a day -- not at whatever rate a stranger can generate.
     """
     cutoff = utcnow() - timedelta(days=_LOG_RETENTION_DAYS)
@@ -138,25 +172,61 @@ def _prune_audit_log(db: Session) -> None:
     db.commit()
 
 
-def _seen_recently(db: Session, raw_body: str) -> bool:
+def _seen_recently(db: Session, raw_body: str, user_id: int | None = None) -> bool:
     """Whether this exact body already arrived inside the replay window.
 
     Compared on the stored, secret-stripped body, so it is the alert's content
     that is matched rather than the credential wrapping it. A price that moved
     makes a different body and gets through, which is what keeps this from
     swallowing real signals.
+
+    Scoped to the account when the URL has already proved which one it is:
+    two accounts can legitimately send identical alert bodies, and one of them
+    must not be dropped as the other's replay.
     """
     cutoff = utcnow() - timedelta(seconds=settings.TV_WEBHOOK_REPLAY_WINDOW_SEC)
-    return (
-        db.query(TradingViewWebhookLog)
-        .filter(
-            TradingViewWebhookLog.raw_body == raw_body,
-            TradingViewWebhookLog.signature_valid.is_(True),
-            TradingViewWebhookLog.received_at >= cutoff,
-            TradingViewWebhookLog.id != None,  # noqa: E711 -- exclude the unsaved row
-        )
-        .first()
-        is not None
+    query = db.query(TradingViewWebhookLog).filter(
+        TradingViewWebhookLog.raw_body == raw_body,
+        TradingViewWebhookLog.signature_valid.is_(True),
+        TradingViewWebhookLog.received_at >= cutoff,
+        TradingViewWebhookLog.id != None,  # noqa: E711 -- exclude the unsaved row
+    )
+    if user_id is not None:
+        query = query.filter(TradingViewWebhookLog.user_id == user_id)
+    return query.first() is not None
+
+
+def _audit_row(
+    request: Request,
+    user: User | None,
+    payload: dict | None,
+    raw_body: bytes = b"",
+) -> TradingViewWebhookLog:
+    """The audit row for a call that got past its credential.
+
+    Stored re-serialized without the shared secret rather than as the bytes
+    that arrived: the secret is a bearer credential, and an audit row quoting
+    it back would be a second, unencrypted copy of the password guarding the
+    shared door. Everything with audit value -- symbol, action, quantity, the
+    alert id -- is kept.
+
+    A body that would not parse cannot have a key removed, so the secret's
+    VALUE is masked in the text instead: somebody pasting the old message,
+    secret line included, into a personal URL with a typo in it must not end
+    up with the shared password sitting in plain text in their log.
+    """
+    if payload is not None:
+        audited = {key: value for key, value in payload.items() if key != "secret"}
+        body = json.dumps(audited, ensure_ascii=False)
+    else:
+        body = raw_body.decode("utf-8", errors="replace")
+        if settings.TV_WEBHOOK_SECRET:
+            body = body.replace(settings.TV_WEBHOOK_SECRET, "***")
+    return TradingViewWebhookLog(
+        raw_body=body[:_MAX_LOGGED_BODY_CHARS],
+        remote_ip=_client_ip(request),
+        signature_valid=True,
+        user_id=user.id if user is not None else None,
     )
 
 
@@ -172,68 +242,17 @@ def _reject_with_log(db: Session, log: TradingViewWebhookLog, error: str) -> JSO
     return JSONResponse(status_code=status.HTTP_200_OK, content={"ok": False, "error": error})
 
 
-@router.post("/tradingview", status_code=status.HTTP_202_ACCEPTED)
-async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
-    """Public endpoint, secured by a shared secret carried in the JSON body
-    (not a header: TradingView alert webhooks can't send custom headers,
-    and the body often arrives as text/plain).
+def _accept(db: Session, request: Request, payload: dict, user: User | None):
+    """From an authenticated payload to a pending signal. Both doors end here.
 
-    Nothing is written to the database until that secret checks out. The path
-    is public and guessable, nothing else authenticates the caller, and no
-    cleanup existed for the audit table -- so an audit row written before the
-    check meant anyone who found the URL could append storage in a loop until
-    Neon's 0.5GB free tier was full, and a database with no space left fails
-    every write the app makes. Rejected requests are reported to the
-    application log instead, which the hosting platform already rotates.
-
-    Returns 202 for a genuinely accepted signal. TradingView retries any
-    non-2xx response, so failures that would never succeed on retry
-    (malformed JSON, an invalid payload shape, no user to attribute it to)
-    return 200 with the error logged instead of a 4xx/5xx."""
-    raw_body = await _read_bounded_body(request)
-    if raw_body is None:
-        logger.warning(
-            "tradingview webhook: refused a body over %d bytes from %s",
-            _MAX_BODY_BYTES,
-            _client_ip(request),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="payload too large"
-        )
-
-    try:
-        payload = json.loads(raw_body)
-        if not isinstance(payload, dict):
-            raise ValueError("payload must be a JSON object")
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-        # The secret travels inside the JSON, so a body that will not parse is
-        # a body that cannot be authenticated. No row.
-        logger.warning("tradingview webhook: unparseable body from %s", _client_ip(request))
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"ok": False, "error": f"invalid JSON: {exc}"},
-        )
-
-    secret = str(payload.get("secret", ""))
-    if not hmac.compare_digest(secret, settings.TV_WEBHOOK_SECRET):
-        logger.warning("tradingview webhook: invalid secret from %s", _client_ip(request))
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
-
+    `user` is the account a personal URL has already proved. None means the
+    shared-secret door, where the owner still has to be inferred
+    (`_resolve_user`).
+    """
     # Authenticated from here, so audit rows are worth writing: their volume is
-    # bounded by whoever holds the secret, and _prune_audit_log caps them even
-    # if that assumption ever stops holding.
-    #
-    # Stored re-serialized without the secret rather than as the bytes that
-    # arrived: the secret is a bearer credential, and an audit row quoting it
-    # back would be a second, unencrypted copy of the password guarding this
-    # endpoint. Everything with audit value -- symbol, action, quantity, the
-    # alert id -- is kept.
-    audited = {key: value for key, value in payload.items() if key != "secret"}
-    log = TradingViewWebhookLog(
-        raw_body=json.dumps(audited, ensure_ascii=False)[:_MAX_LOGGED_BODY_CHARS],
-        remote_ip=_client_ip(request),
-        signature_valid=True,
-    )
+    # bounded by whoever holds the credential, and _prune_audit_log caps them
+    # even if that assumption ever stops holding.
+    log = _audit_row(request, user, payload)
 
     try:
         alert = TradingViewAlert.model_validate(payload)
@@ -252,7 +271,8 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
     #
     # Honest about its limit: a patient attacker replaying an hour apart is
     # not stopped by this, which is why the setup panel pushes `id`.
-    if not alert.id and _seen_recently(db, log.raw_body):
+    known_user_id = user.id if user is not None else None
+    if not alert.id and _seen_recently(db, log.raw_body, known_user_id):
         return _reject_with_log(
             db, log, "重複的警報內容（短時間內收到一模一樣的訊息），已當成重放略過"
         )
@@ -282,9 +302,10 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
         )
     log.note = adjustment
 
-    user = _resolve_user(db, symbol, alert.strategy)
     if user is None:
-        return _reject_with_log(db, log, "no user configured to receive this alert")
+        user = _resolve_user(db, symbol, alert.strategy)
+        if user is None:
+            return _reject_with_log(db, log, "no user configured to receive this alert")
 
     log.user_id = user.id
 
@@ -298,7 +319,7 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
             quantity=alert.quantity or Decimal(1),
             signal_price=alert.price,
             idempotency_key=alert.id,
-            raw_payload=audited,
+            raw_payload={key: value for key, value in payload.items() if key != "secret"},
         ),
     )
 
@@ -307,6 +328,106 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
     _persist_audit(db, log)
 
     return {"ok": True, "created": result.created, "reason": result.reason}
+
+
+@router.post("/tradingview", status_code=status.HTTP_202_ACCEPTED)
+async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
+    """Public endpoint, secured by a shared secret carried in the JSON body
+    (not a header: TradingView alert webhooks can't send custom headers,
+    and the body often arrives as text/plain).
+
+    THE SHARED-SECRET DOOR, KEPT FOR THE ALERTS ALREADY OUT THERE. New setups
+    are handed a personal URL instead (`tradingview_personal_webhook`, #115).
+    This one stays because an update must never silence an alert somebody
+    configured months ago and has forgotten about (#50).
+
+    Nothing is written to the database until that secret checks out. The path
+    is public and guessable, nothing else authenticates the caller, and no
+    cleanup existed for the audit table -- so an audit row written before the
+    check meant anyone who found the URL could append storage in a loop until
+    Neon's 0.5GB free tier was full, and a database with no space left fails
+    every write the app makes. Rejected requests are reported to the
+    application log instead, which the hosting platform already rotates.
+
+    Returns 202 for a genuinely accepted signal. TradingView retries any
+    non-2xx response, so failures that would never succeed on retry
+    (malformed JSON, an invalid payload shape, no user to attribute it to)
+    return 200 with the error logged instead of a 4xx/5xx."""
+    raw_body = await _read_bounded_body(request)
+    if raw_body is None:
+        raise _too_large(request)
+
+    payload, problem = _parse_json(raw_body)
+    if payload is None:
+        # The secret travels inside the JSON, so a body that will not parse is
+        # a body that cannot be authenticated. No row.
+        logger.warning("tradingview webhook: unparseable body from %s", _client_ip(request))
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"ok": False, "error": problem})
+
+    secret = str(payload.get("secret", ""))
+    if not hmac.compare_digest(secret, settings.TV_WEBHOOK_SECRET):
+        logger.warning("tradingview webhook: invalid secret from %s", _client_ip(request))
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+
+    return _accept(db, request, payload, user=None)
+
+
+@router.post("/tradingview/{token}", status_code=status.HTTP_202_ACCEPTED)
+async def tradingview_personal_webhook(token: str, request: Request, db: Session = Depends(get_db)):
+    """One account's own TradingView URL (#115). The URL is the credential.
+
+    THE ORDER BELOW IS THE POINT. The token is checked before anything touches
+    the database: this path is public, and a URL whose validity could only be
+    learnt by querying would let a stranger keep Neon awake with a loop.
+    `tradingview_url.read` needs nothing but the string and the deployment's
+    secret, so a guessed URL costs exactly nothing.
+
+    Past that, it is the same pipeline as the shared-secret door -- except that
+    the account is proven rather than inferred, which is also why two accounts
+    on one deployment finally work.
+    """
+    claim = tradingview_url.read(token, settings.TV_WEBHOOK_SECRET)
+    if claim is None:
+        logger.warning(
+            "tradingview webhook: refused an unrecognised personal URL from %s",
+            _client_ip(request),
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unknown webhook URL")
+
+    raw_body = await _read_bounded_body(request)
+    if raw_body is None:
+        raise _too_large(request)
+
+    user_id, version = claim
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        # The MAC was genuine, so this URL was handed out once -- to an account
+        # that is gone or switched off. There is nobody to show a row to.
+        logger.warning(
+            "tradingview webhook: personal URL for a missing or inactive account from %s",
+            _client_ip(request),
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unknown webhook URL")
+
+    payload, problem = _parse_json(raw_body)
+
+    if version != user.webhook_url_version:
+        # 200, because TradingView retries any non-2xx and this will never
+        # succeed. And a row, because this is the owner's own call to a URL they
+        # retired: the log is the only place that can tell them to update it.
+        log = _audit_row(request, user, payload, raw_body)
+        log.parsed_ok = payload is not None
+        return _reject_with_log(db, log, _REGENERATED)
+
+    if payload is None:
+        # Unlike the shared door, the caller is already known here, so the
+        # malformed body is worth showing them -- it is exactly the row somebody
+        # fixing their alert message is looking for.
+        log = _audit_row(request, user, None, raw_body)
+        log.parsed_ok = False
+        return _reject_with_log(db, log, problem or "invalid JSON")
+
+    return _accept(db, request, payload, user=user)
 
 
 @router.get("/tradingview/logs", response_model=list[TradingViewWebhookLogRead])
@@ -349,23 +470,19 @@ def list_webhook_logs(
     )
 
 
-@router.get("/tradingview/setup", response_model=TradingViewSetup)
-def tradingview_setup(_user: User = Depends(get_current_active_user)) -> TradingViewSetup:
-    """What to paste into TradingView.
-
-    Nothing told the owner the URL, the field names, or that the message needs
-    an `id` -- which is the only thing standing between this endpoint and a
-    replay of a captured alert. Served rather than documented, because a URL
-    in a docs page is a URL nobody finds.
-
-    The example is a template. Printing the real shared secret into a response
-    would put it in every browser cache and every screenshot of this page.
-    """
+def _setup_for(user: User, response: Response) -> TradingViewSetup:
+    # The URL is a credential now. A response that a browser or a proxy keeps
+    # is a copy of it that nobody manages.
+    response.headers["Cache-Control"] = "no-store"
     return TradingViewSetup(
-        url=f"{settings.public_base_url.rstrip('/')}/api/webhooks/tradingview",
+        url=tradingview_url.personal_url(
+            settings.public_base_url,
+            user.id,
+            user.webhook_url_version,
+            settings.TV_WEBHOOK_SECRET,
+        ),
         example_message=(
             "{\n"
-            '  "secret": "<你的 TV_WEBHOOK_SECRET>",\n'
             '  "symbol": "{{ticker}}",\n'
             '  "exchange": "{{exchange}}",\n'
             '  "action": "buy",\n'
@@ -375,10 +492,12 @@ def tradingview_setup(_user: User = Depends(get_current_active_user)) -> Trading
             "}"
         ),
         notes=[
-            "把上面那段貼進 TradingView 警報的「訊息」欄，網址貼進 Webhook URL。",
-            "secret 要換成部署時設定的 TV_WEBHOOK_SECRET，不是這裡顯示的字樣。",
-            "id 一定要填。同一個 id 只會建立一次訂單——沒有它，任何人只要重送一次"
-            "抄到的訊息就能重複下單。用 {{timenow}} 最省事。",
+            "這條網址是你這個帳號專屬的，而且它本身就是密碼：拿到它的人可以替你送訊號。"
+            "不要貼在公開的地方；萬一外洩了，按「重新產生」，舊的會立刻失效。",
+            "網址貼進 TradingView 警報的 Webhook URL，上面那段貼進「訊息」欄。"
+            "訊息裡不需要任何密碼。",
+            "id 一定要填。同一個 id 只會建立一次訊號——沒有它，任何人只要重送一次"
+            "抄到的訊息就能重複觸發。用 {{timenow}} 最省事。",
             # The old wording printed the {{ticker}} template and then said TW
             # must look like 2330.TW -- an instruction that contradicts itself,
             # because that placeholder never includes the exchange. It now says
@@ -387,13 +506,58 @@ def tradingview_setup(_user: User = Depends(get_current_active_user)) -> Trading
             "系統會自動對應到 2330.TW（上櫃是 .TWO），對應結果會寫在下面的收件紀錄裡；"
             "美股送出來的本來就是正確代號。",
             "找不到對應的代號（打錯、或不是台美股）會被擋下來並記在收件紀錄，"
-            "不會建立一筆指向錯誤公司的訂單。",
+            "不會建立一筆指向錯誤公司的訊號。",
             # {{exchange}} only arrives if it is in the message, so every alert
             # made before this line existed keeps using the weaker path. Saying
             # so is the difference between a fix and a fix nobody applied.
             "exchange 那一行請務必留著：日股和港股的代號也是四位數，"
-            "沒有它就分不出 4502 是武田藥品還是台灣的健信。"
-            "已經設定好的舊警報不會自動帶上這一行，請回 TradingView 把訊息補上。",
+            "沒有它就分不出 4502 是武田藥品還是台灣的健信。",
+            # The alerts configured before personal URLs existed must keep
+            # working (#50), and their owner should not be left wondering
+            # whether they have to redo everything.
+            "以前照舊說明設定、訊息裡有 secret 那一行的警報照樣有效（它們打的是另一條共用網址）。"
+            "想換成這條網址的話，換掉網址、刪掉 secret 那一行就好。",
+            "重新產生之後，要回 TradingView 把每一則警報的網址換掉；還在打舊網址的，"
+            "會記在下面的收件紀錄裡並說明原因。",
             "送出後可以在下面的收件紀錄看到它有沒有進來、以及被擋在哪一關。",
         ],
     )
+
+
+@router.get("/tradingview/setup", response_model=TradingViewSetup)
+def tradingview_setup(
+    response: Response, user: User = Depends(get_current_active_user)
+) -> TradingViewSetup:
+    """What to paste into TradingView.
+
+    Nothing told the owner the URL, the field names, or that the message needs
+    an `id` -- which is the only thing standing between this endpoint and a
+    replay of a captured alert. Served rather than documented, because a URL
+    in a docs page is a URL nobody finds.
+
+    It used to print `<你的 TV_WEBHOOK_SECRET>` where the password goes -- for a
+    sound reason, since the real shared secret would land in every browser
+    cache and every screenshot of this page -- with the result that the owner
+    had to dig the value out of the hosting platform's settings: exactly what
+    this app promises never to ask of him (#115). The URL is personal now and
+    IS the credential, so there is nothing left to fetch, and a leaked one is
+    fixed by regenerating rather than by redeploying.
+    """
+    return _setup_for(user, response)
+
+
+@router.post("/tradingview/setup/rotate", response_model=TradingViewSetup)
+def rotate_tradingview_url(
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> TradingViewSetup:
+    """A new personal URL; the old one stops being accepted at once.
+
+    For a URL that leaked. Every TradingView alert still pointed at the old one
+    lands in the webhook log with the reason, instead of silently no longer
+    ringing.
+    """
+    user.webhook_url_version += 1
+    db.commit()
+    return _setup_for(user, response)

@@ -13,6 +13,7 @@ quoting every field.
 """
 
 import logging
+import re
 import sys
 
 _FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
@@ -30,6 +31,31 @@ _QUIET = (
 )
 
 _MARKER = "app-logging"
+
+# A personal TradingView URL is a credential (#115): whoever holds it can send
+# signals as that account. uvicorn's access log prints every request path, so
+# without this each alert would write the credential into the hosting
+# platform's log. The account and version stay readable -- a log that cannot
+# say which account was being called is barely a log -- and only the MAC goes.
+_PERSONAL_WEBHOOK_MAC = re.compile(r"(/api/webhooks/tradingview/\d+\.\d+\.)[A-Za-z0-9_-]+")
+
+
+class RedactWebhookUrls(logging.Filter):
+    """Masks the MAC of a personal TradingView URL wherever a record carries one.
+
+    uvicorn's access records keep the path in `args` rather than in the
+    message, so the arguments are rewritten as well as the format string.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = _PERSONAL_WEBHOOK_MAC.sub(r"\1***", record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _PERSONAL_WEBHOOK_MAC.sub(r"\1***", arg) if isinstance(arg, str) else arg
+                for arg in record.args
+            )
+        return True
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -68,6 +94,14 @@ def configure_logging(level: str = "INFO") -> None:
 
     for name in _QUIET:
         logging.getLogger(name).setLevel(logging.WARNING)
+
+    # On uvicorn's access logger itself, not on the handler above: uvicorn gives
+    # that logger a handler of its own and stops it propagating, so a filter on
+    # ours would never see a single access line. Checked by type so a second
+    # call does not stack another copy.
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(installed, RedactWebhookUrls) for installed in access.filters):
+        access.addFilter(RedactWebhookUrls())
 
     if fell_back:
         root.warning("unknown LOG_LEVEL %r; using INFO", level)
