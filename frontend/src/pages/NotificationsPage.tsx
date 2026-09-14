@@ -83,6 +83,7 @@ const EVENT_CHOICES = [
   { value: 'order.updated', label: '訂單狀態變更' },
   { value: 'strategy.alert', label: '策略提醒（只提醒模式）' },
   { value: 'strategy.error', label: '策略發生錯誤' },
+  { value: 'summary.daily', label: '每日收盤摘要' },
 ] as const
 
 function EventPicker({
@@ -221,6 +222,7 @@ const EVENT_LABEL: Record<string, string> = {
   'order.updated': '訂單狀態變更',
   'strategy.error': '策略發生錯誤',
   'strategy.alert': '策略提醒',
+  'summary.daily': '每日收盤摘要',
 }
 
 function ChannelHealth({ channel }: { channel: NotificationChannel }) {

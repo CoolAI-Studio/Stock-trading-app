@@ -204,6 +204,7 @@ describe('BackupPanel：還原', () => {
     watchlist: 0,
     watchlist_skipped: 5,
     risk_settings_created: false,
+    daily_summary_created: false,
     expired_pending: 1,
   }
 
@@ -247,6 +248,14 @@ describe('BackupPanel：還原', () => {
 
     expect(await screen.findByText(/還原好了/)).toBeInTheDocument()
     expect(screen.getByText(/跳過了 2 筆持股/)).toBeInTheDocument()
+  })
+
+  it('收盤摘要的開關回來了也要說——不說的話他會以為那一則要自己重設（#117）', async () => {
+    vi.mocked(api.upload).mockResolvedValue({ ...REPORT, daily_summary_created: true } as never)
+
+    await restore()
+
+    expect(await screen.findByText(/收盤摘要/)).toBeInTheDocument()
   })
 
   it('而且說得出「它們是停用的，等你打開」', async () => {

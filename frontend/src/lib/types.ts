@@ -449,6 +449,25 @@ export interface WatchlistItem {
   created_at: string
 }
 
+/** One market's part of the close summary (#117). `done_on` is that market's
+ * own trading day, not the owner's calendar date. */
+export interface DailySummaryMarket {
+  market: 'tw' | 'us'
+  label: string
+  symbols: string[]
+  done_on: string | null
+}
+
+/** The close summary switch. The list is the watchlist itself, so this only
+ * says what switching it on would cover -- and what it never will. */
+export interface DailySummaryState {
+  is_enabled: boolean
+  markets: DailySummaryMarket[]
+  unsupported: string[]
+  last_sent_at: string | null
+  last_error: string | null
+}
+
 /** One recorded TradingView call. Failures are included on purpose -- a wrong
  * secret or malformed JSON is precisely the row somebody is looking for. */
 export interface WebhookLog {
