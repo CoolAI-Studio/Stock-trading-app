@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import SessionLocal
-from app.enums import ChannelType, NotificationStatus
+from app.enums import ChannelType, NotificationStatus, OrderSource
 from app.models.mixins import utcnow
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.order import Order
@@ -129,7 +129,11 @@ def _format_message(event: Event, session=None) -> str:
         order = _load_order(session, event.data.get("order_id"))
         if order is None:
             return f"有一筆新的訊號（#{event.data.get('order_id')}），到畫面上看細節。"
-        who = _strategy_name(session, order.strategy_id) or "手動建立"
+        # 沒有策略的訊號不一定是手動建的：TradingView 送進來的也沒有 strategy_id（#115）。
+        # 他在 TradingView 設的警報響了，通知卻說「手動建立」，是在叫他懷疑一件他沒做過的事。
+        who = _strategy_name(session, order.strategy_id) or (
+            "TradingView" if order.source == OrderSource.TRADINGVIEW else "手動建立"
+        )
         return (
             f"{who}：{order.symbol} {_label(_SIDE_LABEL, order.side)}訊號"
             f"，訊號價 {order.signal_price}。"

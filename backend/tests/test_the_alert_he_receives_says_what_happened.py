@@ -126,6 +126,32 @@ def test_it_says_at_what_price(db_session, owner):
     assert "900.5" in _message(db_session, order)
 
 
+def test_a_tradingview_signal_is_not_called_manual(db_session, owner):
+    """TradingView 送進來的訊號沒有 strategy_id，原本因此一律寫成「手動建立」（#115）。
+
+    他在 TradingView 設的警報響了，手機上卻說是他自己手動建的——那是在叫他懷疑一件他沒有
+    做過的事。來源本來就寫在那一列上，照實說就好。
+    """
+    order = Order(
+        user_id=owner.id,
+        strategy_id=None,
+        source=OrderSource.TRADINGVIEW,
+        symbol="2330.TW",
+        side=OrderSide.BUY,
+        quantity=Decimal(1),
+        signal_price=Decimal("900.5"),
+        status=OrderStatus.PENDING,
+    )
+    db_session.add(order)
+    db_session.commit()
+    db_session.refresh(order)
+
+    message = _message(db_session, order)
+
+    assert "TradingView" in message
+    assert "手動建立" not in message
+
+
 def test_it_says_which_of_his_alerts_fired(db_session, owner):
     """他可能有五支策略盯著同一檔。哪一支響了，決定他要不要理它。
 
