@@ -59,6 +59,20 @@ def _no_outbound_http(monkeypatch):
     monkeypatch.setattr(httpx, "get", _refuse)
 
 
+@pytest.fixture(autouse=True)
+def _no_retired_webhook_urls_remembered():
+    """退休的 TradingView 網址記在行程裡（webhooks._RETIRED_URL_LOGGED），不在資料庫。
+
+    每條測試的資料庫都是新的、帳號編號從 1 開始——上一條測試記下的 (1, 0) 會讓下一條測試的
+    舊網址不寫紀錄，而那個紅燈跟下一條測試的程式碼無關。
+    """
+    from app.api.routers import webhooks
+
+    webhooks._RETIRED_URL_LOGGED.clear()
+    yield
+    webhooks._RETIRED_URL_LOGGED.clear()
+
+
 @pytest.fixture
 def db_session(tmp_path):
     db_path = tmp_path / "test.db"
