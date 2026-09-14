@@ -7,12 +7,14 @@ import type { WebhookLog, WebhookSetup } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
-  api: { get: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn() },
 }))
 
+const MAC = 'Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWpr'
+
 const SETUP: WebhookSetup = {
-  url: 'https://example.onrender.com/api/webhooks/tradingview',
-  example_message: '{"secret": "<你的 TV_WEBHOOK_SECRET>", "id": "{{timenow}}"}',
+  url: `https://example.onrender.com/api/webhooks/tradingview/1.0.${MAC}`,
+  example_message: '{"symbol": "{{ticker}}", "id": "{{timenow}}"}',
   notes: ['id 一定要填。'],
 }
 
@@ -47,18 +49,30 @@ function serve(logs: WebhookLog[]) {
 describe('WebhooksPage', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('shows the URL to paste into TradingView', async () => {
-    // Nothing told the owner this; it had to be worked out from the source.
+  it('shows the URL to paste into TradingView, with its credential masked', async () => {
+    // Nothing told the owner this; it had to be worked out from the source. The
+    // URL is the account's own now and IS the password (#115), so the part that
+    // grants access stays off the screen -- the copy button carries the whole thing.
     serve([])
     renderPage()
-    expect(await screen.findByText(SETUP.url)).toBeInTheDocument()
+    expect(await screen.findByText(/\/api\/webhooks\/tradingview\/1\.0\./)).toBeInTheDocument()
+    expect(screen.queryByText(new RegExp(MAC))).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '複製網址' })).toBeInTheDocument()
   })
 
-  it('shows the example message, with the secret as a placeholder', async () => {
-    // Printing the real shared secret would put it in every screenshot.
+  it('shows an example message that needs no password from anywhere else', async () => {
+    // It used to print <你的 TV_WEBHOOK_SECRET>, which sent the owner digging
+    // through the hosting platform's settings for a value (#115).
     serve([])
     renderPage()
-    expect(await screen.findByText(/TV_WEBHOOK_SECRET/)).toBeInTheDocument()
+    expect(await screen.findByText(/"id": "\{\{timenow\}\}"/)).toBeInTheDocument()
+    expect(screen.queryByText(/TV_WEBHOOK_SECRET/)).not.toBeInTheDocument()
+  })
+
+  it('offers to regenerate the URL here, where a leak would be dealt with', async () => {
+    serve([])
+    renderPage()
+    expect(await screen.findByRole('button', { name: '重新產生網址' })).toBeInTheDocument()
   })
 
   it('says an alert became an order', async () => {

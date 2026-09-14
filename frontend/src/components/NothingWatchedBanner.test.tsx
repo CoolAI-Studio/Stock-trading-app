@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NothingWatchedBanner } from './NothingWatchedBanner'
 import { api } from '../lib/api'
-import type { Position, Strategy } from '../lib/types'
+import type { Position, Strategy, WebhookLog } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
@@ -33,10 +33,33 @@ function position(overrides: Partial<Position> = {}): Position {
   } as Position
 }
 
-function answer({ strategies, positions }: { strategies: Strategy[]; positions: Position[] }) {
+const TV_SIGNAL: WebhookLog = {
+  id: 7,
+  received_at: '2026-09-14T01:30:00Z',
+  remote_ip: '52.89.214.238',
+  signature_valid: true,
+  parsed_ok: true,
+  raw_body: '{"symbol": "2330.TW", "action": "buy"}',
+  order_id: 42,
+  error: null,
+  missing_id: false,
+}
+
+function answer({
+  strategies,
+  positions,
+  tvLogs = [],
+}: {
+  strategies: Strategy[]
+  positions: Position[]
+  tvLogs?: WebhookLog[] | Error
+}) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path.startsWith('/api/strategies')) return Promise.resolve(strategies) as never
     if (path.startsWith('/api/positions')) return Promise.resolve(positions) as never
+    if (path.startsWith('/api/webhooks/tradingview/logs')) {
+      return (tvLogs instanceof Error ? Promise.reject(tvLogs) : Promise.resolve(tvLogs)) as never
+    }
     throw new Error(`沒有預期到的請求：${path}`)
   })
 }
@@ -168,6 +191,57 @@ describe('在引導頁上', () => {
 
   it('離開引導回到一般頁面，就要照樣說', async () => {
     answer({ strategies: [], positions: [] })
+
+    renderBanner('/strategies')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+})
+
+/**
+ * TradingView 那條路不經過盯盤迴圈（#115）。
+ *
+ * 他在 TradingView 上設好警報、把網址貼過來之後，這個帳號可以一支策略、一股持股都
+ * 沒有——而每一則 TradingView 警報照樣會變成手機上的一則通知。這時候說「不會有任何
+ * 提醒送出」是一句**假話**，而且是會讓他去懷疑一個正常運作的東西的那一種。
+ *
+ * 判準用「最近真的有訊號進來」（收件紀錄裡有一筆變成了訊號），不是「他打開過設定頁」：
+ * 打開過不代表 TradingView 那邊真的設好了。收件紀錄保留 30 天，所以 TradingView 那邊
+ * 停了一個月之後，這句話會自己回來。
+ */
+describe('TradingView 送訊號進來的帳號', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset()
+  })
+
+  it('最近有 TradingView 訊號進來，就不可以說「不會有任何提醒」——那句話是假的', async () => {
+    answer({ strategies: [], positions: [], tvLogs: [TV_SIGNAL] })
+
+    renderBanner('/strategies')
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringContaining('/api/webhooks/tradingview/logs'),
+      ),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('只有被擋下來、沒變成訊號的收件紀錄不算——那些不會通知他', async () => {
+    answer({
+      strategies: [],
+      positions: [],
+      tvLogs: [{ ...TV_SIGNAL, order_id: null, signature_valid: false, error: '密鑰不符' }],
+    })
+
+    renderBanner('/strategies')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  it('問不到收件紀錄的時候，照策略和持股的判斷說——一個查詢失敗不可以把警告吞掉', async () => {
+    answer({ strategies: [], positions: [], tvLogs: new Error('logs 掛了') })
 
     renderBanner('/strategies')
 
