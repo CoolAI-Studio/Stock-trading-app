@@ -11,14 +11,20 @@ from app.services.notification.base import SendResult
 # phone and said nothing about what had happened.
 TITLE = "交易提醒"
 
-# Apple refuses a push whose encrypted payload exceeds 4 KB, and the encryption
-# adds about a hundred bytes of overhead on top of whatever is sent. 600
-# characters is comfortably inside that even when every one of them is a
-# three-byte Chinese character, and is far more than any alert this app
-# composes -- the case it exists for is a strategy traceback landing in the
-# body, which used to produce a 413 that was retried five times and then
-# dropped without a word.
-MAX_BODY_CHARS = 600
+# THE LIMIT IS THE PLATFORM'S, AND IT IS COUNTED IN BYTES. Apple refuses a push
+# whose encrypted payload exceeds 4096 bytes (RFC 8030 §7.2 asks every push
+# service to accept at least that much), and aes128gcm spends 103 of them: a
+# 21-byte header, the 65-byte sender key, a 16-byte tag, one padding delimiter.
+# So the JSON handed to pywebpush has to stay under 3993 bytes; this leaves
+# about 600 of those spare for whatever a future pywebpush adds.
+#
+# It used to be 600 CHARACTERS -- sized for a three-byte Chinese character in
+# every position -- and the case it was written for was a strategy traceback,
+# which produced a 413 that was retried five times and dropped without a word.
+# But the close summary (#117) is a list, one line per stock, and 600 characters
+# cut it after about eighteen while more than half of the real budget was
+# unused. Counting the actual bytes of the actual payload fits about fifty.
+MAX_PAYLOAD_BYTES = 3400
 
 # pywebpush hands `timeout` straight to requests, and its default is None --
 # which means requests waits forever. Sends run inside the market loop's tick,
@@ -82,10 +88,10 @@ class WebPushSender:
             return SendResult(ok=False, error="VAPID_PRIVATE_KEY is not configured")
 
         subscription_info = {"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}}
-        body: dict[str, str] = {"title": TITLE, "body": _fit(message)}
+        body: dict[str, str] = {"title": TITLE, "body": message}
         if receipt_token:
             body["receipt"] = receipt_token
-        payload = json.dumps(body, ensure_ascii=False)
+        payload = _within_budget(body)
         try:
             webpush(
                 subscription_info=subscription_info,
@@ -122,15 +128,52 @@ class WebPushSender:
             return SendResult(ok=False, error=f"推播時發生未預期的錯誤：{type(exc).__name__}")
 
 
-def _fit(message: str) -> str:
-    """Trim to what a push service will accept, and say that it was trimmed.
+def _encoded(body: dict[str, str]) -> str:
+    return json.dumps(body, ensure_ascii=False)
 
-    Silently cutting an alert mid-sentence reads as a bug in the alert itself,
-    which is the wrong thing for the owner to go and investigate.
+
+def _fits(body: dict[str, str]) -> bool:
+    return len(_encoded(body).encode("utf-8")) <= MAX_PAYLOAD_BYTES
+
+
+def _within_budget(body: dict[str, str]) -> str:
+    """The payload, trimmed to what a push service will accept -- and saying so.
+
+    Measured on the whole serialized payload, receipt token and JSON escaping
+    included, because that is what Apple counts. Silently cutting an alert
+    mid-sentence reads as a bug in the alert itself, which is the wrong thing
+    for the owner to go and investigate.
+
+    WHOLE LINES FIRST. The long message this app actually sends is the close
+    summary, one line per stock: half a stock's line is worse than no line, and
+    a list that is quietly shorter than the watchlist reads as the whole
+    watchlist. So it keeps as many whole lines as fit and says how many are
+    left. Only a single line too long on its own (a strategy's exception text)
+    is cut by characters.
     """
-    if len(message) <= MAX_BODY_CHARS:
-        return message
-    return message[: MAX_BODY_CHARS - 1] + "…"
+    if _fits(body):
+        return _encoded(body)
+
+    lines = body["body"].split("\n")
+    for keep in range(len(lines) - 1, 0, -1):
+        trimmed = {
+            **body,
+            "body": "\n".join(lines[:keep]) + f"\n…還有 {len(lines) - keep} 行沒放進這則通知",
+        }
+        if _fits(trimmed):
+            return _encoded(trimmed)
+
+    # Not even the first line fits. Largest prefix that does, found by halving:
+    # a few serializations rather than one per character of a traceback.
+    text = body["body"]
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if _fits({**body, "body": text[:middle] + "…"}):
+            low = middle
+        else:
+            high = middle - 1
+    return _encoded({**body, "body": text[:low] + "…"})
 
 
 def _describe(exc: WebPushException) -> str:
