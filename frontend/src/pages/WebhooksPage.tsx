@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { Pager } from '../components/Pager'
 import { QueryError } from '../components/QueryError'
+import { SharedWebhookPanel } from '../components/SharedWebhookPanel'
 import { TradingViewSetupPanel } from '../components/TradingViewSetupPanel'
 import type { WebhookLog, WebhookSetup } from '../lib/types'
 
@@ -45,6 +46,8 @@ export function WebhooksPage() {
 
       {setupQuery.isError && <QueryError error={setupQuery.error} />}
       {setupQuery.data && <TradingViewSetupPanel setup={setupQuery.data} allowRegenerate />}
+      {/* 放在專屬網址下面：先把警報換到專屬網址，再關舊的。 */}
+      <SharedWebhookPanel />
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-slate-300">收件紀錄</h2>

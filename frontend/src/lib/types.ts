@@ -497,6 +497,14 @@ export interface WebhookSetup {
   notes: string[]
 }
 
+/** The old shared TradingView URL (the secret carried in the message): whether
+ * it still takes alerts, and when it last received one -- the one fact the
+ * owner decides by before closing it. */
+export interface SharedWebhookState {
+  enabled: boolean
+  last_used_at: string | null
+}
+
 /** A strategy's live scorecard.
  *
  * Deliberately on a different basis from the backtest's -- live fills charge
