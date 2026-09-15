@@ -65,12 +65,16 @@ def _no_retired_webhook_urls_remembered():
 
     每條測試的資料庫都是新的、帳號編號從 1 開始——上一條測試記下的 (1, 0) 會讓下一條測試的
     舊網址不寫紀錄，而那個紅燈跟下一條測試的程式碼無關。
+
+    「共用網址已經關掉」（webhooks._SHARED_DOOR_CLOSED）也記在行程裡，理由一樣。
     """
     from app.api.routers import webhooks
 
     webhooks._RETIRED_URL_LOGGED.clear()
+    webhooks._SHARED_DOOR_CLOSED.clear()
     yield
     webhooks._RETIRED_URL_LOGGED.clear()
+    webhooks._SHARED_DOOR_CLOSED.clear()
 
 
 @pytest.fixture

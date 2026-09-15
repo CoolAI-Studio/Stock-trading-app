@@ -58,3 +58,15 @@ class TradingViewSetup(BaseModel):
     url: str
     example_message: str
     notes: list[str]
+
+
+class SharedWebhookState(BaseModel):
+    """The old shared URL (the secret carried in the message): whether it still
+    takes alerts, and when it last received one -- what the owner decides by."""
+
+    enabled: bool
+    last_used_at: UtcDatetime | None
+
+
+class SharedWebhookUpdate(BaseModel):
+    enabled: bool

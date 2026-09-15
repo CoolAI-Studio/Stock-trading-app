@@ -19,6 +19,8 @@ from app.models.mixins import utcnow
 from app.models.user import User
 from app.models.webhook import TradingViewWebhookLog
 from app.schemas.webhook import (
+    SharedWebhookState,
+    SharedWebhookUpdate,
     TradingViewAlert,
     TradingViewSetup,
     TradingViewWebhookLogRead,
@@ -402,6 +404,23 @@ async def tradingview_webhook(request: Request, db: Session = Depends(get_db)):
         logger.warning("tradingview webhook: invalid secret from %s", _client_ip(request))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
 
+    # The owner's switch (see _SHARED_CLOSED). Read only AFTER the secret checks
+    # out: reading it first would let a stranger wake the database for free.
+    if _shared_door_known_closed():
+        return JSONResponse(
+            status_code=status.HTTP_200_OK, content={"ok": False, "error": _SHARED_CLOSED}
+        )
+    owner = _resolve_user(db, "", None)
+    if owner is not None and not owner.shared_webhook_enabled:
+        _SHARED_DOOR_CLOSED["logged_at"] = _clock()
+        log = _audit_row(request, owner, payload)
+        log.parsed_ok = True
+        return _reject_with_log(db, log, _SHARED_CLOSED)
+    if owner is not None:
+        # The one fact the owner decides by before closing it: is anything still
+        # calling it? Committed by whichever way _accept ends.
+        owner.shared_webhook_last_used_at = utcnow()
+
     return _accept(db, request, payload, user=None)
 
 
@@ -563,16 +582,29 @@ def _setup_for(user: User, response: Response) -> TradingViewSetup:
             "沒有它就分不出 4502 是武田藥品還是台灣的健信。",
             # The alerts configured before personal URLs existed must keep
             # working (#50), and their owner should not be left wondering
-            # whether they have to redo everything.
-            "以前照舊說明設定、訊息裡有 secret 那一行的警報照樣有效（它們打的是另一條共用網址）。"
-            "想換成這條網址的話，換掉網址、刪掉 secret 那一行就好。",
-            # 「重新產生」只換得掉這條網址。共用密碼明文寫在每一則舊警報的訊息裡，會跟著
-            # TradingView 的彈窗、通知信、截圖流出去，而它的補救是另一個動作——不說的話，
-            # 他會以為按了重新產生就安全了。
-            "舊警報訊息裡的 secret 如果外洩了（截圖、轉寄了 TradingView 的通知信、分享了警報"
-            "範本），「重新產生」擋不住它：到 Render 的環境變數把 TV_WEBHOOK_SECRET 換成新的值，"
-            "舊的共用網址就不再收件，這條專屬網址不受影響。"
-            "還在用 secret 的舊警報，趁這時候換成這條網址。",
+            # whether they have to redo everything -- nor, once he has closed
+            # the shared URL, be told that they still work.
+            *(
+                [
+                    "以前照舊說明設定、訊息裡有 secret 那一行的警報照樣有效"
+                    "（它們打的是另一條共用網址）。"
+                    "想換成這條網址的話，換掉網址、刪掉 secret 那一行就好。",
+                    # 「重新產生」只換得掉這條網址。共用密碼明文寫在每一則舊警報的訊息裡，
+                    # 會跟著 TradingView 的彈窗、通知信、截圖流出去，而它的補救是另外的
+                    # 動作——不說的話，他會以為按了重新產生就安全了。
+                    "舊警報訊息裡的 secret 如果外洩了（截圖、轉寄了 TradingView 的通知信、"
+                    "分享了警報範本），「重新產生」擋不住它。兩種補救都讓它沒用、"
+                    "這條專屬網址都不受影響：在這一頁下面把「舊的共用網址」關掉，"
+                    "或到 Render 的環境變數把 TV_WEBHOOK_SECRET 換成新的值。"
+                    "還在用 secret 的舊警報，趁這時候換成這條網址。",
+                ]
+                if user.shared_webhook_enabled
+                else [
+                    "舊的共用網址已經關掉：訊息裡還有 secret 那一行的警報不會再進來，"
+                    "被擋下來的會記在下面的收件紀錄裡。"
+                    "要換成這條網址，換掉網址、刪掉 secret 那一行就好。",
+                ]
+            ),
             "重新產生之後，要回 TradingView 把每一則警報的網址換掉；還在打舊網址的，"
             "會記在下面的收件紀錄裡並說明原因。",
             "送出後可以在下面的收件紀錄看到它有沒有進來、以及被擋在哪一關。",
@@ -617,3 +649,59 @@ def rotate_tradingview_url(
     user.webhook_url_version += 1
     db.commit()
     return _setup_for(user, response)
+
+
+# --- THE OLD SHARED DOOR, AND A WAY TO CLOSE IT ------------------------------
+#
+# The shared secret is written in plain text into every legacy alert message,
+# and travels wherever that message does: TradingView's pop-ups, alert e-mails,
+# phone notifications, screenshots. The personal URL needs no secret, but while
+# the shared door stays open a leaked copy can still send signals. Once every
+# alert has moved, closing it makes that secret worthless.
+#
+# NEVER CLOSED AUTOMATICALLY. Alerts set up months ago still call it, and an
+# update must not silence them (#50). The owner closes it, on the page that says
+# when it last received anything.
+_SHARED_CLOSED = (
+    "舊的共用網址已經在「TradingView」頁關掉了，訊息裡帶 secret 的警報不再收件。"
+    "請把這則警報的 Webhook URL 換成那一頁的專屬網址、刪掉 secret 那一行；"
+    "或到那一頁把共用網址重新打開。"
+)
+
+# Remembered in the process for the same reason as _RETIRED_URL_LOGGED: a closed
+# door is exactly what a leaked secret keeps knocking on. Unlike a retired
+# version this CAN change back, so the switch clears it at once -- a stale
+# 「closed」 held for an hour would be an hour of alerts that never rang.
+_SHARED_DOOR_CLOSED: dict[str, float] = {}
+
+
+def _shared_door_known_closed() -> bool:
+    logged_at = _SHARED_DOOR_CLOSED.get("logged_at")
+    return logged_at is not None and _clock() - logged_at < _RETIRED_URL_LOG_EVERY_SEC
+
+
+def _shared_state(user: User) -> SharedWebhookState:
+    return SharedWebhookState(
+        enabled=user.shared_webhook_enabled,
+        last_used_at=user.shared_webhook_last_used_at,
+    )
+
+
+@router.get("/tradingview/shared", response_model=SharedWebhookState)
+def shared_webhook_state(user: User = Depends(get_current_active_user)) -> SharedWebhookState:
+    """Whether the old shared URL still takes alerts, and when it last did."""
+    return _shared_state(user)
+
+
+@router.put("/tradingview/shared", response_model=SharedWebhookState)
+def set_shared_webhook(
+    payload: SharedWebhookUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_active_user),
+) -> SharedWebhookState:
+    """Close or reopen the old shared URL. Takes effect on the very next alert."""
+    user.shared_webhook_enabled = payload.enabled
+    db.commit()
+    # Either way the remembered answer is now wrong or unneeded.
+    _SHARED_DOOR_CLOSED.clear()
+    return _shared_state(user)
