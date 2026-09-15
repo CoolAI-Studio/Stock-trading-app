@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
-import type { Position, Strategy, WebhookLog } from '../lib/types'
+import type { DailySummaryState, Position, Strategy, WebhookLog } from '../lib/types'
 
 // 這兩頁的全部工作就是帶他建第一支策略。OnboardingGate 會把剛建好帳號的人直接導去
 // /welcome，所以在這裡還掛著這句話，等於他的第一個畫面上有一條黃色警告外加一個把他
@@ -33,13 +33,16 @@ const PAGES_THAT_ARE_THE_FIX = new Set(['/welcome', '/guide'])
  * 載入中閃一下、或後端掛掉時多喊一次，都是把這句話變成背景雜訊——而後端掛掉本來就有
  * WorkerHealthBanner 在講。一句被學會忽略的警告，跟沒有那句話是同一件事。
  *
- * ＊ TradingView 那條路不經過盯盤迴圈（#115）。
+ * ＊ 不經過盯盤迴圈的兩條路（#115、#117）。
  *
- * 一個只用 TradingView 的帳號可以一支策略、一股持股都沒有，而每一則 TradingView 警報照樣
- * 會變成手機上的通知。對他說「不會有任何提醒送出」是一句假話，而且是會讓他去懷疑一個正常
- * 運作的東西的那一種。判準是「收件紀錄裡最近有一筆真的變成了訊號」，不是「他打開過設定
- * 頁」——打開過不代表 TradingView 那邊真的設好了。紀錄保留 30 天，所以 TradingView 那邊停了
- * 一個月之後，這句話會自己回來。
+ * TradingView 的警報和收盤摘要都不需要一支策略或一筆持股，而它們照樣會變成手機上的通知。
+ * 對只用這兩條路的人說「不會有任何提醒送出」是假話，而且是會讓他去懷疑一個正常運作的東西
+ * 的那一種。
+ *
+ * - TradingView：收件紀錄裡最近有一筆**真的變成訊號**，不是「他打開過設定頁」——打開過不代
+ *   表 TradingView 那邊真的設好了。紀錄保留 30 天，所以那邊停了一個月之後這句話會自己回來。
+ * - 收盤摘要：開著，**而且**自選股裡至少有一檔在會收盤的市場。開著卻只有加密貨幣（不收盤）
+ *   或一檔都沒選，那一則永遠不會來，這句話就還是真的。
  */
 export function NothingWatchedBanner() {
   const { pathname } = useLocation()
@@ -58,17 +61,30 @@ export function NothingWatchedBanner() {
     queryFn: () => api.get<WebhookLog[]>('/api/webhooks/tradingview/logs?limit=20&offset=0'),
     retry: false,
   })
+  const summary = useQuery({
+    queryKey: ['daily-summary'],
+    queryFn: () => api.get<DailySummaryState>('/api/daily-summary'),
+    retry: false,
+  })
 
   if (PAGES_THAT_ARE_THE_FIX.has(pathname)) return null
   if (!strategies.isSuccess || !positions.isSuccess) return null
   if ((strategies.data ?? []).some((one) => one.is_active)) return null
   // 數量 0 是一筆平掉的紀錄，不是還在看的部位——停損掃描也是這樣分的。
   if ((positions.data ?? []).some((one) => Number(one.quantity) !== 0)) return null
-  // 還在問就先不說，否則 TradingView 的使用者每次開頁面都會看到它閃一下。問不到（錯誤）
-  // 則照策略和持股的判斷說：一個查詢失敗不可以把警告吞掉。
-  if (tradingViewLogs.isPending) return null
+  // 還在問就先不說，否則這兩條路的使用者每次開頁面都會看到它閃一下。問不到（錯誤）則照
+  // 策略和持股的判斷說：一個查詢失敗不可以把警告吞掉。
+  if (tradingViewLogs.isPending || summary.isPending) return null
   // 只算真的變成訊號的那幾筆：密鑰不符、格式看不懂、被風控擋下的都不會通知他。
   if (tradingViewLogs.isSuccess && tradingViewLogs.data.some((log) => log.order_id !== null)) {
+    return null
+  }
+  if (
+    summary.isSuccess &&
+    summary.data?.is_enabled &&
+    Array.isArray(summary.data.markets) &&
+    summary.data.markets.some((market) => market.symbols.length > 0)
+  ) {
     return null
   }
 

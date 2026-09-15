@@ -42,6 +42,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.enums import OrderStatus
+from app.models.daily_summary import DailySummary
 from app.models.notification import NotificationChannel
 from app.models.order import Order
 from app.models.position import Position
@@ -200,6 +201,12 @@ def _snapshot(db: Session, user: User) -> dict:
             .all(),
             ("symbol", "data_source"),
         ),
+        # 收盤摘要的開關（#117）。只帶開關：「哪一天已經送過」是這一份部署的執行紀錄，
+        # 不是他的設定——帶過去的話，換一份部署的第一天會以為今天已經送過了。
+        "daily_summary": _rows(
+            db.query(DailySummary).filter(DailySummary.user_id == user.id).all(),
+            ("is_enabled",),
+        ),
         "alerts": _rows(
             db.query(StrategyAlert)
             .filter(StrategyAlert.user_id == user.id)
@@ -322,6 +329,7 @@ class RestoreReport:
     watchlist: int = 0
     watchlist_skipped: int = 0
     risk_settings_created: bool = False
+    daily_summary_created: bool = False
     expired_pending: int = 0
 
 
@@ -429,6 +437,13 @@ def restore(db: Session, user: User, snapshot: dict) -> RestoreReport:
         if rows and not db.query(RiskSettings).filter(RiskSettings.user_id == user.id).first():
             db.add(_Coercer(RiskSettings).build(RiskSettings, rows[0], user_id=user.id))
             report = replace(report, risk_settings_created=True)
+
+        # 收盤摘要的開關：一個帳號一份，跟風控一樣只在完全沒有的時候才建，絕不蓋掉他
+        # 現在的選擇。沒有這一欄的舊備份就是「那一版還沒有這件事」。
+        rows = snapshot.get("daily_summary") or []
+        if rows and not db.query(DailySummary).filter(DailySummary.user_id == user.id).first():
+            db.add(DailySummary(user_id=user.id, is_enabled=bool(rows[0].get("is_enabled"))))
+            report = replace(report, daily_summary_created=True)
 
         # 訊號紀錄：純歷史，全部加回來。
         #

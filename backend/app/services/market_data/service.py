@@ -2,6 +2,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -168,7 +169,13 @@ class MarketDataService:
         self._bar_locks: dict[tuple[DataSource, str, Timeframe, int], threading.Lock] = {}
         self._bar_locks_guard = threading.Lock()
 
-    def get_quotes(self, symbols: list[str], data_source: DataSource) -> dict[str, Quote]:
+    def get_quotes(
+        self,
+        symbols: list[str],
+        data_source: DataSource,
+        *,
+        answered_since: datetime | None = None,
+    ) -> dict[str, Quote]:
         if not symbols:
             return {}
 
@@ -184,10 +191,24 @@ class MarketDataService:
         #
         # 這不是放棄它：完整刷新那條路（TTL 過了就問全部）每次都會再問它一次，所以代
         # 號恢復了——上市了、改名了、或者他把 .TW 補上去了——下一次刷新就拿得到。
+        #
+        # `answered_since` 是另一種「還缺」：快取裡有，但那一筆是在問的人在乎的那一刻之前回答
+        # 的。收盤摘要要的是收盤之後的回答，而這份快取整個來源共用一個計時——迴圈剛刷新自己的
+        # 代號，別人的代號就會帶著中午的價格一起顯得「還新鮮」（#117 的審查抓到的）。
         missing = [
             s
             for s in symbols
-            if s not in cached_quotes and not self._recently_unanswered(data_source, s, now)
+            if (
+                s not in cached_quotes
+                or (
+                    answered_since is not None
+                    and (
+                        cached_quotes[s].fetched_at is None
+                        or cached_quotes[s].fetched_at < answered_since
+                    )
+                )
+            )
+            and not self._recently_unanswered(data_source, s, now)
         ]
 
         if stale or missing:

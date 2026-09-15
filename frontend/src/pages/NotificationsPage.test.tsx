@@ -388,6 +388,7 @@ describe('choosing which events a channel receives', () => {
       '訂單狀態變更',
       '策略提醒（只提醒模式）',
       '策略發生錯誤',
+      '每日收盤摘要',
     ]) {
       await user.click(screen.getByLabelText(label))
     }

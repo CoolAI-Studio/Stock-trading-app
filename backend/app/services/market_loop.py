@@ -21,6 +21,7 @@ from app.services import (
     alerts,
     backup_schedule,
     build_info,
+    daily_summary,
     market_calendar,
     risk,
     risk_resolver,
@@ -814,6 +815,14 @@ def tick_once(
             # the loop stopping is a strictly worse outcome than one alert
             # arriving late.
             logger.exception("notification retry sweep failed")
+
+        # 收盤摘要（#117）。自己一個 try：它會去問行情，而上游抖一下不該連累重送掃描，
+        # 反過來也一樣。事件交給底下 finally 那一段發出去，跟這一輪其他事件走同一條路。
+        # 時間窗外它一句 SQL 都不送（daily_summary.run_due 的第一行）。
+        try:
+            events.extend(daily_summary.run_due(session, service=service))
+        except Exception:
+            logger.exception("收盤摘要這一輪失敗")
     finally:
         if owns_session:
             session.close()

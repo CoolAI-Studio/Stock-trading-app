@@ -174,6 +174,7 @@ type RestoreReport = {
   watchlist: number
   watchlist_skipped: number
   risk_settings_created: boolean
+  daily_summary_created: boolean
   expired_pending: number
 }
 
@@ -275,7 +276,8 @@ function RestoreBackup() {
             <strong>還原好了。</strong>加回來的有：策略 {report.strategies} 支、通知管道{' '}
             {report.channels} 個、持股 {report.positions} 筆、自選 {report.watchlist} 檔、
             訊號紀錄 {report.orders} 筆、提醒紀錄 {report.alerts} 筆
-            {report.risk_settings_created ? '，以及風控設定' : ''}。
+            {report.risk_settings_created ? '，以及風控設定' : ''}
+            {report.daily_summary_created ? '，以及收盤摘要的開關' : ''}。
           </p>
           {/* 這一句是整段裡最重要的。沒有它，他會以為提醒已經在跑了。 */}
           <p className="text-amber-200">

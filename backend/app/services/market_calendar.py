@@ -23,7 +23,7 @@ day of pointless requests and nothing worse.
 Stdlib only -- zoneinfo, no new dependency for what is a table of two markets.
 """
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.enums import DataSource
@@ -74,6 +74,36 @@ _TAIWAN = _Session("Asia/Taipei", time(9, 0), time(13, 30))
 # `fast_info` lastPrice does not serve them either, so pretending the market
 # is open then would only feed strategies the previous close again.
 _US = _Session("America/New_York", time(9, 30), time(16, 0))
+
+# The markets that have a close to summarise, by the key the rest of the app
+# uses (#117). Crypto is absent on purpose: it never closes.
+MARKET_LABELS = {"tw": "台股", "us": "美股"}
+_MARKETS = {"tw": _TAIWAN, "us": _US}
+
+
+def market_of(symbol: str, data_source: DataSource) -> str | None:
+    """'tw', 'us', or None -- whose close a summary line belongs to.
+
+    Unlike `is_open`, None here does not mean 「treat as open」: it means 「there
+    is no close to summarise」 (crypto, or a market this module cannot place),
+    and the caller leaves that symbol out of the summary.
+    """
+    session = _session_for(symbol, data_source)
+    for key, candidate in _MARKETS.items():
+        if session is candidate:
+            return key
+    return None
+
+
+def close_on(market: str, day: date) -> datetime:
+    """When `market`'s regular session ends on `day`, in its own zone."""
+    session = _MARKETS[market]
+    return datetime.combine(day, session.closes, tzinfo=session.tz)
+
+
+def local_date(market: str, moment: datetime) -> date:
+    """The calendar date in `market`'s own zone -- the trading day, not UTC's."""
+    return moment.astimezone(_MARKETS[market].tz).date()
 
 
 def session_close_after(

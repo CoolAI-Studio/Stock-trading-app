@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NothingWatchedBanner } from './NothingWatchedBanner'
 import { api } from '../lib/api'
-import type { Position, Strategy, WebhookLog } from '../lib/types'
+import type { DailySummaryState, Position, Strategy, WebhookLog } from '../lib/types'
 
 vi.mock('../lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/api')>()),
@@ -45,20 +45,36 @@ const TV_SIGNAL: WebhookLog = {
   missing_id: false,
 }
 
+const SUMMARY_OFF: DailySummaryState = {
+  is_enabled: false,
+  markets: [
+    { market: 'tw', label: '台股', symbols: [], done_on: null },
+    { market: 'us', label: '美股', symbols: [], done_on: null },
+  ],
+  unsupported: [],
+  last_sent_at: null,
+  last_error: null,
+}
+
 function answer({
   strategies,
   positions,
   tvLogs = [],
+  summary = SUMMARY_OFF,
 }: {
   strategies: Strategy[]
   positions: Position[]
   tvLogs?: WebhookLog[] | Error
+  summary?: DailySummaryState | Error
 }) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path.startsWith('/api/strategies')) return Promise.resolve(strategies) as never
     if (path.startsWith('/api/positions')) return Promise.resolve(positions) as never
     if (path.startsWith('/api/webhooks/tradingview/logs')) {
       return (tvLogs instanceof Error ? Promise.reject(tvLogs) : Promise.resolve(tvLogs)) as never
+    }
+    if (path.startsWith('/api/daily-summary')) {
+      return (summary instanceof Error ? Promise.reject(summary) : Promise.resolve(summary)) as never
     }
     throw new Error(`沒有預期到的請求：${path}`)
   })
@@ -242,6 +258,74 @@ describe('TradingView 送訊號進來的帳號', () => {
 
   it('問不到收件紀錄的時候，照策略和持股的判斷說——一個查詢失敗不可以把警告吞掉', async () => {
     answer({ strategies: [], positions: [], tvLogs: new Error('logs 掛了') })
+
+    renderBanner('/strategies')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+})
+
+/**
+ * 收盤摘要也不經過盯盤迴圈的快路（#117）。
+ *
+ * 一個只想「收盤後給我一則摘要」的人，沒有策略、沒有持股——而每個交易日收盤後他照樣會收
+ * 到一則。對他說「不會有任何提醒送出」是假話。
+ *
+ * 但只算**會送得出來**的：開著、而且自選股裡至少有一檔在會收盤的市場。開著卻只有加密貨幣
+ * （不收盤）或什麼都沒選，那一則永遠不會來，這句話就還是真的。
+ */
+describe('只開了收盤摘要的帳號', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset()
+  })
+
+  it('摘要開著而且有會收盤的自選，就不可以說「不會有任何提醒」', async () => {
+    answer({
+      strategies: [],
+      positions: [],
+      summary: {
+        ...SUMMARY_OFF,
+        is_enabled: true,
+        markets: [
+          { market: 'tw', label: '台股', symbols: ['2330.TW'], done_on: null },
+          { market: 'us', label: '美股', symbols: [], done_on: null },
+        ],
+      },
+    })
+
+    renderBanner('/strategies')
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/api/daily-summary')),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('開著但沒有任何一檔會收盤——那一則永遠不會來，照樣要說', async () => {
+    answer({
+      strategies: [],
+      positions: [],
+      summary: { ...SUMMARY_OFF, is_enabled: true, unsupported: ['BTCUSDT'] },
+    })
+
+    renderBanner('/strategies')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  it('關著就不算', async () => {
+    answer({
+      strategies: [],
+      positions: [],
+      summary: {
+        ...SUMMARY_OFF,
+        markets: [
+          { market: 'tw', label: '台股', symbols: ['2330.TW'], done_on: null },
+          { market: 'us', label: '美股', symbols: [], done_on: null },
+        ],
+      },
+    })
 
     renderBanner('/strategies')
 

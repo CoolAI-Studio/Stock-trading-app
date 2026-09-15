@@ -76,6 +76,7 @@ class RestoreReport(BaseModel):
     watchlist: int
     watchlist_skipped: int
     risk_settings_created: bool
+    daily_summary_created: bool = False
     expired_pending: int
 
 
