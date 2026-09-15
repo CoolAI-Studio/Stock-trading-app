@@ -104,9 +104,18 @@ _BROWSER_HEADERS = {
 # scan and its pending-notification sweep with it.
 _HTTP_TIMEOUT_SEC = 10.0
 
-# What a quote needs: the newest daily candle's meta block. A short range keeps
-# the response small -- the numbers come from `meta`, not from the candles.
-_QUOTE_RANGE = "5d"
+# What a quote needs: the newest daily candle's meta block -- the numbers come
+# from `meta`, not from the candles.
+#
+# ONE DAY, NOT FIVE (#121). `chartPreviousClose` is the close of the session
+# before the FIRST candle of the requested range, not before the newest one.
+# MEASURED on AAPL the same evening: range=1d gave 332.27 (the 9/11 close),
+# range=5d gave 319.97 (9/04, the session before a 9/08-9/14 window). With 5d,
+# every change on the dashboard was a change against last week -- NVDA fell
+# 3.36% that day and the screen said 8.42% -- and a wrong change looks exactly
+# like a right one. Also measured before the Taipei open: 1d answers with the
+# last session that traded, so a closed market still gets the right pair.
+_QUOTE_RANGE = "1d"
 
 # Which timeframes keep the instant they opened. Anything a whole day or longer
 # is normalised to local midnight (see _stamp).
@@ -308,7 +317,15 @@ class YFinanceProvider:
             try:
                 fast_info = yf.Ticker(symbol).fast_info
                 price = fast_info["lastPrice"]
-                prev_close = fast_info.get("previousClose") if hasattr(fast_info, "get") else None
+                # NOT "previousClose" (#121): yfinance works that one out from a
+                # week of hourly candles including pre/post-market, and it
+                # MEASURED 332.55 for AAPL where the session close was 332.27
+                # (2330.TW: 2420 against 2410).
+                prev_close = (
+                    fast_info.get("regularMarketPreviousClose")
+                    if hasattr(fast_info, "get")
+                    else None
+                )
                 # fast_info already carries it, so the poll pays nothing extra.
                 # Falling back to the symbol rather than to None: losing the
                 # currency entirely is worse than reading it off a suffix that
