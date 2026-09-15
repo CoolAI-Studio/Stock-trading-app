@@ -80,6 +80,11 @@ PUBLIC_ON_PURPOSE: dict[str, str] = {
     "GET /api/setup/status": "設定沒填完時前端要說得出缺什麼，而那時還沒有帳號可登入",
     "POST /api/setup/generate": "設定頁的「產生金鑰」按鈕，同樣發生在有帳號之前",
     "POST /api/webhooks/tradingview": "TradingView 帶不了 bearer token，它用共享密鑰認證",
+    "POST /api/webhooks/tradingview/{token}": (
+        "每個帳號自己的 TradingView 網址（#115）。TradingView 帶不了 bearer token，所以網址本身"
+        "就是憑證：路徑裡的 HMAC 由 TV_WEBHOOK_SECRET 算出，驗不過就在任何一句 SQL 之前回 401，"
+        "而驗得過的網址也只能替那一個帳號送訊號——帳號編號在 MAC 裡，改不動。"
+    ),
     "POST /api/notifications/push/receipt": (
         "瀏覽器的 service worker 拿不到 app 的 JWT，也不需要：RFC 8291 的推播內容是"
         "端到端加密的，只有那個訂閱本身解得開，所以「手上有這個 token」本身就是證明。"

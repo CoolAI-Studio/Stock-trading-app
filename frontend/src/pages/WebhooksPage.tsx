@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { Pager } from '../components/Pager'
 import { QueryError } from '../components/QueryError'
+import { TradingViewSetupPanel } from '../components/TradingViewSetupPanel'
 import type { WebhookLog, WebhookSetup } from '../lib/types'
 
 const PAGE_SIZE = 50
@@ -15,6 +16,11 @@ const PAGE_SIZE = 50
  * become an order, there was no way to tell whether it arrived at all,
  * whether the secret was wrong, whether the JSON was malformed, or whether a
  * risk gate refused it.
+ *
+ * The setup panel is shared with the onboarding flow (#115); only this page
+ * offers to regenerate the URL, because this is where a leak gets dealt with
+ * -- right next to the log that shows which alerts are still calling the old
+ * one.
  */
 export function WebhooksPage() {
   const [offset, setOffset] = useState(0)
@@ -38,7 +44,7 @@ export function WebhooksPage() {
       <h1 className="text-lg font-semibold">TradingView 訊號</h1>
 
       {setupQuery.isError && <QueryError error={setupQuery.error} />}
-      {setupQuery.data && <SetupPanel setup={setupQuery.data} />}
+      {setupQuery.data && <TradingViewSetupPanel setup={setupQuery.data} allowRegenerate />}
 
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-slate-300">收件紀錄</h2>
@@ -138,53 +144,5 @@ function Badge({ tone, children }: { tone: 'good' | 'warn' | 'bad'; children: Re
     <span className={`whitespace-nowrap rounded border px-2 py-0.5 text-xs ${skin}`}>
       {children}
     </span>
-  )
-}
-
-function SetupPanel({ setup }: { setup: WebhookSetup }) {
-  const [copied, setCopied] = useState<'url' | 'message' | null>(null)
-
-  async function copy(value: string, which: 'url' | 'message') {
-    await navigator.clipboard.writeText(value)
-    setCopied(which)
-    setTimeout(() => setCopied(null), 2000)
-  }
-
-  return (
-    <section className="space-y-3 rounded border border-slate-800 p-4">
-      <h2 className="text-sm font-semibold text-slate-300">怎麼設定</h2>
-
-      <div>
-        <p className="text-sm text-slate-400">Webhook URL</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <code className="rounded bg-slate-950 px-2 py-1 text-xs">{setup.url}</code>
-          <button
-            onClick={() => copy(setup.url, 'url')}
-            className="rounded bg-slate-700 px-2 py-1 text-xs font-medium text-white hover:bg-slate-600"
-          >
-            {copied === 'url' ? '已複製' : '複製'}
-          </button>
-        </div>
-      </div>
-
-      <div>
-        <p className="text-sm text-slate-400">警報訊息</p>
-        <pre className="overflow-x-auto rounded bg-slate-950 p-2 text-xs text-slate-300">
-          {setup.example_message}
-        </pre>
-        <button
-          onClick={() => copy(setup.example_message, 'message')}
-          className="mt-1 rounded bg-slate-700 px-2 py-1 text-xs font-medium text-white hover:bg-slate-600"
-        >
-          {copied === 'message' ? '已複製' : '複製'}
-        </button>
-      </div>
-
-      <ul className="list-inside list-disc space-y-1 text-xs text-slate-500">
-        {setup.notes.map((note) => (
-          <li key={note}>{note}</li>
-        ))}
-      </ul>
-    </section>
   )
 }

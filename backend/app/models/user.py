@@ -24,6 +24,11 @@ class User(TimestampMixin, Base):
     # revokes all of them at once -- the only way to actually take an account
     # back, since a JWT is otherwise valid until it expires.
     token_version: Mapped[int] = mapped_column(Integer, default=0)
+    # The version of this account's personal TradingView URL (#115). The URL is
+    # computed from this and TV_WEBHOOK_SECRET and never stored, so regenerating
+    # it is this number going up -- and every alert still using the old URL is
+    # refused from that moment, with the reason written into the webhook log.
+    webhook_url_version: Mapped[int] = mapped_column(Integer, default=0)
     # Two, not one: "last login" showing the login happening right now tells
     # the owner nothing. The one before it is what they can recognise or not.
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

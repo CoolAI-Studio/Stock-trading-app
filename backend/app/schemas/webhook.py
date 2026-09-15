@@ -6,7 +6,10 @@ from app.schemas.common import UtcDatetime
 
 
 class TradingViewAlert(BaseModel):
-    secret: str
+    # Only the shared-secret door needs this, and it reads it from the raw
+    # payload before this model is ever consulted. A personal URL (#115) is its
+    # own credential, so an alert sent there has nothing to put here.
+    secret: str | None = None
     symbol: str
     # TradingView's {{exchange}} placeholder, when the owner puts it in the
     # alert message. Optional because every alert configured before it was

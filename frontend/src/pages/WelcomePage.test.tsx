@@ -250,6 +250,74 @@ describe('引導流程', () => {
 })
 
 /**
+ * 方案 4：已經在 TradingView 上設好警報的人（ONBOARDING.md，#115）。
+ *
+ * 規格的判準跟其他三條一樣：**直接複製就能用，不用去別的地方拿任何值**。原本這條路
+ * 需要一個 TV_WEBHOOK_SECRET，而那個值只存在部署平台的環境變數裡——對這個使用者，
+ * 那一步就是流程的終點。
+ */
+describe('引導流程：TradingView 那條路', () => {
+  const TV_SETUP = {
+    url: 'https://example.onrender.com/api/webhooks/tradingview/1.0.Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWpr',
+    example_message: '{\n  "symbol": "{{ticker}}",\n  "action": "buy",\n  "id": "{{timenow}}"\n}',
+    notes: ['這條網址本身就是密碼。'],
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.includes('tradingview/setup')) return Promise.resolve(TV_SETUP) as never
+      if (path.includes('templates')) return Promise.resolve([TEMPLATE]) as never
+      if (path.includes('ai-settings')) return Promise.resolve({ configured: false }) as never
+      return Promise.resolve([]) as never
+    })
+  })
+
+  it('有這個選項，而且排在「我自己選」後面——不寫程式、不用金鑰的那條仍然是第一個', async () => {
+    renderWizard()
+
+    const own = await screen.findByRole('button', { name: /我自己選/ })
+    const tradingView = screen.getByRole('button', { name: /TradingView 設好警報/ })
+
+    expect(own.compareDocumentPosition(tradingView)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it('選了就拿得到可以直接複製的網址和訊息，不用去別的地方拿任何值', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /TradingView 設好警報/ }))
+
+    expect(await screen.findByRole('button', { name: '複製網址' })).toBeInTheDocument()
+    const message = screen.getByText(/"id": "\{\{timenow\}\}"/)
+    expect(message.textContent).not.toMatch(/secret|TV_WEBHOOK_SECRET/)
+    // 第一次設定的人不需要一顆按了會讓東西失效的按鈕。那顆在「TradingView」頁上。
+    expect(screen.queryByRole('button', { name: '重新產生網址' })).not.toBeInTheDocument()
+  })
+
+  it('貼好之後，下一步一樣是「這些提醒要送到哪裡」——沒有出口的訊號等於沒有訊號', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /TradingView 設好警報/ }))
+    await user.click(await screen.findByRole('button', { name: /貼好了/ }))
+
+    expect(await screen.findByText(/送到哪裡/)).toBeInTheDocument()
+  })
+
+  it('完成畫面不可以只說「0 則提醒」——TradingView 的警報響的時候一樣會通知他', async () => {
+    const user = userEvent.setup()
+    renderWizard()
+
+    await user.click(await screen.findByRole('button', { name: /TradingView 設好警報/ }))
+    await user.click(await screen.findByRole('button', { name: /貼好了/ }))
+    await user.click(await screen.findByRole('button', { name: /這一步先跳過/ }))
+
+    expect(await screen.findAllByText(/TradingView 的警報/)).not.toHaveLength(0)
+  })
+})
+
+/**
  * 階段 2B：讓 AI 幫忙。
  *
  * 這一段的規格有一條是硬的：**AI 產生的東西一定要他按下確認才會寫進去**。

@@ -2,12 +2,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { TemplateAlertForm } from '../components/TemplateAlertForm'
+import { TradingViewSetupPanel } from '../components/TradingViewSetupPanel'
 import { ApiError, api } from '../lib/api'
 import { markOnboardingSeen } from '../lib/onboarding'
 import { isPushSupported, requestPushPermission, subscribeToPush } from '../lib/push'
-import type { NotificationChannel, Strategy, StrategyGenerateResult } from '../lib/types'
+import type {
+  NotificationChannel,
+  Strategy,
+  StrategyGenerateResult,
+  WebhookSetup,
+} from '../lib/types'
 
-type Step = 'choose' | 'templates' | 'ai' | 'channel' | 'done'
+type Step = 'choose' | 'templates' | 'ai' | 'tradingview' | 'channel' | 'done'
 
 /**
  * 引導流程：從「帳號建好了」到「第一則提醒送到手機」。規格在 ONBOARDING.md。
@@ -24,6 +30,10 @@ type Step = 'choose' | 'templates' | 'ai' | 'channel' | 'done'
  *
  *   通知管道那一步可以跳過，但跳過的話畫面上要明說「現在不會有任何提醒送出」。
  *   沒有出口的提醒系統跟沒有在跑的提醒系統，後果一模一樣。
+ *
+ * 已經在 TradingView 設好警報的人（方案 4，#115）拿到的是一條可以直接複製的網址——
+ * 不是一個要他去部署平台翻出來的密碼。那條網址本身就是密碼，所以畫面上遮著、複製的
+ * 是完整的，而「重新產生」不放在引導裡。
  */
 export function WelcomePage() {
   const navigate = useNavigate()
@@ -35,6 +45,9 @@ export function WelcomePage() {
   const [answer, setAnswer] = useState('')
   const [proposal, setProposal] = useState<StrategyGenerateResult | null>(null)
   const [aiError, setAiError] = useState<string | null>(null)
+  // 走過 TradingView 那一步的人，完成畫面上的「0 則提醒」會嚇到他：他的警報在
+  // TradingView 那邊，不在這個 app 的策略清單裡。
+  const [usedTradingView, setUsedTradingView] = useState(false)
 
   const channelsQuery = useQuery({
     queryKey: ['notification-channels'],
@@ -50,6 +63,14 @@ export function WelcomePage() {
   const aiSettingsQuery = useQuery({
     queryKey: ['ai-settings'],
     queryFn: () => api.get<{ configured: boolean }>('/api/ai-settings'),
+    retry: false,
+  })
+
+  // 只在走到那一步才問：網址是憑證，不需要在每一個打開引導的人面前先拿一份。
+  const tradingViewSetupQuery = useQuery({
+    queryKey: ['webhook-setup'],
+    queryFn: () => api.get<WebhookSetup>('/api/webhooks/tradingview/setup'),
+    enabled: step === 'tradingview',
     retry: false,
   })
 
@@ -185,6 +206,18 @@ export function WelcomePage() {
             </span>
           </button>
 
+          {/* 方案 4（#115）。排在「我自己選」後面：多數人沒有 TradingView，預設路徑不可以
+              假設他有。排在 AI 前面：它不需要金鑰，只需要他本來就在用的東西。 */}
+          <button
+            onClick={() => setStep('tradingview')}
+            className="w-full rounded border border-slate-700 bg-slate-900 p-4 text-left hover:border-slate-500"
+          >
+            <span className="block font-medium text-slate-100">我已經在 TradingView 設好警報了</span>
+            <span className="mt-1 block text-sm text-slate-400">
+              給你一條網址和一段訊息，貼進 TradingView 就好。不用寫程式，也不用去別的地方拿密碼。
+            </span>
+          </button>
+
           {aiSettingsQuery.data?.configured && (
             <button
               onClick={() => setStep('ai')}
@@ -220,6 +253,46 @@ export function WelcomePage() {
         <div className="space-y-4">
           <h1 className="text-lg font-semibold text-slate-100">要盯什麼？</h1>
           <TemplateAlertForm onCreated={() => setStep('channel')} />
+          <button
+            onClick={() => setStep('choose')}
+            className="text-xs text-slate-500 underline hover:text-slate-300"
+          >
+            回上一步
+          </button>
+        </div>
+      )}
+
+      {step === 'tradingview' && (
+        <div className="space-y-4">
+          <h1 className="text-lg font-semibold text-slate-100">把 TradingView 的警報接過來</h1>
+          <ol className="list-inside list-decimal space-y-1 text-sm text-slate-300">
+            <li>在 TradingView 打開一則警報的設定，勾選「Webhook URL」。</li>
+            <li>按下面的「複製網址」，貼進 Webhook URL 那一格。</li>
+            <li>按「複製」把訊息範本貼進「訊息」欄，儲存。</li>
+          </ol>
+          <p className="text-xs text-slate-500">
+            之後那則警報響的時候，這裡會通知你——一樣只是提醒，不會下單。每一則有沒有進來、被擋在
+            哪一關，都可以在「TradingView」頁的收件紀錄看到。
+          </p>
+
+          {tradingViewSetupQuery.isError && (
+            <p className="text-sm text-red-400">
+              現在拿不到網址（後端沒有回應）。可以先往下走，之後到「TradingView」頁再拿。
+            </p>
+          )}
+          {tradingViewSetupQuery.data && (
+            <TradingViewSetupPanel setup={tradingViewSetupQuery.data} />
+          )}
+
+          <button
+            onClick={() => {
+              setUsedTradingView(true)
+              setStep('channel')
+            }}
+            className="w-full rounded bg-emerald-600 px-3 py-2 font-medium text-white hover:bg-emerald-500"
+          >
+            貼好了，下一步
+          </button>
           <button
             onClick={() => setStep('choose')}
             className="text-xs text-slate-500 underline hover:text-slate-300"
@@ -441,6 +514,13 @@ export function WelcomePage() {
               '。'
             )}
           </p>
+
+          {usedTradingView && (
+            <p className="text-sm text-slate-300">
+              <strong>TradingView 的警報</strong>不算在上面的數字裡——它們設在 TradingView 那邊，
+              響的時候會跟其他提醒走同一個通知管道。
+            </p>
+          )}
 
           {enabled.length > 0 && proven.length === 0 && (
             <p className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">

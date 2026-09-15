@@ -126,6 +126,74 @@ def test_it_says_at_what_price(db_session, owner):
     assert "900.5" in _message(db_session, order)
 
 
+def test_the_price_reads_like_a_price(db_session, owner):
+    """欄位是 Numeric(18, 8)，所以存回來的是 333.08000000。
+
+    本機端到端收到的那一封就是「訊號價 333.08000000」——手機的一行字裡有一半是零，而他要
+    從裡面找出那個數字。
+    """
+    order = _an_order(db_session, owner)
+    order.signal_price = Decimal("333.08000000")
+    db_session.commit()
+
+    message = _message(db_session, order)
+
+    assert "訊號價 333.08。" in message
+    assert "333.08000000" not in message
+
+
+def test_a_signal_without_a_price_does_not_say_none(db_session, owner):
+    """TradingView 的警報訊息可以不帶 price（他自己改過範本的時候），而那一列就沒有價格。
+
+    本機端到端收到的是「訊號價 None」。None 不是他看得懂的東西；沒有就不要說。
+    """
+    order = Order(
+        user_id=owner.id,
+        strategy_id=None,
+        source=OrderSource.TRADINGVIEW,
+        symbol="NVDA",
+        side=OrderSide.SELL,
+        quantity=Decimal(1),
+        signal_price=None,
+        status=OrderStatus.PENDING,
+    )
+    db_session.add(order)
+    db_session.commit()
+    db_session.refresh(order)
+
+    message = _message(db_session, order)
+
+    assert "None" not in message
+    assert "訊號價" not in message
+    assert "NVDA" in message and "賣" in message
+
+
+def test_a_tradingview_signal_is_not_called_manual(db_session, owner):
+    """TradingView 送進來的訊號沒有 strategy_id，原本因此一律寫成「手動建立」（#115）。
+
+    他在 TradingView 設的警報響了，手機上卻說是他自己手動建的——那是在叫他懷疑一件他沒有
+    做過的事。來源本來就寫在那一列上，照實說就好。
+    """
+    order = Order(
+        user_id=owner.id,
+        strategy_id=None,
+        source=OrderSource.TRADINGVIEW,
+        symbol="2330.TW",
+        side=OrderSide.BUY,
+        quantity=Decimal(1),
+        signal_price=Decimal("900.5"),
+        status=OrderStatus.PENDING,
+    )
+    db_session.add(order)
+    db_session.commit()
+    db_session.refresh(order)
+
+    message = _message(db_session, order)
+
+    assert "TradingView" in message
+    assert "手動建立" not in message
+
+
 def test_it_says_which_of_his_alerts_fired(db_session, owner):
     """他可能有五支策略盯著同一檔。哪一支響了，決定他要不要理它。
 

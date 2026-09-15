@@ -73,16 +73,26 @@ def test_the_log_needs_a_login(client):
 def test_the_setup_details_are_served_so_nobody_has_to_read_the_source(auth_client):
     """Nothing told the owner what URL to paste into TradingView or that the
     message needs an `id` field, which is the only thing standing between the
-    endpoint and a replay."""
+    endpoint and a replay.
+
+    The URL is the account's own now (#115), so the message carries no password
+    at all -- that half lives in test_a_tradingview_url_is_its_own_credential.py."""
     body = auth_client.get("/api/webhooks/tradingview/setup").json()
-    assert body["url"].endswith("/api/webhooks/tradingview")
-    assert "secret" in body["example_message"]
-    assert "id" in body["example_message"]
+    assert "/api/webhooks/tradingview/" in body["url"]
+    assert '"id"' in body["example_message"]
     assert body["notes"]
 
 
-def test_the_setup_endpoint_does_not_hand_out_the_secret(auth_client):
-    """The example is a template. Printing the real shared secret into a
-    response would put it in every browser cache and screenshot."""
-    body = auth_client.get("/api/webhooks/tradingview/setup").json()
-    assert "你的密鑰" in body["example_message"] or "<" in body["example_message"]
+def test_the_setup_endpoint_does_not_hand_out_the_secret(auth_client, monkeypatch):
+    """Printing the real shared secret into a response would put it in every
+    browser cache and screenshot.
+
+    This used to check that the example showed a placeholder, which was a proxy
+    for the property. The personal URL is DERIVED from the secret (#115), so the
+    property itself is now the thing to check: the secret's value appears
+    nowhere in what is served -- not in the URL, the example, or the notes."""
+    monkeypatch.setattr("app.config.settings.TV_WEBHOOK_SECRET", "the-real-shared-secret-value")
+
+    raw = auth_client.get("/api/webhooks/tradingview/setup").text
+
+    assert "the-real-shared-secret-value" not in raw
