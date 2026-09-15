@@ -30,7 +30,7 @@ from unittest.mock import patch
 import pytest
 from pywebpush import WebPushException
 
-from app.services.notification.webpush import MAX_BODY_CHARS, WebPushSender
+from app.services.notification.webpush import WebPushSender
 
 SUBSCRIPTION = {
     "endpoint": "https://web.push.apple.com/abc",
@@ -100,6 +100,32 @@ def test_an_unexpected_exception_does_not_escape_into_the_market_loop():
 
 
 # --- how big the message may be ---------------------------------------------
+#
+# THE LIMIT IS THE PLATFORM'S, NOT OURS, and it is counted in BYTES. Apple refuses
+# an encrypted payload over 4096 bytes (RFC 8030 §7.2 asks push services to take
+# at least that much), and aes128gcm adds 103 of its own: a 21-byte header, the
+# 65-byte sender key, a 16-byte tag and one padding delimiter. So the JSON handed
+# to pywebpush must stay under 3993 bytes.
+#
+# It used to be enforced as 600 CHARACTERS -- a guess sized for a three-byte
+# Chinese character in every position -- which cut a close summary after about
+# eighteen stocks while more than half of the real budget was still unused.
+
+APPLE_PAYLOAD_LIMIT = 4096
+AES128GCM_OVERHEAD = 103
+# Room left for whatever a future pywebpush adds, so the tests fail before Apple does.
+SAFETY_MARGIN = 400
+
+
+def _fits(data: str) -> bool:
+    return len(data.encode("utf-8")) <= APPLE_PAYLOAD_LIMIT - AES128GCM_OVERHEAD - SAFETY_MARGIN
+
+
+def _summary(stocks: int) -> str:
+    rows = ["美股收盤摘要（9/14）"]
+    rows += [f"聯發科 {2000 + n}.TW　4,430（▼130，-2.85%）" for n in range(stocks)]
+    rows.append("這是收盤後的整理，不會幫你下單。")
+    return "\n".join(rows)
 
 
 def test_a_long_body_is_trimmed_rather_than_rejected_by_apple():
@@ -108,9 +134,47 @@ def test_a_long_body_is_trimmed_rather_than_rejected_by_apple():
     -- the owner simply never heard about the thing that went wrong."""
     _result, kwargs = _send("x" * 10_000)
 
-    payload = json.loads(kwargs["data"])
-    assert len(payload["body"]) <= MAX_BODY_CHARS
-    assert len(kwargs["data"].encode("utf-8")) < 3500, "must leave room for encryption overhead"
+    assert _fits(kwargs["data"]), "must leave room for encryption overhead"
+
+
+def test_the_budget_holds_with_a_receipt_and_every_character_chinese():
+    """The worst case the budget has to survive: three bytes per character, plus
+    the receipt token riding in the same payload."""
+    with patch("app.services.notification.webpush.webpush", return_value=None) as mock:
+        WebPushSender().send(SUBSCRIPTION, "跌" * 5000, receipt_token="r" * 43)
+    data = mock.call_args.kwargs["data"]
+
+    assert _fits(data)
+    assert json.loads(data)["receipt"] == "r" * 43
+
+
+def test_a_close_summary_of_forty_stocks_arrives_whole():
+    """The case the old 600-character cap got wrong: a watchlist of forty is
+    about 1,500 characters and 2,600 bytes -- well inside what Apple accepts."""
+    message = _summary(40)
+
+    _result, kwargs = _send(message)
+
+    assert json.loads(kwargs["data"])["body"] == message
+    assert _fits(kwargs["data"])
+
+
+def test_when_it_still_does_not_fit_it_cuts_between_lines_and_says_how_many_are_left():
+    """Past the real limit, cut at a line -- half a stock's line is worse than no
+    line -- and say how much was left out, so the owner knows the list is not the
+    whole watchlist."""
+    message = _summary(200)
+
+    _result, kwargs = _send(message)
+
+    body = json.loads(kwargs["data"])["body"]
+    kept = body.split("\n")
+    note = kept.pop()
+    original = message.split("\n")
+    assert kept == original[: len(kept)], "every kept line must be a whole line"
+    assert kept[0] == "美股收盤摘要（9/14）"
+    assert f"還有 {len(original) - len(kept)} 行" in note
+    assert _fits(kwargs["data"])
 
 
 def test_a_trimmed_body_says_it_was_trimmed():

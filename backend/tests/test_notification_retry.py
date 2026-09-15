@@ -325,7 +325,8 @@ def test_a_message_that_was_too_long_does_not_disable_telegram():
 def test_a_long_alert_is_trimmed_before_it_is_sent():
     """上一條的另一半：**根本不該送出過長的訊息**。
 
-    webpush 有 MAX_BODY_CHARS（600），telegram 和 line 一個都沒有。而策略的錯誤訊息可
+    webpush 有自己的大小上限（現在是 MAX_PAYLOAD_BYTES，照 bytes 算），telegram 和
+    line 一個都沒有。而策略的錯誤訊息可
     以很長（Python 的例外字串、使用者自己寫的 message），所以那個 400 是我們自己造成
     的。分類修好只是不再把管道關掉；不送出過長的訊息才是讓那則提醒真的送到。
 
