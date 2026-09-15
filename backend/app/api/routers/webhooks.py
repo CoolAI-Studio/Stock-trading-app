@@ -419,7 +419,10 @@ async def tradingview_personal_webhook(token: str, request: Request, db: Session
     the account is proven rather than inferred, which is also why two accounts
     on one deployment finally work.
     """
-    claim = tradingview_url.read(token, settings.TV_WEBHOOK_SECRET)
+    # SECRET_ENCRYPTION_KEY, not TV_WEBHOOK_SECRET: the shared secret is written
+    # in plain text into every legacy alert message and travels wherever that
+    # message does. See tradingview_url's header, point 4.
+    claim = tradingview_url.read(token, settings.SECRET_ENCRYPTION_KEY)
     if claim is None:
         logger.warning(
             "tradingview webhook: refused an unrecognised personal URL from %s",
@@ -525,7 +528,7 @@ def _setup_for(user: User, response: Response) -> TradingViewSetup:
             settings.public_base_url,
             user.id,
             user.webhook_url_version,
-            settings.TV_WEBHOOK_SECRET,
+            settings.SECRET_ENCRYPTION_KEY,
         ),
         example_message=(
             "{\n"
@@ -563,6 +566,13 @@ def _setup_for(user: User, response: Response) -> TradingViewSetup:
             # whether they have to redo everything.
             "以前照舊說明設定、訊息裡有 secret 那一行的警報照樣有效（它們打的是另一條共用網址）。"
             "想換成這條網址的話，換掉網址、刪掉 secret 那一行就好。",
+            # 「重新產生」只換得掉這條網址。共用密碼明文寫在每一則舊警報的訊息裡，會跟著
+            # TradingView 的彈窗、通知信、截圖流出去，而它的補救是另一個動作——不說的話，
+            # 他會以為按了重新產生就安全了。
+            "舊警報訊息裡的 secret 如果外洩了（截圖、轉寄了 TradingView 的通知信、分享了警報"
+            "範本），「重新產生」擋不住它：到 Render 的環境變數把 TV_WEBHOOK_SECRET 換成新的值，"
+            "舊的共用網址就不再收件，這條專屬網址不受影響。"
+            "還在用 secret 的舊警報，趁這時候換成這條網址。",
             "重新產生之後，要回 TradingView 把每一則警報的網址換掉；還在打舊網址的，"
             "會記在下面的收件紀錄裡並說明原因。",
             "送出後可以在下面的收件紀錄看到它有沒有進來、以及被擋在哪一關。",

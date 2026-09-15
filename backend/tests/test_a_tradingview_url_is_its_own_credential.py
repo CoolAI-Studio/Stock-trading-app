@@ -14,8 +14,9 @@ ONBOARDING.md 方案 4 的規格是「系統給他 webhook 網址＋密碼，**�
 
     /api/webhooks/tradingview/{user_id}.{version}.{mac}
 
-mac 是 TV_WEBHOOK_SECRET 對 (user_id, version) 算的 HMAC-SHA256。每一條性質底下都有一個
-測試：
+mac 是對 (user_id, version) 算的 HMAC-SHA256，金鑰從 SECRET_ENCRYPTION_KEY 推導——**不是**
+TV_WEBHOOK_SECRET，那一個明文寫在每一則舊警報的訊息裡（理由在 tradingview_url 的檔頭第 4 條）。
+每一條性質底下都有一個測試：
 
 1. **驗證 MAC 不需要資料庫**——所以一個亂打的網址叫不醒 Neon。這跟共用密碼那條「密碼對了才
    寫」是同一條原則，而這支端點是公開的、誰都打得到。
@@ -195,18 +196,56 @@ def test_regenerating_retires_the_old_url_and_the_log_says_so(auth_client, db_se
     assert fresh.status_code == 202, fresh.text
 
 
-def test_changing_the_deployment_secret_retires_every_url(
+def test_a_leaked_shared_secret_cannot_mint_a_personal_url(auth_client, db_session, secret):
+    """共用密碼會明文寫在每一則舊警報的「訊息」裡：TradingView 的彈窗、通知信、手機通知、截圖都
+    帶著它。網址如果是從它算出來的，拿到它的人就能替任何帳號、任何版本算出一條——「重新產生」
+    擋不住（一次唯讀審查抓到的）。"""
+    from app.services import tradingview_url
+
+    owner = _owner(db_session)
+    forged = tradingview_url.token_for(owner.id, owner.webhook_url_version, TV_SECRET)
+
+    resp = _post(auth_client, f"/api/webhooks/tradingview/{forged}", _alert())
+
+    assert resp.status_code == 401
+    assert db_session.query(Order).count() == 0
+
+
+def test_changing_the_shared_secret_leaves_personal_urls_working(
     auth_client, db_session, monkeypatch, secret
 ):
-    """網址是從 TV_WEBHOOK_SECRET 算出來的。換掉它就是「所有 TradingView 網址都作廢」，
-    跟換掉共用密碼的意思一樣——這是刻意的，所以要被釘住，不是被發現。"""
+    """共用密碼外洩時的補救是換掉 TV_WEBHOOK_SECRET。那一步只該讓舊的共用網址失效，不可以連帶
+    弄斷他已經換好、貼在每一則警報裡的專屬網址——那會是一次沒有人看得到的全面停擺。"""
     path = _personal_path(auth_client)
     monkeypatch.setattr("app.config.settings.TV_WEBHOOK_SECRET", "a-completely-different-secret")
 
     resp = _post(auth_client, path, _alert())
 
+    assert resp.status_code == 202, resp.text
+
+
+def test_changing_the_encryption_key_retires_every_url(
+    auth_client, db_session, monkeypatch, secret
+):
+    """網址是從 SECRET_ENCRYPTION_KEY 推出來的。換掉它就是所有 TradingView 網址一起作廢——跟它
+    讓加密過的通知設定全部解不開是同一件事，所以要被釘住，不是被發現。"""
+    from cryptography.fernet import Fernet
+
+    path = _personal_path(auth_client)
+    monkeypatch.setattr("app.config.settings.SECRET_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+    resp = _post(auth_client, path, _alert())
+
     assert resp.status_code == 401
     assert db_session.query(Order).count() == 0
+
+
+def test_the_setup_says_what_to_do_when_the_shared_secret_leaks(auth_client, secret):
+    """「重新產生」擋得住外洩的網址，擋不住外洩的共用密碼。他要知道後者的補救是哪一個動作。"""
+    notes = " ".join(auth_client.get("/api/webhooks/tradingview/setup").json()["notes"])
+
+    assert "外洩" in notes
+    assert "TV_WEBHOOK_SECRET" in notes
 
 
 def test_a_retired_url_hammered_in_a_loop_stops_costing_the_database(
