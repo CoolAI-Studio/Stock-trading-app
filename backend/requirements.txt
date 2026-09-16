@@ -13,7 +13,7 @@ bcrypt<4.1
 # planned fix, so the weekly audit's pip-audit gate would be red forever (#111).
 # 2.10.1 is the first release with the issuer-matching fix (CVE-2024-53861).
 PyJWT>=2.10.1
-pyotp>=2.9
+pyotp>=2.10.0
 python-multipart>=0.0.12
 httpx>=0.27
 cryptography>=43.0
